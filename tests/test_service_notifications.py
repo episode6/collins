@@ -5,6 +5,8 @@ every subscriber; a client's `RemoteNotifications` is a NotificationCenter
 over that, its rows' text translated from msgid and args, its reads told
 back as `seen`, which every other client hears."""
 
+import time
+
 import pytest
 
 from collins import notifycenter
@@ -13,6 +15,7 @@ from collins.api.protocol import RequestRefused
 from collins.apilink import Link
 from collins.notifycenter import KIND_BELL, KIND_MESSAGE, KIND_UPDATE
 from collins.remotenotify import RemoteNotifications
+from collins.service import notifications as noti
 from collins.service.notifications import ServiceNotifications
 
 
@@ -207,3 +210,176 @@ def test_a_refused_write_changes_nothing(service):
     )()
     row = mirror.make(KIND_MESSAGE, "s1", "t", "p", "lost")
     assert mirror.post(row) is row and mirror.rows() == []
+
+
+# -- the sink: notify_command (PR-3.4, spec §3.13, §3.24) ------------------------------------------
+
+SCRIPT = """#!/bin/sh
+# Records what it was run with: argv one per line, the five variables, and
+# whatever its stdin held (nothing: it is /dev/null).
+{
+  for a in "$@"; do printf 'arg=%s\\n' "$a"; done
+  printf 'COLLINS_NOTIFY_KIND=%s\\n' "$COLLINS_NOTIFY_KIND"
+  printf 'COLLINS_NOTIFY_TITLE=%s\\n' "$COLLINS_NOTIFY_TITLE"
+  printf 'COLLINS_NOTIFY_BODY=%s\\n' "$COLLINS_NOTIFY_BODY"
+  printf 'COLLINS_NOTIFY_SESSION=%s\\n' "$COLLINS_NOTIFY_SESSION"
+  printf 'COLLINS_NOTIFY_PROJECT=%s\\n' "$COLLINS_NOTIFY_PROJECT"
+  printf 'stdin=%s\\n' "$(cat)"
+} > "$OUT"
+exit "${EXIT:-0}"
+"""
+
+
+@pytest.fixture
+def script(tmp_path, monkeypatch):
+    path = tmp_path / "record.sh"
+    path.write_text(SCRIPT)
+    path.chmod(0o755)
+    out = tmp_path / "out.txt"
+    monkeypatch.setenv("OUT", str(out))
+
+    def recorded() -> list[str]:
+        return out.read_text().splitlines()
+
+    return path, recorded
+
+
+def sink_service(template, clients=False, **kwargs):
+    return ServiceNotifications(
+        State(),
+        get_setting={"notify_command": template}.get,
+        has_clients=lambda: clients,
+        run_async=lambda fn: fn(),
+        dispatch=lambda fn: fn(),
+        **kwargs,
+    )
+
+
+def test_the_sink_runs_only_with_no_client_subscribed(script):
+    path, recorded = script
+    svc = ServiceNotifications(
+        State(), get_setting={"notify_command": str(path)}.get, run_async=lambda fn: fn()
+    )
+    link, _mirror = connect(svc)
+    assert svc.sink("message", "s1", "Fix it", "proj", "Done") is False
+    assert not (path.parent / "out.txt").exists()
+    svc.unsubscribe(link)
+    assert svc.sink("message", "s1", "Fix it", "proj", "Done") is True
+    assert "COLLINS_NOTIFY_BODY=Done" in recorded()
+
+
+def test_the_cores_subscribers_decide_when_given(script):
+    path, _recorded = script
+    attached = [object()]
+    svc = ServiceNotifications(
+        State(),
+        get_setting={"notify_command": str(path)}.get,
+        has_clients=lambda: bool(attached),
+        run_async=lambda fn: fn(),
+    )
+    assert svc.sink("message", "s1", "t", "p", "b") is False
+    attached.clear()
+    assert svc.sink("message", "s1", "t", "p", "b") is True
+
+
+def test_an_empty_setting_runs_nothing():
+    for value in ("", "   ", None, 7):
+        svc = sink_service(value)
+        assert svc.sink("message", "s1", "t", "p", "b") is False
+
+
+def test_the_five_variables_stdin_and_argv(script):
+    path, recorded = script
+    svc = sink_service(f"{path} one 'two words'")
+    assert svc.sink("finished", "sid-1", "Fix the thing", "collins", "Finished a run")
+    assert recorded() == [
+        "arg=one",
+        "arg=two words",
+        "COLLINS_NOTIFY_KIND=finished",
+        "COLLINS_NOTIFY_TITLE=Fix the thing",
+        "COLLINS_NOTIFY_BODY=Finished a run",
+        "COLLINS_NOTIFY_SESSION=sid-1",
+        "COLLINS_NOTIFY_PROJECT=collins",
+        "stdin=",  # /dev/null: EOF at once, the cat did not hang
+    ]
+
+
+def test_the_template_is_shlex_split_and_never_a_shell(script, tmp_path):
+    path, recorded = script
+    marker = tmp_path / "marker"
+    svc = sink_service(f"{path} '$COLLINS_NOTIFY_TITLE' $HOME `id` ; touch {marker} | cat > /dev/null")
+    svc.sink("message", "s1", "T", "p", "b")
+    args = [line for line in recorded() if line.startswith("arg=")]
+    # Nothing was expanded, nothing was a separator: a shell would have
+    # run touch, and shlex hands the metacharacters to the program as text.
+    assert "arg=$COLLINS_NOTIFY_TITLE" in args and "arg=$HOME" in args and "arg=`id`" in args
+    assert "arg=;" in args and "arg=|" in args and "arg=>" in args
+    assert not marker.exists()
+
+
+def test_the_values_are_bounded_and_carry_no_nul():
+    env = noti.command_env("message", "t" * 5000, "b\0ad" + "x" * 20000, "s" * 999, "p")
+    assert len(env["COLLINS_NOTIFY_TITLE"]) == 1024
+    assert "\0" not in env["COLLINS_NOTIFY_BODY"] and len(env["COLLINS_NOTIFY_BODY"]) == 8192
+    assert len(env["COLLINS_NOTIFY_SESSION"]) == 256
+    assert set(env) == {f"COLLINS_NOTIFY_{n}" for n in ("KIND", "TITLE", "BODY", "SESSION", "PROJECT")}
+
+
+def test_the_timeout_kills_the_command(tmp_path):
+    slow = tmp_path / "slow.sh"
+    slow.write_text("#!/bin/sh\nsleep 30\n")
+    slow.chmod(0o755)
+    started = time.monotonic()
+    status, error = noti.run_command(str(slow), {}, timeout=0.3)
+    assert status is None and "didn't finish in 0.3 s" in error
+    assert time.monotonic() - started < 5
+    assert noti.COMMAND_TIMEOUT_S == 10.0
+
+
+def test_a_bad_template_or_missing_program_fails_soft(tmp_path):
+    status, error = noti.run_command("echo 'unterminated", {})
+    assert status is None and "doesn't parse" in error
+    status, error = noti.run_command(str(tmp_path / "nowhere"), {})
+    assert status is None and "Couldn't run" in error
+    # Through the sink: skipped and logged, nothing raised.
+    svc = sink_service(str(tmp_path / "nowhere"))
+    assert svc.sink("message", "s1", "t", "p", "b") is True
+
+    def boom(*_args):
+        raise RuntimeError("boom")
+
+    assert sink_service("x", run=boom).sink("message", "s1", "t", "p", "b") is True
+
+
+def test_the_sink_runs_off_the_loop():
+    started = []
+    svc = ServiceNotifications(
+        State(),
+        get_setting={"notify_command": "x"}.get,
+        run_async=started.append,
+        run=lambda *_a: (0, ""),
+    )
+    assert svc.sink("message", "s1", "t", "p", "b") is True and len(started) == 1
+
+
+def ask_test(svc):
+    message = protocol.validate({"t": "notify.test", "id": 7}, protocol.CLIENT)
+    assert isinstance(message, protocol.Message), message
+    deferred = svc.handle(message, None)
+    assert isinstance(deferred, protocol.Deferred) and deferred.settled
+    return protocol.validate_response(deferred.reply, "notify.test")
+
+
+def test_notify_test_runs_regardless_of_clients_and_replies_with_the_status(script, monkeypatch):
+    path, recorded = script
+    monkeypatch.setenv("EXIT", "3")
+    svc = sink_service(str(path), clients=True)
+    answer = ask_test(svc)
+    assert answer.ok and answer.fields["status"] == 3 and answer.fields["error"] == ""
+    assert "COLLINS_NOTIFY_KIND=test" in recorded()
+
+
+def test_notify_test_replies_with_the_error(tmp_path):
+    for template, wanted in (("", "No notify command"), (str(tmp_path / "nowhere"), "Couldn't run")):
+        answer = ask_test(sink_service(template))
+        assert answer.ok and "status" not in answer.fields and wanted in answer.fields["error"]

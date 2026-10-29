@@ -2637,3 +2637,64 @@ def test_the_first_sweep_waits_for_the_stores_first_scan(app_state, projects_dir
     finally:
         core.shutdown()
         assert not core._sweep_source
+
+
+def test_a_counted_finish_runs_the_notify_command_only_with_no_client(app_state, projects_dir, tmp_path):
+    """PR-3.4: the finish the clients would be told of goes to the
+    notify_command instead when none is subscribed (§3.13)."""
+    _root, ids = projects_dir
+    service_state = app_state.AppState(migrate=True, device=False)
+    service_state.set_setting("notify_command", "notify-me --flag")
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    runs = []
+    core.notifications._run_async = lambda fn: fn()
+    core.notifications._run = lambda template, env: runs.append((template, env)) or (0, "")
+    item = store.get_item(ids["alpha1"])
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        core._announce_finished(ids["alpha1"])
+        assert runs == []  # a client is attached: it gets the `notify` event
+        assert any(e.get("kind") == "finished" for e in ends.of("notify"))
+        client.close()
+        assert core._subscribers == []
+        core._announce_finished(ids["alpha1"])
+        ((template, env),) = runs
+        assert template == "notify-me --flag"
+        assert env["COLLINS_NOTIFY_KIND"] == "finished"
+        assert env["COLLINS_NOTIFY_SESSION"] == ids["alpha1"]
+        assert env["COLLINS_NOTIFY_TITLE"] == item.display_name
+        assert env["COLLINS_NOTIFY_PROJECT"] == item.session.project_name
+        assert env["COLLINS_NOTIFY_BODY"] == "Finished a run"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_notify_test_is_served_with_a_client_attached(app_state, tmp_path):
+    """`notify.test` runs the command whether or not anyone is subscribed,
+    and the reply carries the exit status or the error."""
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    core.start_store(SessionStore(service_state))
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        reply = client.request({"t": "notify.test"})
+        assert reply["error"] == "No notify command is set" and "status" not in reply
+        service_state.set_setting("notify_command", "true")
+        reply = client.request({"t": "notify.test"})
+        assert reply["status"] == 0 and reply["error"] == ""
+        service_state.set_setting("notify_command", "false")
+        assert client.request({"t": "notify.test"})["status"] == 1
+    finally:
+        srv.shutdown()
+        pump(0.3)

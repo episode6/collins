@@ -159,6 +159,7 @@ from .. import (
     autodelete,
     chats,
     clisetup,
+    notifycenter,
     panelhistory,
     providers,
     sandboxgrants,
@@ -167,7 +168,7 @@ from .. import (
     trust,
 )
 from ..api import protocol
-from ..i18n import N_
+from ..i18n import N_, english
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
 from . import (
@@ -389,7 +390,11 @@ class ServiceCore:
         self.feed = storefeed.StoreFeed(store, self.state, running=self.running_sessions)
         # The notification history (PR-1.11): the service's, over the same
         # state, published to the same subscribers.
-        self.notifications = notifications_mod.ServiceNotifications(self.state)
+        self.notifications = notifications_mod.ServiceNotifications(
+            self.state,
+            get_setting=self._get_setting,
+            has_clients=lambda: bool(self._subscribers),
+        )
         # The PR hub is the store's own; its events go to the same
         # subscribers (PR-1.11).
         self.prs = prfeed.PrFeed(store.pr_store)
@@ -1332,6 +1337,7 @@ class ServiceCore:
     _req_notify_clear = _notify
     _req_notify_green = _notify
     _req_notify_rekey = _notify
+    _req_notify_test = _notify
     _req_seen = _notify
 
     # -- pull requests (PR-1.11; service.prfeed)
@@ -2230,7 +2236,17 @@ class ServiceCore:
         """A counted finish, to every subscriber (§3.19): a `notify` event of
         kind ``finished`` (never persisted, as today), which a client's
         delivery runs on — the pull requests re-read, the green announced —
-        before the row's unread flag follows it."""
+        before the row's unread flag follows it. With no client subscribed
+        it goes to the notify_command instead (§3.13)."""
+        if self.notifications is not None and not self._subscribers:
+            item = self.store.get_item(session_id) if self.store is not None else None
+            self.notifications.sink(
+                notifycenter.KIND_FINISHED,
+                session_id,
+                item.display_name if item is not None else "",
+                item.session.project_name if item is not None else "",
+                english(notifycenter.FINISHED_MSGID),
+            )
         self._broadcast(
             {
                 "t": "notify",

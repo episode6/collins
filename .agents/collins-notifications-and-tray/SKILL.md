@@ -36,7 +36,8 @@ which the snapshot never re-sent; held, the one `changed` sees the whole
 history and only a row read elsewhere meanwhile comes down. A row the
 service posted with no client (a `notify_user` from a detached session)
 arrives in that snapshot unread and is never announced on the desktop:
-the snapshot never delivers (D29's command sink is PR-3.4's). Each client
+the snapshot never delivers (the `notify_command` sink, below, is what
+runs for it). Each client
 applies the delivery table below with its own
 focus; the card, sound, desktop notification, flash, tray, dock badge and
 Caffeine are pure client. **A row's text is a msgid and args** (§3.14):
@@ -46,7 +47,29 @@ args)` (no args: never formatted — an agent's `notify_user` text is its own
 msgid). Collins' own words are `BELL_MSGID`, `FINISHED_MSGID` and the
 update's body. A record from before has its body read as its msgid.
 `notify_user` with no client attached is recorded unread with its session
-flagged (`service/tools.py`); the command sink for that case is PR-3.4's.
+flagged (`service/tools.py`), and goes to the command sink.
+
+**The command sink** (`notify_command`, PR-3.4, spec §3.13/§3.24). A
+`SERVICE_SETTINGS` string, default `""`: an argv template.
+`ServiceNotifications.sink(kind, session, title, project, body)` runs it
+when the setting is non-empty and `has_clients()` is false (the core
+passes `lambda: bool(self._subscribers)`; a bare instance uses its own
+subscribers). Two producers call it: `SessionTools._headless_notify_user`
+(kind `message`, the agent's text as the body) and
+`ServiceCore._announce_finished` when `_subscribers` is empty (kind
+`finished`, body `Finished a run`, the item's name and project). The
+run (`run_command`) is `shlex.split` and a `Popen` argv, **never a
+shell and never expanded** (the values are in the environment only:
+`COLLINS_NOTIFY_KIND/_TITLE/_BODY/_SESSION/_PROJECT`, bounded and
+NUL-free by `command_env`), `stdin=DEVNULL`, its own session so a
+timeout (10 s, `COMMAND_TIMEOUT_S`) kills the group. It runs on a
+daemon thread (`run_async`), never the loop, and fails soft: an empty
+or unsplittable template, a missing program, a timeout, a non-zero
+exit are logged and skipped. `notify.test` (the Preferences *Send test*
+button) runs it regardless of clients, returns a `Deferred`, and
+replies `{status}` or `{error}`; it takes no argument, so it runs the
+setting as saved. A test injects `get_setting`, `has_clients`,
+`run_async`, `run` and `dispatch` into the constructor.
 
 ## The center (`notifycenter.py`, GTK-free)
 

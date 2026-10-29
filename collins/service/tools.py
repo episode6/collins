@@ -488,8 +488,8 @@ class SessionTools:
     def _headless_notify_user(self, session, args: dict, sandboxed: bool = False):
         """Recorded in the history, unread, and the session's row flagged,
         as the delivery table does for a user away from Collins (the desktop
-        notification and the sound have nobody to reach; the command sink
-        of §3.13 is PR-3.4's)."""
+        notification and the sound have nobody to reach; the `notify_command`
+        of §3.13 is run for it, when one is set)."""
         if self.notifications is None:
             return False, "Collins couldn't post a notification"
         title, project = self._identity(session)
@@ -500,6 +500,9 @@ class SessionTools:
             project,
             args["message"],
             None,
+        )
+        self.notifications.sink(
+            notifycenter.KIND_MESSAGE, session.session_id or "", title, project, args["message"]
         )
         if session.session_id and self.store is not None:
             self.store.set_unread(session.session_id, True)

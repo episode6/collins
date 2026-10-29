@@ -970,6 +970,23 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   every finish too. A finish is announced only when the session's own
   transcript records a turn ending; the CLI's idle repaints, which it
   draws every so often after a turn, are not finishes and announce nothing.
+- **A command for when nobody is looking.** When no window is attached to the
+  service, a `notify_user` call or a finished run (a counted finish, the one
+  that would have turned a row green) has no card or desktop notification to
+  go to. Set **Notify command** (`notify_command`) in Preferences → *Service*
+  to have the service run a program instead, on the service's machine:
+  a script around `tpush`, a `curl` to ntfy, anything. It is a command line split
+  like a shell would split it, but never run by one: no `$VAR`, no pipes, no
+  `~`. The notification is in its environment instead, as
+  `COLLINS_NOTIFY_KIND` (`message` or `finished`), `COLLINS_NOTIFY_TITLE`
+  (the session's name), `COLLINS_NOTIFY_BODY`, `COLLINS_NOTIFY_SESSION` and
+  `COLLINS_NOTIFY_PROJECT`, so a two-line script does the rest
+  (`exec tpush "$COLLINS_NOTIFY_TITLE: $COLLINS_NOTIFY_BODY"`). It gets an
+  empty stdin and 10 s before it is killed; a program that is missing or
+  fails is logged and skipped, and the notification is in the history
+  either way. *Send test* runs it once with a test notification, whether or
+  not a window is attached, and shows its exit status or why it did not
+  run. Empty (the default) runs nothing.
 - **Bells from other sessions** ring the same way: a terminal bell (`\a`,
   from the agent or from a `make` in a session's panel shell) in a session
   you aren't looking at is a card in Collins, a desktop notification

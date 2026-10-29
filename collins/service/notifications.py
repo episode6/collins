@@ -30,7 +30,21 @@ which are the service's verdicts), a
 placeholder's rows filed under the session it resolved to
 (`notify.rekey`). A producer on this side (`post`) is the `notify_user`
 tool with no client attached. The command sink for when no client is
-attached (`notify_command`) is PR-3.4's.
+attached is `notify_command` (the sink, below).
+
+**The sink.** `notify_command` (a service setting, default empty) is an
+argv template run for a `notify_user` call and for a counted finish when
+no client is subscribed (`has_clients`, the core's subscriber list),
+with `COLLINS_NOTIFY_KIND`, `_TITLE`, `_BODY`, `_SESSION` and `_PROJECT`
+in its environment, `stdin=DEVNULL` and a 10 s timeout. The template is
+split with `shlex.split` and run as an argv, never through a shell, and
+the values are in the environment only (nothing in the template is
+expanded: a person who wants them on a command line wraps it in a
+script). It runs on a daemon thread, so a slow program never holds the
+loop, and it fails soft: an empty setting, a template that does not
+split, a program that is missing, a timeout or a non-zero exit is
+logged and skipped. `notify.test` runs the same command once, whether or
+not a client is attached, and answers with its exit status or the error.
 
 GLib only; nothing here imports GTK.
 """
@@ -39,6 +53,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shlex
+import signal
+import subprocess
+import threading
 from collections.abc import Callable
 
 from .. import notifycenter
@@ -47,6 +66,81 @@ from ..i18n import english
 from ..notifycenter import Notification, NotificationCenter
 
 log = logging.getLogger(__name__)
+
+SETTING = "notify_command"
+COMMAND_TIMEOUT_S = 10.0
+# What goes into the command's environment is bounded (rule 5: an agent's
+# message is foreign text): the kind and the session id are short, the
+# title and project are names, the body is the message.
+_ENV_MAX = {"KIND": 32, "TITLE": 1024, "BODY": 8192, "SESSION": 256, "PROJECT": 1024}
+_STDERR_KEEP = 200
+
+
+def command_env(kind: str, title: str, body: str, session: str, project: str) -> dict[str, str]:
+    """The five variables the command is told its notification by, each
+    bounded and free of the NUL an environment cannot carry."""
+    values = {"KIND": kind, "TITLE": title, "BODY": body, "SESSION": session, "PROJECT": project}
+    return {
+        f"COLLINS_NOTIFY_{name}": str(value or "").replace("\0", "")[: _ENV_MAX[name]]
+        for name, value in values.items()
+    }
+
+
+def run_command(
+    template: str, env: dict[str, str], timeout: float = COMMAND_TIMEOUT_S
+) -> tuple[int | None, str]:
+    """Run *template* (an argv template, `shlex.split`, never a shell) with
+    *env* added to the service's own, `stdin=DEVNULL`, for at most *timeout*
+    seconds. Returns ``(exit status, "")`` once it ended (negative: the
+    signal that ended it) or ``(None, why)`` when it did not run or did not
+    finish, in English. Blocking: call it off the main loop. Never raises."""
+    template = (template or "").strip()
+    if not template:
+        return None, "No notify command is set"
+    try:
+        argv = shlex.split(template)
+    except ValueError as error:
+        return None, f"The notify command doesn't parse: {error}"
+    if not argv:
+        return None, "No notify command is set"
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env={**os.environ, **env},
+            start_new_session=True,
+        )
+    except (OSError, ValueError) as error:
+        return None, f"Couldn't run {argv[0]}: {getattr(error, 'strerror', None) or error}"
+    try:
+        _out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # The whole group, so a script's children go with it.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        proc.communicate()
+        return None, f"{argv[0]} didn't finish in {timeout:g} s"
+    except Exception as error:  # fail soft: never into the service's loop
+        log.exception("notify_command: waiting on %s failed", argv[0])
+        return None, f"Couldn't run {argv[0]}: {error}"
+    if proc.returncode:
+        tail = (err or b"").decode("utf-8", "replace").strip()[-_STDERR_KEEP:]
+        log.warning("notify_command: %s exited %s%s", argv[0], proc.returncode, f": {tail}" if tail else "")
+    return proc.returncode, ""
+
+
+def _thread(fn: Callable[[], None]) -> None:
+    threading.Thread(target=fn, name="notify-command", daemon=True).start()
+
+
+def _dispatch(fn: Callable[[], object]) -> None:
+    from .gitfeed import dispatch_default
+
+    dispatch_default(fn)
 
 
 def event_for(row: Notification) -> dict:
@@ -78,8 +172,27 @@ def _key(event: dict) -> str:
 class ServiceNotifications:
     """See the module docstring. *state* is the service's AppState."""
 
-    def __init__(self, state) -> None:
+    def __init__(
+        self,
+        state,
+        get_setting: Callable[[str], object] | None = None,
+        has_clients: Callable[[], bool] | None = None,
+        run_async: Callable[[Callable[[], None]], None] | None = None,
+        run: Callable[..., tuple[int | None, str]] | None = None,
+        dispatch: Callable[[Callable[[], object]], None] | None = None,
+    ) -> None:
+        """*get_setting* reads the service's settings (the core's),
+        *has_clients* says whether a client is subscribed (the core's
+        `_subscribers`; by default this class's own subscribers),
+        *run_async* starts the sink's blocking work off the loop, *run* is
+        `run_command` and *dispatch* lands a thread's answer on the main
+        loop: a test's own."""
         self.state = state
+        self._get_setting = get_setting or (lambda key: None)
+        self._has_clients = has_clients or (lambda: bool(self._subscribers))
+        self._run_async = run_async or _thread
+        self._run = run or run_command
+        self._dispatch = dispatch or _dispatch
         self.center = NotificationCenter(records=state.get_notifications())
         self._subscribers: list[tuple[object, Callable[[dict], None]]] = []
         self._published: dict[str, dict] = {row.id: event_for(row) for row in self.center.rows()}
@@ -156,6 +269,61 @@ class ServiceNotifications:
             row.id = key
         return self.center.post(row)
 
+    # -- the sink (notify_command) ----------------------------------------------
+
+    def command(self) -> str:
+        value = self._get_setting(SETTING)
+        return value.strip() if isinstance(value, str) else ""
+
+    def sink(self, kind: str, session_id: str, title: str, project: str, body: str) -> bool:
+        """A notification for nobody to see: runs the notify_command, off
+        the loop, when one is set and no client is subscribed. Returns
+        whether a run was started. Never raises."""
+        try:
+            template = self.command()
+            if not template or self._has_clients():
+                return False
+            env = command_env(kind, title, body, session_id, project)
+            run = self._run
+
+            def work() -> None:
+                try:
+                    _status, error = run(template, env)
+                except Exception:
+                    log.exception("notify_command: the run failed")
+                    return
+                if error:
+                    log.warning("notify_command: %s", error)
+
+            self._run_async(work)
+            return True
+        except Exception:
+            log.exception("notify_command: couldn't start")
+            return False
+
+    def test(self, message: protocol.Message) -> protocol.Deferred:
+        """`notify.test`: the command once, with or without a client, on a
+        thread; the reply is settled on the main loop with the exit status
+        or the error."""
+        deferred = protocol.Deferred()
+        template = self.command()
+        env = command_env("test", "Collins", "Test notification", "", "")
+        run = self._run
+
+        def work() -> None:
+            try:
+                status, error = run(template, env)
+            except Exception as exc:
+                log.exception("notify_command: the test failed")
+                status, error = None, f"Couldn't run the command: {exc}"
+            fields: dict = {"error": error[: protocol.NAME_MAX]}
+            if status is not None:
+                fields["status"] = max(-255, min(255, int(status)))
+            self._dispatch(lambda: deferred.settle(protocol.reply(message.id, **fields)))
+
+        self._run_async(work)
+        return deferred
+
     # -- requests -----------------------------------------------------------------
 
     def handle(self, message: protocol.Message, client) -> dict:
@@ -197,6 +365,8 @@ class ServiceNotifications:
             return protocol.reply(
                 message.id, moved=self.center.rekey_session(message.get("session"), message.get("to"))
             )
+        if kind == "notify.test":
+            return self.test(message)
         if kind == "seen":
             return self._seen(message, client)
         return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})

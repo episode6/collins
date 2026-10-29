@@ -20,7 +20,7 @@ from collins.state import DEFAULT_SETTINGS, DEVICE_SETTINGS, SERVICE_SETTINGS
 # The spec's §3.8 service settings, by name. mcp_tool_* and sandbox_tool_*
 # come from the tool table and are listed as patterns below.
 SPEC_SERVICE_SETTINGS = {
-    "claude_cli_path", "title_model", "icon_model", "auto_renew_login",
+    "claude_cli_path", "notify_command", "title_model", "icon_model", "auto_renew_login",
     "worktree_new_sessions", "clone_directory",
     "sandbox_new_sessions", "sandbox_bypass_permissions", "sandbox_share_gh",
     "sandbox_share_ssh", "sandbox_settings_editable",
@@ -55,6 +55,10 @@ NEW_SERVICE_RECORDS = {
 # Device settings added since v0.1.4 (not in its file): the quit dialog's
 # one-time notice and the ask -> detach move's marker (PR-1.12c).
 NEW_DEVICE_SETTINGS = {"quit_detach_migrated", "quit_notice_shown"}
+
+# Service settings added since v0.1.4: the command a notification with no
+# client attached runs (PR-3.4).
+NEW_SERVICE_SETTINGS = {"notify_command"}
 
 # Every settings key v0.1.4 wrote, frozen as a literal: the migration
 # fixture is built from this list, not from DEFAULT_SETTINGS, so a key the
@@ -275,7 +279,9 @@ def test_first_start_migrates_with_every_key_accounted_for(app_state, v014):
     assert set(service["settings"]) == SERVICE_SETTINGS
     device_in_ui = set(ui["device"]["settings"]) | uistate.SERVICE_SCOPED_SETTINGS
     assert device_in_ui == DEVICE_SETTINGS
-    assert set(service["settings"]) | device_in_ui == set(v014["settings"]) | NEW_DEVICE_SETTINGS
+    assert set(service["settings"]) | device_in_ui == (
+        set(v014["settings"]) | NEW_DEVICE_SETTINGS | NEW_SERVICE_SETTINGS
+    )
     assert not (set(service["settings"]) & set(ui["device"]["settings"]))
     # With their values.
     assert service["settings"]["title_model"] == "claude-haiku-4-5-20251001"

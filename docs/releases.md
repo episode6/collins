@@ -71,6 +71,16 @@ downloads of each version, see the
   dropped file is, and the copy is what the agent is told about. On the
   service's machine both are as they were. See [Picking a folder on the
   box](/guide/remote#picking-a-folder-on-the-box).
+- **A command for notifications nobody is there to see.** With no
+  window attached, a `notify_user` call or a finished run now runs the
+  program set as **Notify command** in Preferences → *Service*
+  (`notify_command`, empty by default) on the service's machine, with
+  `COLLINS_NOTIFY_KIND`, `_TITLE`, `_BODY`, `_SESSION` and `_PROJECT` in
+  its environment, an empty stdin and a 10 s limit. It is split into
+  words and never run through a shell; a program that is missing or
+  fails is logged and skipped. *Send test* runs it once, attached or
+  not. See [A service on another
+  machine](/guide/remote#notifications-while-you-are-away).
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch

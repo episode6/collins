@@ -124,6 +124,11 @@ already running in the Collins service"); the window attaches instead.
 A finish or a message that arrives while no window is open is in the bell
 when the next window connects, unread, not on the desktop: nothing was
 there to announce it, and the window does not announce it late.
+Set **Notify command** (`notify_command`, Preferences → *Service*) and
+the service runs that program for each of them instead, with the
+notification in `COLLINS_NOTIFY_*` environment variables (see
+[Notifications](/guide/features#knowing-what-s-happening) and [A
+service on another machine](./remote#notifications-while-you-are-away)).
 
 If the connection drops while a window is open, the window shows a
 "Reconnecting to the Collins service" banner, finds or restarts the
