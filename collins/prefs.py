@@ -1,12 +1,11 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-20. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 import sys
@@ -22,6 +21,7 @@ from . import (  # noqa: E402
     apilink,
     apppicker,
     autodelete,
+    choosers,
     clisetup,
     clonerepo,
     editor,
@@ -474,24 +474,16 @@ class PreferencesDialog(Adw.Dialog):
         self._on_change()
 
     def _browse_clone_directory(self) -> None:
-        picker = Gtk.FileDialog(title=_("Choose the folder new clones go in"))
-        current = clonerepo.parent_directory(self._state.get_setting("clone_directory"))
-        # The native chooser is a `local` client's (§3.11).
-        if apilink.is_local() and os.path.isdir(current):
-            picker.set_initial_folder(Gio.File.new_for_path(current))
-
-        def picked(picker: Gtk.FileDialog, result) -> None:
-            try:
-                folder = picker.select_folder_finish(result)
-            except GLib.Error:
-                return  # dismissed
-            path = folder.get_path() if folder is not None else None
-            if path:
-                # Stored "~/…" under home, so a synced state.json means the
-                # same folder on a machine with a different user name.
-                self._set_clone_directory(display_path(path))
-
-        picker.select_folder(self.get_root(), None, picked)
+        # Stored "~/…" under home, so a synced state.json means the same
+        # folder on a machine with a different user name. The chooser is
+        # the desktop's for a `local` client, the path picker otherwise
+        # (§3.11, PR-3.2).
+        choosers.choose_folder(
+            self,
+            _("Choose the folder new clones go in"),
+            clonerepo.parent_directory(self._state.get_setting("clone_directory")),
+            lambda path: self._set_clone_directory(display_path(path)),
+        )
 
     def _build_token_use_group(self, state: AppState) -> _SearchableGroup:
         """The settings that spend the user's Claude quota, together and

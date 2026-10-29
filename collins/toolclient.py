@@ -511,23 +511,23 @@ class ToolClient:
         Relative paths try the running agent's cwd first (it may have cd'd
         into a worktree), then the tab's project root — the same order
         clickable file references resolve in (terminal._reference_roots).
-        A `~` is the service's home: the service expands it (`fs.stat`,
-        PR-3.0 item 4), never this device.
+        Every trial is the service's `fs.stat` (at most two: the cwd and
+        the root are folders of the service's machine, never this
+        device's; D54 (7)), and a `~` is the service's home: the service
+        expands it (PR-3.0 item 4).
         """
-        if linkpatterns.home_led(raw):
-            try:
-                found = remotefiles.stat_path(raw, timeout=STAT_TIMEOUT_S)
-            except RequestRefused:
-                return None
-            return os.path.normpath(found.path) if found.is_file and found.path else None
-        if os.path.isabs(raw):
+        if linkpatterns.home_led(raw) or os.path.isabs(raw):
             trials = [raw]
         else:
             roots = [tab.current_agent_cwd(), tab.editor_root]
             trials = [os.path.join(root, raw) for root in roots if root]
         for trial in trials:
-            if os.path.isfile(trial):
-                return os.path.normpath(trial)
+            try:
+                found = remotefiles.stat_path(trial, timeout=STAT_TIMEOUT_S)
+            except RequestRefused:
+                continue
+            if found.is_file:
+                return os.path.normpath(found.path or trial)
         return None
 
     def open_in_editor(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:

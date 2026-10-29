@@ -46,9 +46,9 @@ from collections.abc import Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
-from . import mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
+from . import choosers, mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
 from .api.protocol import RequestRefused  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _, translate  # noqa: E402
@@ -445,20 +445,12 @@ class SandboxChip(Gtk.MenuButton):
         The chooser is modal over the window and closes this popover; the
         outcome — allowed, or refused with the reason — goes out as a toast
         either way, so the answer is seen without reopening the chip."""
-        dialog = Gtk.FileDialog(title=_("Allow a directory"), modal=True)
-        dialog.set_initial_folder(Gio.File.new_for_path(workspace))
-        root = self.get_root()
-        window = root if isinstance(root, Gtk.Window) else None
-        dialog.select_folder(window, None, self._on_directory_picked, workspace)
-
-    def _on_directory_picked(self, dialog: Gtk.FileDialog, result, workspace: str) -> None:
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return  # cancelled
-        path = folder.get_path() if folder is not None else None
-        if path:
-            self.allow_directory(workspace, path)
+        choosers.choose_folder(
+            self.get_root(),
+            _("Allow a directory"),
+            workspace,
+            lambda path: self.allow_directory(workspace, path),
+        )
 
     def allow_directory(self, workspace: str, path: str) -> None:
         """Grant *path* to this session — its box, and no other — and say

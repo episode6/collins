@@ -187,7 +187,9 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
     them. So each group's size is pinned, and `DEVICE`'s per module: a
     new site means editing these numbers in the same diff, where the
     question "is this really the device's own file" gets asked."""
-    assert len(LOCAL_EXTRAS) == 27  # 16, and eleven launchers since PR-3.0 (items 7, 8)
+    # 16, eleven launchers since PR-3.0 (items 7, 8), and the two folder
+    # choosers' one site in `choosers` since PR-3.2.
+    assert len(LOCAL_EXTRAS) == 26
     per_module: dict[str, int] = {}
     for site in DEVICE:
         module = site.split(":", 1)[0]

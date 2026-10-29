@@ -458,3 +458,23 @@ def test_locate_keeps_the_asked_path_from_a_service_older_than_the_field(link):
 def test_locate_is_none_on_a_refusal(link):
     link.answers["fs.stat"] = RequestRefused(protocol.ERROR_INVALID, "{field} must be an absolute path", {})
     assert remotefiles.locate("~bob/a.md") is None
+
+
+# -- covers (PR-3.2): when a root the service refused is worth asking about again ---------
+
+
+def test_covers_is_a_session_at_or_above_the_root():
+    assert remotefiles.covers("/srv/p", ["/srv/p"])
+    assert remotefiles.covers("/srv/p/sub", ["/srv/p"])
+    assert remotefiles.covers("/srv/p/", ["/srv/p"])  # normalised
+    assert not remotefiles.covers("/srv/p", ["/srv/p/sub"])  # a session below it names no more
+    assert not remotefiles.covers("/srv/project", ["/srv/p"])  # a prefix of the text is no parent
+    assert not remotefiles.covers("/srv/p", [])
+    assert not remotefiles.covers("", ["/srv/p"])
+
+
+def test_covers_counts_a_worktrees_project_and_skips_what_is_not_text():
+    # The service's roots count a Claude worktree's project (files.roots).
+    assert remotefiles.covers("/srv/p", ["/srv/p/.claude/worktrees/w1"])
+    assert remotefiles.covers("/srv/p/docs", [None, 7, "", "/srv/p/.claude/worktrees/w1"])
+    assert not remotefiles.covers("/srv/q", [None, "/srv/p/.claude/worktrees/w1"])

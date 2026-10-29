@@ -54,6 +54,8 @@ links), blocking the same way:
 - `root_names(root)` is `fs.names`: the non-directory names of a root, and
   `truncated`; the root's watch is `Watcher.watch(root, listener,
   kind=WATCH_DIR)` and its `dir-changed` is the cue to ask again.
+  `covers(root, cwds)` is when a root the service refused is worth
+  asking about again (PR-3.2): a session listed at it or above it.
 
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
@@ -65,6 +67,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import threading
 import weakref
 from collections.abc import Callable
@@ -77,6 +80,7 @@ from .api import protocol
 from .api.protocol import RequestRefused
 from .i18n import _
 from .projectfiles import PasteError, RenameError
+from .sessions import worktree_project_root
 
 log = logging.getLogger(__name__)
 
@@ -278,6 +282,27 @@ def root_names(root: str) -> tuple[list[str], bool]:
     truncated). Blocking; raises `RequestRefused`."""
     fields = apilink.call({"t": "fs.names", "root": str(root)}, timeout=CALL_TIMEOUT_S)
     return [str(n) for n in fields.get("names") or ()], bool(fields.get("truncated", False))
+
+
+def covers(root: str, cwds) -> bool:
+    """Whether a session working in one of *cwds* makes *root* a folder
+    the service may now answer about: a cwd that is the root or one of its
+    parents, or the project a Claude worktree among them belongs to (what
+    the service's `files.roots` counts). A cue to ask again, nothing more:
+    the service decides (PR-2.8's nit 2, PR-3.2). Text only: no disk."""
+    if not root:
+        return False
+    target = os.path.normpath(root)
+    for cwd in cwds:
+        if not isinstance(cwd, str) or not cwd:
+            continue
+        for known in (cwd, worktree_project_root(cwd)):
+            if not known:
+                continue
+            known = os.path.normpath(known)
+            if target == known or target.startswith(known.rstrip("/") + "/"):
+                return True
+    return False
 
 
 def off_main(

@@ -43,7 +43,7 @@ site in a GTK module or a client helper fails the suite until it is
 filed here, and so does an entry nothing matches any more (a site that
 moved comes off the list in the same PR). Filing is a deliberate,
 reviewed edit, not a way round the rule: each group is pinned by its
-exact size (`DEVICE` 73 and per module, `LOCAL_EXTRAS` 27), so a site
+exact size (`DEVICE` 78 and per module, `LOCAL_EXTRAS` 26), so a site
 cannot be added
 to any of them without that test changing in the same diff, where a
 reviewer sees it. And a match that is **no read at all** — the walker's
@@ -66,7 +66,10 @@ uploading, which the walker could not see while a `Gio.File` method
 needed a receiver it had watched being made. No code moved for any of
 the eighteen. PR-3.0 took the seven of `RECORDED` and `UNRULED` off and
 filed the seventeen launchers it taught the walker to read (six `DEVICE`,
-eleven `LOCAL_EXTRAS`): 100. What does not change
+eleven `LOCAL_EXTRAS`): 100. PR-3.2 put the seven folder choosers behind
+`choosers.choose_folder`, whose one gated starting-folder check replaced
+the clone dialog's and Preferences': 104 (PR-3.1's ssh forward had made
+it 105). What does not change
 is what may be on the list: this device's own files and programs, and
 local extras behind the proof.
 """
@@ -243,9 +246,8 @@ LOCAL_EXTRAS = frozenset(
         "terminal:_launch_local_uri:FileLauncher.new",
         "terminal:_launch_local_uri:UriLauncher.new",
         # -- a native chooser's starting folder (§3.11: the native choosers are a
-        # `local` client's; PR-3.2 gives the others the path picker) --------------------
-        "clonedialog:CloneDialog._browse_target:os.path.isdir",
-        "prefs:PreferencesDialog._browse_clone_directory:os.path.isdir",
+        # `local` client's; any other gets the path picker, PR-3.2) ---------------------
+        "choosers:choose_folder:os.path.isdir",  # the seven folder sites' one chooser
         "window:MainWindow._open_session_file:Path.is_dir",
     }
 )
@@ -277,14 +279,18 @@ LOCAL_EXTRAS = frozenset(
 #   `toolclient.start_session` (`os.path.isdir`, `expanduser`,
 #   toolclient.py:878-879). PR-3.0 (D54 (5)): the `expanduser`s went, a
 #   `~` path is the service's `fs.stat`, and start_session's `isdir` is
-#   one; `resolve_file`'s `isfile` of a path that is no `~` is left.
+#   one. **Moved in PR-3.2 (D54 (7))**: `resolve_file`'s `isfile` of a
+#   path that is no `~` is the service's `fs.stat` too, one per trial (the
+#   agent's cwd, then the editor root: at most two).
 # - `dialogs.details_dialog` through `provider.parse_details(jsonl_path)`
 #   (dialogs.py:846)
 # - the replay (`replaymodel.read_session_turns`, replayview.py:32) and
 #   `window._open_session_file` through `sessions.session_from_file`
 #   (window.py:7072)
 # - `clonerepo.destination_status` (disk reads per keystroke in the clone
-#   dialog, clonedialog.py:337; PR-3.2's path picker by §3.11)
+#   dialog, clonedialog.py:337; PR-3.2's path picker by §3.11). PR-3.0
+#   (item 9) made the dialog's folder check the service's `fs.stat`; the
+#   Browse button is `choosers.choose_folder` since PR-3.2.
 # - `panelhistory.load_all` (terminal.py:5629) and `panelhistory.delete`
 #   (terminal.py:5709, window.py:2761, 2871, 2952)
 # - `pkgrepos` (sidebar.py:2049, window.py:6275); `clisetup.validate`
@@ -349,7 +355,13 @@ LOCAL_EXTRAS = frozenset(
 #    path of this device to the service's CLI, where a drop of the same
 #    file uploads. (The three whose starting folder IS read are gated and
 #    on `LOCAL_EXTRAS`: prefs.py:480, clonedialog.py:389, window.py:7064.)
-#    All of it is PR-3.2's path picker by the spec's 3.11.
+#    All of it is PR-3.2's path picker by the spec's 3.11. **Moved in
+#    PR-3.2**: the four window sites, the clone dialog's, Preferences' and
+#    the sandbox chip's are `choosers.choose_folder` (the desktop's chooser
+#    behind the proof, one `LOCAL_EXTRAS` site; the path picker over the
+#    service's `fs.list` otherwise); the composer's attach starts in the
+#    agent's cwd only for a `local` client and, for any other, uploads the
+#    picked file as a drop does and mentions the copy (D56).
 # Lesser: this device's `Path.home()` sent as a service cwd
 #    (terminal.py:1210, 1991, 2058, 2441; sidebar.py:2414; window.py:2006;
 #    D39's fallback absorbs it) and used to abbreviate service paths:

@@ -661,7 +661,11 @@ class _RootNameLinks:
     most events are content writes that leave the set alone anyway). An
     answer for a root this has since left, or one an asked-again has
     overtaken, is dropped. A service that cannot answer leaves the names
-    as they were, and a reconnect asks again (`Watcher.on_reset`).
+    as they were, and a reconnect asks again (`Watcher.on_reset`). A root
+    the service refused (outside every root it knows: a tab whose
+    session's row has not reached the store yet) is asked about again,
+    names and watch, when a `rows` event lists a session there
+    (`remotefiles.covers`, on the store's `refreshed`; PR-3.2).
     Between snapshots the usual guarantees hold: a deleted file's click is
     claimed, resolves nowhere on the service and is swallowed (D40). The
     terminal's signal closures keep the instance alive; no one else needs
@@ -680,6 +684,11 @@ class _RootNameLinks:
         self._refresh_source: int | None = None
         self._asked = 0  # the newest `fs.names` ask: older answers are dropped
         self._destroyed = False
+        # The service refused the root's names (outside every root it
+        # knows), and the store's handler that asks again once a row lists
+        # a session there: (store, handler id) while it is connected.
+        self._refused = False
+        self._rows_handler: tuple[GObject.Object, int] | None = None
         terminal.connect("map", self._on_map)
         terminal.connect("destroy", self._on_destroy)
         # A reconnect re-sends the watch but not what changed meanwhile.
@@ -710,6 +719,7 @@ class _RootNameLinks:
 
     def _rebuild(self, root: str) -> None:
         self._unwatch()
+        self._refused = False
         self._root = root
         self._apply()
         self._monitor = remotefiles.watcher().watch(
@@ -752,9 +762,44 @@ class _RootNameLinks:
                 _log.debug("root names of %s truncated at %d", root, len(names))
         elif isinstance(value, RequestRefused) and value.error == protocol.ERROR_GONE:
             names = frozenset()  # the root is not there (any more)
+        elif isinstance(value, RequestRefused) and value.error == protocol.ERROR_REFUSED:
+            # Outside every root the service knows (yet): asked about again
+            # when a row lists a session there (`_on_rows`).
+            self._refused = True
+            self._hear_rows()
+            return
         else:
             return  # the service could not say: keep what was known
+        self._refused = False
         self._set_names(names)
+
+    def _hear_rows(self) -> None:
+        if self._rows_handler is not None:
+            return
+        store = getattr(Gio.Application.get_default(), "store", None)
+        if store is None or not hasattr(store, "row_ids"):
+            return
+        self._rows_handler = (store, store.connect("refreshed", self._on_rows))
+
+    def _drop_rows(self) -> None:
+        if self._rows_handler is not None:
+            store, handler = self._rows_handler
+            self._rows_handler = None
+            store.disconnect(handler)
+
+    def _on_rows(self, store, _order_changed: bool) -> None:
+        """A `rows` event landed: a refused root that a listed session now
+        covers is asked about again, its watch sent again with it (the
+        watch was refused by the same rule)."""
+        root = self._root
+        if not self._refused or root is None or self._destroyed:
+            self._drop_rows()
+            return
+        sessions = store.known_sessions
+        cwds = [getattr(sessions.get(sid), "cwd", None) for sid in store.row_ids()]
+        if remotefiles.covers(root, cwds):
+            self._drop_rows()
+            self._rebuild(root)
 
     def _set_names(self, names: frozenset[str]) -> None:
         if names == self._names:
@@ -778,6 +823,7 @@ class _RootNameLinks:
     def _on_destroy(self, _terminal: Vte.Terminal) -> None:
         self._destroyed = True
         remotefiles.watcher().off_reset(self._on_reconnect)
+        self._drop_rows()
         if self._tab is not None:
             self._tab.unregister_root_name_links(self)
             self._tab = None
@@ -5060,35 +5106,64 @@ class TerminalTab(Gtk.Box):
         """The composer's attach button: pick a file, landing its mention in
         the composer's box instead of the terminal's.
 
-        The dialog starts in the agent's cwd right now, not the directory the
-        tab started in, matching where the mention it produces will resolve."""
+        The chooser is this device's always (D56: the file the person means
+        is one they have here). A `local` client's starts in the agent's cwd
+        right now, not the directory the tab started in, matching where the
+        mention it produces will resolve; any other client's starts where
+        the desktop puts it (the agent's cwd is a folder of the service's
+        machine) and its pick is uploaded, as a drop is (§3.11)."""
         dialog = Gtk.FileDialog(title=_("Attach file"))
         cwd = self.current_agent_cwd()
-        if cwd:
+        if apilink.is_local() and cwd:
             dialog.set_initial_folder(Gio.File.new_for_path(cwd))
         root = self.get_root()
         parent = root if isinstance(root, Gtk.Window) else None
         dialog.open(parent, None, self._on_composer_file_chosen)
+
+    def _attach_composer(self) -> ComposerView | None:
+        """The composer an attach's mention lands in, or None: the composer
+        can close (or the tab die) while the dialog or the upload is under
+        way, and a mention with nowhere to land is dropped. On the new-chat
+        screen the screen's own composer is the one that asked."""
+        if self.get_root() is None:
+            return None
+        if self._new_chat is not None:
+            return self._new_chat.composer
+        if self.composer_open():
+            return self._composer
+        return None
 
     def _on_composer_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
         try:
             gfile = dialog.open_finish(result)
         except GLib.Error:
             return  # cancelled
-        # The composer can close (or the tab die) while the dialog is up;
-        # a mention with nowhere to land is dropped. On the new-chat screen
-        # the screen's own composer is the one that asked.
-        if self.get_root() is None:
+        if self._attach_composer() is None:
             return
-        if self._new_chat is not None:
-            composer = self._new_chat.composer
-        elif self.composer_open():
-            composer = self._composer
-        else:
-            return
-        path = gfile.get_path()
-        if path is None:
+        if gfile.get_path() is None:
             return  # a remote location — nothing the CLI could read
+        if remoteuploads.is_local():
+            self._mention_attached(gfile.get_path())
+            return
+
+        # Not on the service's machine: the file goes up as a drop does
+        # (`PUT /api/upload`, filed under the session, or pending before it
+        # has an id: D37), and the mention names the copy the service wrote.
+        def uploaded(paths: list[str], errors: list[str]) -> None:
+            if errors:
+                self.feed_message(_("couldn't send the attached file: {reason}").format(reason=errors[0]))
+            if paths:
+                self._mention_attached(paths[0])
+
+        remoteuploads.upload_files([gfile], self.upload_session(), uploaded)
+
+    def _mention_attached(self, path: str) -> None:
+        """The attached file's mention into the composer that asked (a path
+        of the service's machine: the file itself for a `local` client, the
+        uploaded copy otherwise)."""
+        composer = self._attach_composer()
+        if composer is None:
+            return
         reference = self.provider.file_reference(path, self.current_agent_cwd())
         if reference is None:
             self.feed_message(_("Add to chat isn't available for this file"))
