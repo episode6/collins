@@ -553,7 +553,12 @@ jpg, jpeg, gif, webp, svg, bmp, ico, tiff, tif, avif) plus pdf, txt, md,
 csv, json and log — checked by `blobcache.hands_to_an_app` on the key
 before a fetch and on the copy that landed. Why these: they are what an
 agent hands a user to *look at*, a viewer opens each without running
-anything, and the list is the one rule that can be stated truthfully (a
+anything — except that an SVG handed to a desktop whose `image/svg+xml`
+handler is a browser runs its `<script>` in a `file://` origin (no read
+of this device's other files, but it runs and it reaches the network:
+the same exposure as a clicked web link, which every client has; SVG
+stays on the list as a picture the service already serves, the Fable
+review of PR 622, S3) — and the list is the one rule that can be stated truthfully (a
 deny-list of what a desktop might run, like `_RUNNABLE_SUFFIXES`, is
 never complete). A row whose file is anything else has **no Open With…
 row** (hidden, not disabled: `attachpanel._copy_may_open`), is not
