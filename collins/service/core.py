@@ -944,7 +944,10 @@ class ServiceCore:
     def _req_cwd_settle(self, message: protocol.Message, client: Client) -> dict:
         session = self._record(message).session
         judge = session.judge_cwd if message.get("judge") else session.settle_cwd
-        scope = judge(message.get("cwd"), message.get("root"))
+        cwd = message.get("cwd")
+        if isinstance(cwd, str):
+            cwd = files_mod.expand_home(cwd)  # a `~` is this machine's home (PR-3.0 item 4)
+        scope = judge(cwd, message.get("root"))
         return protocol.reply(message.id, scope=scope.name.lower() if scope is not None else "")
 
     def _req_shells_follow(self, message: protocol.Message, client: Client) -> dict:

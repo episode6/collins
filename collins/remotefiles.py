@@ -120,6 +120,9 @@ class Stat:
     size: int | None
     mtime: int | None
     inside: bool
+    # The path the service stat'ed: the one asked about, a `~` expanded
+    # with the service's home (PR-3.0 item 4); "" from an older service.
+    path: str = ""
 
     @property
     def is_file(self) -> bool:
@@ -201,8 +204,9 @@ def write(
 
 
 def stat_path(path: str, root: str | None = None, timeout: float | None = None) -> Stat:
-    """`fs.stat` of *path*: blocking, on the caller's thread (a worker's).
-    *root* is what `inside` is of (every root the service knows when
+    """`fs.stat` of *path* (absolute, or led by `~`, which the service
+    expands with its own home): blocking, on the caller's thread (a
+    worker's). *root* is what `inside` is of (every root the service knows when
     None). *timeout* is for a caller something waits on (a held launch:
     `checkouts.ask_answer`), CALL_TIMEOUT_S otherwise. Raises
     `RequestRefused`."""
@@ -212,11 +216,13 @@ def stat_path(path: str, root: str | None = None, timeout: float | None = None) 
     fields = apilink.call(message, timeout=CALL_TIMEOUT_S if timeout is None else timeout)
     size = fields.get("size")
     mtime = fields.get("mtime")
+    where = fields.get("path")
     return Stat(
         kind=str(fields.get("kind") or "missing"),
         size=int(size) if isinstance(size, int) else None,
         mtime=int(mtime) if isinstance(mtime, int) else None,
         inside=bool(fields.get("inside", False)),
+        path=where if isinstance(where, str) else "",
     )
 
 
@@ -240,6 +246,20 @@ def walk_root(root: str, hidden: bool = False) -> tuple[list[str], bool]:
     `RequestRefused`."""
     fields = apilink.call({"t": "fs.walk", "root": str(root), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
     return [str(p) for p in fields.get("paths") or ()], bool(fields.get("truncated", False))
+
+
+def locate(path: str) -> str | None:
+    """Where something is at *path* on the service's machine, or None:
+    `fs.stat`'s answer as the click's gate wants it (`present`), with the
+    path the service stat'ed (a `~` expanded there with its home, PR-3.0
+    item 4). Blocking; a refusal or no link is None."""
+    try:
+        found = stat_path(path)
+    except RequestRefused:
+        return None
+    if found.kind in ("missing", "symlink"):
+        return None
+    return found.path or path
 
 
 def present(path: str) -> bool:

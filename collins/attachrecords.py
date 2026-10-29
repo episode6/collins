@@ -61,6 +61,14 @@ from pathlib import PurePosixPath
 
 from . import editorfiles, linkpatterns
 
+
+def here(path: str) -> str | None:
+    """Where *path* is on this machine (the service's: a `~` is its home),
+    or None: `linkpatterns.resolve_path`'s *exists* for the attachment
+    log, which reads the service's own disk."""
+    full = os.path.expanduser(path)
+    return full if os.path.isabs(full) and os.path.exists(full) else None
+
 log = logging.getLogger(__name__)
 
 # Records kept per session. A gallery is a glance, not an archive: 100 rows
@@ -551,7 +559,7 @@ def scan(
             checked += 1
             if checked == MAX_SCAN_CANDIDATES:
                 log.debug("stat budget spent after %d image paths in one message", checked)
-            resolved = linkpatterns.resolve_file_reference(path, trials, os.path.exists)
+            resolved = linkpatterns.resolve_file_reference(path, trials, here)
             key = resolved[0] if resolved is not None else None
         if key is None:
             # Reached only by something that *looked* like an image, so it
@@ -611,7 +619,7 @@ def delivered(
     written = path.strip()
     if is_remote(written):
         return None
-    key = linkpatterns.resolve_path(written, roots, os.path.exists)
+    key = linkpatterns.resolve_path(written, roots, here)
     if key is None:
         log.debug("delivered file resolved nowhere: %r", written)
         return None

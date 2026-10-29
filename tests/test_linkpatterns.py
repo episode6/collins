@@ -297,13 +297,23 @@ def test_resolve_skips_none_roots(project) -> None:
     assert resolved == (str(project / "collins" / "foo.py"), None, None)
 
 
-def test_resolve_expands_home(project, monkeypatch) -> None:
+def test_a_home_led_path_is_expanded_by_whoever_owns_the_disk(project, monkeypatch) -> None:
+    """PR-3.0 item 4: a `~` is handed to *exists* as written; the answer's
+    path (the owner's expansion) is what comes back. The attachment log's
+    `attachrecords.here` expands with the service's home; a gate that does
+    not expand finds nothing, so no client ever expands with its own."""
+    from collins import attachrecords
+
     monkeypatch.setenv("HOME", str(project))
-    assert resolve_file_reference("~/collins/foo.py", []) == (
+    assert resolve_file_reference("~/collins/foo.py", [], attachrecords.here) == (
         str(project / "collins" / "foo.py"),
         None,
         None,
     )
+    asked = []
+    assert resolve_file_reference("~/collins/foo.py", [str(project)], lambda p: asked.append(p)) is None
+    assert asked == ["~/collins/foo.py"]  # as written, never joined to a root
+    assert linkpatterns.resolve_path("~/x", [], lambda p: "/srv/u/x") == "/srv/u/x"
 
 
 def test_resolve_normalizes_dot_segments(project) -> None:

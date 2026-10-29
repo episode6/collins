@@ -558,6 +558,17 @@ def write_file(
 # -- the tree, quick open and roots (PR-2.4) ------------------------------------------------
 
 
+def expand_home(path: str) -> str:
+    """*path* with a leading `~` (alone, or `~/…`) expanded to this
+    machine's home, the service's; anything else as it is. The one place a
+    `~` a client names is expanded (PR-3.0 item 4, D54 (5)): `fs.stat`
+    and `cwd.settle` take one, and a client never expands it with its own
+    home, which on another machine is another folder."""
+    if path == "~" or path.startswith("~/"):
+        return os.path.expanduser(path)
+    return path
+
+
 def stat_path(path: str) -> dict:
     """`fs.stat`'s kind, size and mtime of *path* (a worker thread). The
     kind follows a symlink to what it names (`file`, `dir`, `other`);
@@ -802,9 +813,12 @@ class Files:
         self._watches.clear()
         self._installing.clear()
 
-    def _path(self, message: protocol.Message, field: str = "path") -> str | dict:
-        """The request's path (its *field*), an absolute one; else the refusal."""
+    def _path(self, message: protocol.Message, field: str = "path", expand: bool = False) -> str | dict:
+        """The request's path (its *field*), an absolute one (a `~`-led one
+        expanded first with *expand*: `expand_home`); else the refusal."""
         path = message.get(field)
+        if expand and isinstance(path, str):
+            path = expand_home(path)
         if not isinstance(path, str) or not os.path.isabs(path):
             return protocol.refuse(
                 message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID,
@@ -901,8 +915,9 @@ class Files:
         Unconfined (a stat leaks nothing a shell could not); `inside` is
         of *root* when the request names one, else of every root the
         service knows (computed here, on the main loop, where the store
-        lives)."""
-        path = self._path(message)
+        lives). A `~`-led path is this machine's home's (`expand_home`),
+        and the reply says the path stat'ed."""
+        path = self._path(message, expand=True)
         if isinstance(path, dict):
             return path
         root = message.get("root")
@@ -911,7 +926,7 @@ class Files:
         def work() -> dict:
             fields = stat_path(path)
             inside = fields["kind"] != "missing" and any(is_inside(r, path) for r in inside_of)
-            return protocol.reply(message.id, inside=inside, **fields)
+            return protocol.reply(message.id, inside=inside, path=path, **fields)
 
         return self._later(message, "fs-stat", work)
 

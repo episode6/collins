@@ -288,6 +288,7 @@ def test_table_shapes_are_sound():
         p.K_JSON,
         p.K_JSON_OBJECT,
         p.K_PATH,
+        p.K_HOME_PATH,
         p.K_URL,
         p.K_SCALAR,
     }
@@ -946,7 +947,7 @@ REPLIES = {
     "fs.write": {"mtime": 1700000000000000, "size": 4, "encoding": "latin-1"},
     "fs.watch": {},
     "fs.unwatch": {},
-    "fs.stat": {"kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True},
+    "fs.stat": {"kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True, "path": "/home/u/a.txt"},
     "fs.list": {
         "entries": [{"name": "a.txt", "kind": "file", "ignored": False}],
         "truncated": False,
@@ -1146,6 +1147,13 @@ def _spec_cases(path, spec, sample_value):
         yield path, "/" + "a" * p.PATH_MAX, "{field} must be at most {max} characters", label
         yield path, "relative/path", "{field} must be an absolute path", label
         yield path, "/with\0nul", "{field} must be an absolute path", label
+    elif kind == p.K_HOME_PATH:
+        yield path, 5, "{field} must be a string", label
+        yield path, "/" + "a" * p.PATH_MAX, "{field} must be at most {max} characters", label
+        yield path, "relative/path", "{field} must be an absolute path", label
+        yield path, "~user/x", "{field} must be an absolute path", label
+        yield path, "~relative", "{field} must be an absolute path", label
+        yield path, "~/with\0nul", "{field} must be an absolute path", label
     elif kind == p.K_URL:
         yield path, 5, "{field} must be a string", label
         yield path, "https://" + "a" * p.PATH_MAX, "{field} must be at most {max} characters", label

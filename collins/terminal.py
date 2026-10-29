@@ -524,11 +524,12 @@ def _click_target(
     transcript's unwrapped text behind both screen stitchers, and the
     direct reading last. Every path is checked by the service (`fs.stat`,
     remembered for this click), every URL needs nothing but the screen."""
-    seen: dict[str, bool] = {}
+    seen: dict[str, str | None] = {}
 
-    def exists(path: str) -> bool:
+    def exists(path: str) -> str | None:
+        # Where the service found it (a `~` expanded there), or None.
         if path not in seen:
-            seen[path] = remotefiles.present(path)
+            seen[path] = remotefiles.locate(path)
         return seen[path]
 
     fetched: list[list[str]] = []

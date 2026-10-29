@@ -1362,6 +1362,8 @@ def test_a_fork_of_a_running_session_is_spawned_not_refused(tmp_path, monkeypatc
     assert pump(5, lambda: core.ptys.get(fork["pty"]).has_running_command())
     assert origin["pty"] in core.ptys.ptys  # the origin's pty is not closed for it
     # The fork's pty names no session in the table: no stand-in for its origin.
+    # (The table is the facts' word, re-read a moment after the pty's own.)
+    assert pump(5, lambda: fork["pty"] in core.agent_pty_sessions())
     assert core.agent_pty_sessions()[fork["pty"]] is None
     server.shutdown()
     pump(0.3)
