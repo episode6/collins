@@ -12,13 +12,14 @@ reviewer sees). The git page's, gitinfo's and window._run_git's sites are gone
 since PR-2.1 (git goes over the API), and the walker covers the modules
 PR-2.1 added for it.
 
-The final list (PR-2.8) is four groups with a rule each: `DEVICE` (this
-device's own files and programs), `LOCAL_EXTRAS` (each behind
-`apilink.is_local()` in its own function; kept on the list by ruling
-D49), `UNRULED` (pinned, so it only shrinks; recorded and not moved by
-ruling D50, with the reads the walker cannot see listed beside the group
-in `tests/pathless_allowlist.py`). `RECORDED` (four `gitloads` default
-arguments) is gone since PR-3.0 (D54 (6)).
+The final list (PR-2.8, closed by PR-3.0: D59) is two groups with a
+rule each: `DEVICE` (this device's own files and programs, the launchers
+of a web address or of a file this device has among them) and
+`LOCAL_EXTRAS` (each behind `apilink.is_local()` in its own function;
+kept on the list by ruling D49), and `NOT_A_SITE`. The reads the walker
+cannot see are recorded in `tests/pathless_allowlist.py` (the D50
+record). `UNRULED` (three sites) and `RECORDED` (four `gitloads`
+default arguments) are gone since PR-3.0 (D54).
 
 The walker's own reach is pinned at the end of this file: a table of
 spellings of a read it must catch, and a table of the ones it is known
@@ -31,7 +32,7 @@ import ast
 
 import pathless
 import pytest
-from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE, UNRULED
+from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE
 
 WHAT_TO_DO = """
 Each is a call the walker reads as the client opening a file or starting a
@@ -54,7 +55,7 @@ so one of these is the answer, in this order:
 
 The lists are in tests/pathless_allowlist.py. Each is pinned in this file
 (`test_each_group_is_pinned…`, `test_what_is_no_site_is_pinned…`), so filing
-means editing the pin in the same diff. `UNRULED` takes nothing new."""
+means editing the pin in the same diff."""
 
 
 def test_no_site_outside_the_allowlist():
@@ -168,9 +169,15 @@ def test_the_walker_covers_the_gtk_modules_and_the_helpers():
 # -- the final list (PR-2.8) ------------------------------------------------------------------
 
 
-def test_the_list_is_groups_that_do_not_overlap():
-    groups = (DEVICE, LOCAL_EXTRAS, UNRULED)
-    assert ALLOWLIST == DEVICE | LOCAL_EXTRAS | UNRULED
+def test_the_list_is_two_groups_that_do_not_overlap():
+    """D59: Phase 3's first chunk ends the list with `DEVICE`,
+    `LOCAL_EXTRAS` and `NOT_A_SITE` only; nothing else is importable."""
+    import pathless_allowlist
+
+    groups = (DEVICE, LOCAL_EXTRAS)
+    assert ALLOWLIST == DEVICE | LOCAL_EXTRAS
+    assert not hasattr(pathless_allowlist, "UNRULED")
+    assert not hasattr(pathless_allowlist, "RECORDED")
     assert len(ALLOWLIST) == sum(len(group) for group in groups)
 
 
@@ -181,7 +188,6 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
     new site means editing these numbers in the same diff, where the
     question "is this really the device's own file" gets asked."""
     assert len(LOCAL_EXTRAS) == 27  # 16, and eleven launchers since PR-3.0 (items 7, 8)
-    assert len(UNRULED) <= 3
     per_module: dict[str, int] = {}
     for site in DEVICE:
         module = site.split(":", 1)[0]
@@ -306,15 +312,17 @@ def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
     }
 
 
-def test_the_unruled_group_only_shrinks():
-    """Three sites PR-2.8 reported for a ruling (neither device files nor
-    local extras, and no chunk's by the spec). Pinned: ruling one takes it
-    off here and off the list; nothing joins it."""
-    assert UNRULED <= {
+def test_the_three_unruled_sites_are_gone():
+    """PR-3.0 item 9 (D54, D59): the clone dialog's folder check and its
+    `gh` lookup, and the visible project's directory, are the service's
+    answers (`fs.stat`, `service.status`'s `gh`)."""
+    found = pathless.walk()
+    for site in (
         "clonedialog:CloneDialog._clone_done:os.path.isdir",
         "clonedialog:CloneDialog._refresh_destination:shutil.which",
         "window:MainWindow._visible_project_dir:Path.is_dir",
-    }
+    ):
+        assert site not in found, site
 
 
 def test_the_cwd_checks_and_the_terminals_sites_are_gone():
@@ -348,8 +356,8 @@ def test_a_clicked_link_of_any_scheme_but_the_webs_is_a_local_extra():
 #
 # The reviewer's probe wrote one read 48 ways and the walker caught 17.
 # These tables are that probe, kept: every spelling the walker catches now,
-# and every one it is known to miss (each a form the D50 record beside
-# `UNRULED` names). A real site written any of the first ways is found; one
+# and every one it is known to miss (each a form the D50 record in
+# `tests/pathless_allowlist.py` names). A real site written any of the first ways is found; one
 # written any of the second ways is a reviewer's to find.
 
 _HEADER = (

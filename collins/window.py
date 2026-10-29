@@ -310,6 +310,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_icon_name(_app_icon_name(self))
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
+        # Whether each session's project directory is there, the service's
+        # answer (`fs.stat`): session id -> (the directory asked about, is a
+        # directory); and the asks still out (PR-3.0 item 9).
+        self._project_dirs_there: dict[str, tuple[str, bool]] = {}
+        self._project_dirs_asked: set[tuple[str, str]] = set()
         self._confirmed_closes: set[Adw.TabPage] = set()
         # Graceful closes in progress (their polls are the tabs' sessions':
         # Session.begin_close), and which of them are /bg handoffs.
@@ -2223,23 +2228,58 @@ class MainWindow(Adw.ApplicationWindow):
         service's word on its CLI (remotecli), never this process's PATH."""
         return default_provider()
 
-    def _visible_project_dir(self) -> str | None:
-        """Project directory of the session in the visible tab. A session's
-        recorded cwd can itself be a Claude-managed worktree (worktree-entry
-        forks rewrite every cwd in the copied transcript), so it is mapped
-        back to the repository — new sessions belong in the project proper,
-        or they cascade into the worktree. None when the visible tab has no
-        bound session or the directory no longer exists."""
+    def _visible_project_candidate(self) -> tuple[str, str] | None:
+        """(session id, project directory) of the session in the visible
+        tab, whether or not the directory is there. A session's recorded
+        cwd can itself be a Claude-managed worktree (worktree-entry forks
+        rewrite every cwd in the copied transcript), so it is mapped back
+        to the repository — new sessions belong in the project proper, or
+        they cascade into the worktree."""
         session_id = self._active_session_id()
         if session_id is None:
             return None
         session = self.store.get_session(session_id)
         if session is None or not session.cwd:
             return None
-        cwd = worktree_project_root(session.cwd) or session.cwd
-        if Path(cwd).is_dir():
-            return cwd
-        return None
+        return session_id, worktree_project_root(session.cwd) or session.cwd
+
+    def _visible_project_dir(self) -> str | None:
+        """Project directory of the session in the visible tab
+        (`_visible_project_candidate`). None when the visible tab has no
+        bound session or the directory is not known to be there: whether it
+        is, is the service's answer (`fs.stat`, PR-3.0 item 9), asked on tab
+        selection (`_refresh_visible_project_dir`) and read here with no
+        round trip; until it answered the directory counts as gone, which
+        is the safe direction (the chooser opens, at the service's home)."""
+        candidate = self._visible_project_candidate()
+        if candidate is None:
+            return None
+        session_id, cwd = candidate
+        known = self._project_dirs_there.get(session_id)
+        if known is None or known[0] != cwd:
+            self._refresh_visible_project_dir()  # asked now, for the next time
+            return None
+        return cwd if known[1] else None
+
+    def _refresh_visible_project_dir(self) -> None:
+        """Ask the service whether the visible session's project directory
+        is a directory (`fs.stat`, off the main loop), and keep the answer
+        for `_visible_project_dir`: once per session and directory while an
+        ask is out."""
+        candidate = self._visible_project_candidate()
+        if candidate is None:
+            return
+        session_id, cwd = candidate
+        if (session_id, cwd) in self._project_dirs_asked:
+            return
+        self._project_dirs_asked.add((session_id, cwd))
+
+        def landed(kind: str, value) -> None:
+            self._project_dirs_asked.discard((session_id, cwd))
+            there = kind == "ok" and value.is_dir
+            self._project_dirs_there[session_id] = (cwd, there)
+
+        remotefiles.off_main(lambda: remotefiles.stat_path(cwd), landed, name="window-project-dir")
 
     def _new_session(self, provider=None) -> None:
         """Start in the visible session's project directory, else ask."""
@@ -5069,6 +5109,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
         self._update_active_row()
+        # Whether its project directory is still there, asked now so the
+        # next new session started from this tab knows (PR-3.0 item 9).
+        self._refresh_visible_project_dir()
         self._update_close_buttons(page)
         self._sync_window_title()
         if page is None:

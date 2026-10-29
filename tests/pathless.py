@@ -101,7 +101,7 @@ so is `getattr(os.path, ...)`; a path's method handed on or bound
 uncalled the same (`filter(Path.is_dir, ps)`, `key=Path.stat`,
 `fn = Path.read_text`).
 
-**What is not seen** is written down, form by form, beside `UNRULED` in
+**What is not seen** is written down, form by form, in
 `tests/pathless_allowlist.py` (the D50 record): a helper's read (a site
 is named by the function the read is written in, never by its callers),
 a receiver with no hint for the method names other objects use too, and
