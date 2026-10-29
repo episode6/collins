@@ -38,10 +38,12 @@ from . import (
     notifysound,
     prmenu,
     ptyclient,
+    quitrules,
     remotecli,
     remotediffs,
     remotefiles,
     remotegit,
+    remoteicons,
     sandboxstatus,
     sshforward,
     statusicon,
@@ -2231,6 +2233,16 @@ class App(Adw.Application):
         self.connections = connections.Connections(self._ui)
         self.current_connection = connections.LOCAL
         self._switched = False  # a switch_connection awaiting its connect
+        # A forward a crashed client of this device left behind (its pid
+        # file names a client that no longer lives) is ended now; another
+        # client's, still living, is left alone (§3.24, ruled 2026-10-29).
+        try:
+            ended = sshforward.sweep_orphans()
+        except Exception:
+            log.exception("sweeping orphaned forwards failed")
+        else:
+            if ended:
+                log.info("ended %d orphaned ssh forward(s): %s", len(ended), ended)
         self._start_connection(self._initial_connection())
 
     def _initial_connection(self) -> connections.Connection:
@@ -2276,6 +2288,7 @@ class App(Adw.Application):
             )
             if answer != "local":
                 log.info("quitting: the remote connection failed")
+                self._connection.stop()  # the forward, if one bound, goes with the client
                 sys.exit(0)
             self._start_connection(connections.LOCAL)
 
@@ -2301,6 +2314,16 @@ class App(Adw.Application):
         if connection.id == self.current_connection.id or self._connection is None:
             return
         log.info("switching to connection %r (%s)", connection.name, connection.kind)
+        # The transport first: its runtime directory can be refused (a
+        # squatted stand-in under the temp dir), and that must not cost the
+        # tabs (nit 7 of PR 623's review).
+        try:
+            transport = None if connection.is_local else self._transport_for(connection)
+        except OSError as exc:
+            log.warning("could not prepare the forward for %s: %s", connection.name, exc)
+            self._show_refused_write(_("Could not connect to {name}: {detail}").format(
+                name=connection.name, detail=str(exc)[: sshforward.DETAIL_MAX]))
+            return
         self._flush_open_tabs()
         self._open_tabs_frozen = True
         for window in self.get_windows():
@@ -2311,7 +2334,6 @@ class App(Adw.Application):
         self.current_connection = connection
         self.connections.set_last(connection)
         self._switched = True  # the next connect is another machine's: see _on_connected
-        transport = None if connection.is_local else self._transport_for(connection)
         reason = (
             _("Switching to this computer") if connection.is_local
             else _("Switching to {name}").format(name=connection.name)
@@ -2330,6 +2352,7 @@ class App(Adw.Application):
         running instance): switch, or say the name is unknown."""
         name = param.get_string()
         connection = self.connections.find(name)
+        self._present_main_window()  # a hidden window would show nothing of the switch
         if connection is None:
             self._show_refused_write(_("No connection is named {name}").format(name=name))
             return
@@ -2492,6 +2515,9 @@ class App(Adw.Application):
             # Another machine's service (§3.24): the usage panel's numbers
             # were the old login's; it asks the new service for its own.
             self._switched = False
+            # And the project icons held by root path: the same path on
+            # both machines must not show the old machine's icon.
+            remoteicons.forget()
             for window in self.get_windows():
                 if isinstance(window, MainWindow):
                     window.sidebar.usage_panel.forget()
@@ -2582,7 +2608,11 @@ class App(Adw.Application):
         if when == "now":
             self._flush_open_tabs()
             self._open_tabs_frozen = True
-            self._connection.expect_restart(pid)
+            if not self._connection.is_remote:
+                # The pid is the box's over a forward: nothing of this
+                # machine's /proc says when it is gone (the remote's own
+                # lock and the backoff carry the reconnect).
+                self._connection.expect_restart(pid)
         try:
             link.call({"t": "service.restart", "when": when})
         except RequestRefused as refusal:
@@ -2663,6 +2693,22 @@ class App(Adw.Application):
         that does not come up at all is the startup's fatal path, as for any
         first connect that fails."""
         log.warning("the service refused this client's protocol: %s", mismatch)
+        if self._connection.is_remote:
+            # A service reached over ssh (§3.24, ruled 2026-10-29): never
+            # *Restart Service* — the client cannot stop a process on
+            # another machine, and the local service is not the one that
+            # refused. *Connect to This Computer*, or Quit (Cancel); the
+            # forward is stopped before either.
+            heading, body, choices = quitrules.mismatch_words(
+                remote_name=self.current_connection.name,
+                service=mismatch.service, client=mismatch.client,
+            )
+            if self._ask_before_any_window(heading, body, choices) == quitrules.MISMATCH_LOCAL:
+                self._start_connection(connections.LOCAL)  # start_local stops the transport
+                return
+            log.info("quitting: the remote service speaks another protocol")
+            self._connection.stop()
+            sys.exit(0)
         heading, body, can_restart = self._mismatch_text(mismatch)
         choices = [("quit", _("Quit"), "")]
         if can_restart:
@@ -2699,6 +2745,25 @@ class App(Adw.Application):
         """A reconnect found a service this Collins cannot talk to (an
         upgrade restarted it): the same question, over the window."""
         window = self._main_window()
+        if self._connection.is_remote:
+            # Over a forward (§3.24, ruled 2026-10-29): *Connect to This
+            # Computer* switches; Cancel stays disconnected (the manager is
+            # in `mismatch`, no retry) until Connect to… is used.
+            heading, body, choices = quitrules.mismatch_words(
+                remote_name=self.current_connection.name,
+                service=mismatch.service, client=mismatch.client,
+            )
+            if window is None:
+                return
+
+            def answered_remote(response: str) -> None:
+                if response == quitrules.MISMATCH_LOCAL:
+                    self.switch_connection(connections.LOCAL)
+
+            dialogs.answer_dialog(
+                window, heading, body, choices, answered_remote, default_response=choices[-1][0]
+            )
+            return
         heading, body, can_restart = self._mismatch_text(mismatch)
 
         def answered(response: str) -> None:

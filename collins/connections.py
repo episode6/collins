@@ -28,6 +28,7 @@ by name through `find`; ``local`` always names `LOCAL`.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field, replace
 
 from .uistate import UiState, mint_id
@@ -104,7 +105,10 @@ def valid_name(name: object) -> bool:
     control characters, not blank."""
     if not isinstance(name, str) or not name.strip() or len(name) > NAME_MAX:
         return False
-    return not any(ord(c) < 32 or c == "\x7f" for c in name)
+    # No C0 control, and no Unicode format character either (a
+    # right-to-left override, a zero-width joiner): the name is shown in
+    # the banner, the dialog and `--connect` as it is (PR 623's review).
+    return not any(ord(c) < 32 or c == "\x7f" or unicodedata.category(c) == "Cf" for c in name)
 
 
 def valid_app_id(app_id: object) -> bool:

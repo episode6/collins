@@ -54,7 +54,12 @@ downloads of each version, see the
   switches a running one; the connection used last is the next launch's.
   No port, no token: ssh's keys and host verification are all of it, and a
   window reaching a service over ssh never gets the local extras, whatever
-  the far side says. See [A service on another machine](/guide/remote).
+  the far side says. `collins-service` is run through the box's login
+  shell, so a `pipx` install in `~/.local/bin` is found; a forward a
+  crashed window left behind is ended by the next window; and a box whose
+  Collins speaks another protocol gets a dialog naming the side to
+  upgrade, never a *Restart service*. See
+  [A service on another machine](/guide/remote).
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch

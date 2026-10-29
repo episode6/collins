@@ -204,7 +204,12 @@ class ConnectDialog(Adw.Dialog):
         if need_name and not connections.valid_name(name):
             self._say(_("Give the connection a name."), error=True)
             return None
-        return connections.new_ssh(name or target, target)
+        if need_name and any(c.name == name for c in self._app.connections.all()):
+            self._say(_("A connection named {name} exists already.").format(name=name), error=True)
+            return None
+        # A Test with no name yet: the target stands in, cut to a name's
+        # length (a valid target can be longer than NAME_MAX).
+        return connections.new_ssh(name or target[: connections.NAME_MAX], target)
 
     def _test(self) -> None:
         if self._testing:

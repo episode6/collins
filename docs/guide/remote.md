@@ -43,14 +43,30 @@ connects to.
 Collins runs two ssh commands and nothing else:
 
 ```
-ssh -o BatchMode=yes TARGET collins-service --print-socket
-ssh -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-    -o BatchMode=yes -N -L <runtime dir>/collins/remote/<id>.sock:<remote api.sock> TARGET
+ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o RemoteCommand=none \
+    -o RequestTTY=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p PORT] \
+    TARGET 'exec "$SHELL" -lc '"'"'exec collins-service --print-socket'"'"''
+ssh -o ExitOnForwardFailure=yes <the same options> [-p PORT] -N \
+    -L <runtime dir>/collins/remote/<id>.sock:<remote api.sock> TARGET
 ```
 
+The first runs `collins-service --print-socket` through your **login
+shell** on the box (`$SHELL -lc`), so a `pipx install collins` in
+`~/.local/bin` is found the way your shell finds it; the path it prints
+is taken only when it is a plain absolute path (letters, digits, `.`,
+`_`, `-`, `/`), since ssh expands `${VAR}` and `%`-tokens in a forward's
+path on *your* side. The second holds the forward. Both run as
+connections of their own (`ControlMaster=no`) with your config's
+`RemoteCommand` and `RequestTTY` set aside, so nothing in `~/.ssh/config`
+changes what they are; the rest of it applies (a jump host, a key file,
+a user name). Beside each forward's socket Collins writes a small pid
+file (`<id>.pid`): a forward a crashed window left behind is ended by
+the next window on this machine (or the next connect to that box)
+before a new one binds, and a forward of another window that is still
+running is left alone.
+
 Authentication, encryption, host verification and key management are all
-ssh's: whatever `~/.ssh/config` says about the host applies (a jump host,
-a key file, a user name). **`BatchMode=yes`** means ssh never asks you
+ssh's. **`BatchMode=yes`** means ssh never asks you
 anything, so three things must already be in place:
 
 - **The key** is in your ssh agent (`ssh-add`), or has no passphrase.
@@ -94,6 +110,13 @@ the service's screen when the link is back.
 The claude login on the box is the box's: log in once there
 (`ssh -t user@host claude`). Nothing of your laptop's `~/.claude` is
 copied over.
+
+When the box's Collins and yours are too far apart to talk (the window
+speaks the service's protocol or the one before it), the dialog names
+the box and the side to upgrade, and offers **Connect to This Computer**;
+it never offers *Restart service* for a box, since a window cannot stop a
+process on another machine. Upgrade Collins on the side it names and
+connect again.
 
 ## What is different when the service is elsewhere
 

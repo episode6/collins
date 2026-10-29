@@ -161,6 +161,16 @@ DEVICE = frozenset(
         "sshforward:print_socket:subprocess.run",
         "sshforward:unlink_socket:os.lstat",
         "sshforward:unlink_socket:os.unlink",
+        # The pid file beside each forward's socket and the sweep of a crashed
+        # client's forwards (ruled 2026-10-29, the review of PR 623, Q2): this
+        # device's files under its own runtime dir, and its own /proc.
+        "sshforward:Forward.stop:os.unlink",
+        "sshforward:end_stale_forward:os.unlink",
+        "sshforward:is_our_forward:open",
+        "sshforward:pid_alive:open",
+        "sshforward:read_pid_file:os.open",
+        "sshforward:sweep_orphans:os.listdir",
+        "sshforward:write_pid_file:os.open",
         "prefs:PreferencesDialog._on_restart:subprocess.Popen",
         # -- which programs this device has, for the local extras' offers: Ghostty
         # on its PATH (the offer and the launch are LOCAL_EXTRAS' below), the

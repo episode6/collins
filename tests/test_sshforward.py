@@ -5,10 +5,12 @@ ssh's last line, the local socket unlinked first (and a non-socket
 refused), the child's death as the transport's `lost`, and the transport's
 find/start/connect_failed round."""
 
+import json
 import os
 import socket
 import subprocess
 import threading
+import time
 
 import pytest
 
@@ -26,14 +28,17 @@ PLAIN = connections.Connection(id="b" * 32, name="plain", kind="ssh", target="bu
 def test_print_socket_argv_is_batch_mode_with_the_port():
     argv = sshforward.print_socket_argv(CONNECTION)
     assert argv[0] == "ssh"
-    assert argv[-3:] == ["collins@localhost", "collins-service", "--print-socket"]
+    # The remote command is one fixed string, run through the box's login
+    # shell (Q3 of PR 623's review): a pipx install's ~/.local/bin is found.
+    assert argv[-2:] == ["collins@localhost", "exec \"$SHELL\" -lc 'exec collins-service --print-socket'"]
     assert "-o" in argv and "BatchMode=yes" in argv
     assert argv[argv.index("-p") + 1] == "2222"
-    assert "ControlMaster=no" in argv and "ControlPath=none" in argv
+    for option in ("ControlMaster=no", "ControlPath=none", "RemoteCommand=none", "RequestTTY=no"):
+        assert option in argv
     assert f"ServerAliveInterval={sshforward.SERVER_ALIVE_INTERVAL_S}" in argv
     # No port: no -p; the destination is the bare host.
     plain = sshforward.print_socket_argv(PLAIN)
-    assert "-p" not in plain and plain[-3] == "build.example.net"
+    assert "-p" not in plain and plain[-2] == "build.example.net"
 
 
 def test_print_socket_argv_carries_a_remote_app_id():
@@ -41,7 +46,9 @@ def test_print_socket_argv_carries_a_remote_app_id():
         id="c" * 32, name="x", kind="ssh", target="h", remote_app_id="com.episode6.Collins.Debug"
     )
     argv = sshforward.print_socket_argv(other)
-    assert argv[-4:] == ["collins-service", "--print-socket", "--app-id", "com.episode6.Collins.Debug"]
+    assert argv[-1] == (
+        "exec \"$SHELL\" -lc 'exec collins-service --print-socket --app-id com.episode6.Collins.Debug'"
+    )
 
 
 def test_forward_argv_is_the_spec_command():
@@ -376,3 +383,195 @@ def test_a_replaced_forwards_late_death_is_not_a_loss(tmp_path, monkeypatch):
     assert FakeForward.made[1].stopped == 1
     FakeForward.made[1].die(0, "")
     assert lost == [] and transport.find("app")[1] == "none"
+
+
+# ---- PR 623's review: the printed path, a stop mid-start, the pid file ------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "/tmp/x-${R623_SECRET}-%u.sock",  # ssh expands ${VAR} and %u on this side (M3)
+        "/tmp/x-%d.sock",
+        "/tmp/a:b.sock",  # misparses -L
+        "/tmp/x y.sock",
+        "/tmp/~x.sock",
+        "relative/path",
+        "",
+        "/" + "a" * 108,  # past sun_path on the far side
+    ],
+)
+def test_print_socket_refuses_a_path_ssh_would_expand_or_misparse(line):
+    result = sshforward.print_socket(CONNECTION, run=FakeRun(stdout=(line + "\n").encode()))
+    assert not result.ok and "no socket path" in result.text
+
+
+def test_forward_argv_refuses_a_bad_path_on_either_side():
+    with pytest.raises(ValueError):
+        sshforward.forward_argv(CONNECTION, "/run/user/1/x.sock", "/tmp/${HOME}.sock")
+    with pytest.raises(ValueError):
+        sshforward.forward_argv(CONNECTION, "/run/user/1/%u.sock", "/tmp/api.sock")
+
+
+def test_exit_127_says_the_path():
+    run = FakeRun(returncode=127, stderr=b"bash: line 1: collins-service: command not found\n")
+    result = sshforward.print_socket(CONNECTION, run=run)
+    assert not result.ok and "command not found" in result.text
+    assert "login shell's PATH" in result.text
+
+
+def test_a_stop_during_print_socket_spawns_nothing(tmp_path, monkeypatch):
+    """M2(b): the worker is in --print-socket when a switch or a quit stops
+    the transport; the start must raise and leave no forward alive."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    FakeForward.made = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_print_socket(connection):
+        entered.set()
+        release.wait(5)
+        return sshforward.PrintSocketResult(ok=True, path="/remote/api.sock")
+
+    transport = sshforward.RemoteTransport(
+        CONNECTION, on_lost=lambda text: None, print_socket=blocking_print_socket,
+        make_forward=FakeForward, probe=lambda path: "live",
+    )
+    outcome = {}
+
+    def work():
+        try:
+            transport.start("app")
+        except sshforward.ForwardError as exc:
+            outcome["error"] = str(exc)
+
+    worker = threading.Thread(target=work)
+    worker.start()
+    assert entered.wait(5)
+    transport.stop()  # lands while print-socket runs
+    release.set()
+    worker.join(5)
+    assert outcome == {"error": "stopped"}
+    assert not any(f.alive for f in FakeForward.made)
+    assert transport.forward is None and transport.find("app")[1] == "none"
+
+
+def test_a_stop_right_after_the_spawn_ends_the_child(tmp_path, monkeypatch):
+    """The other gap: stopped between forward.start() and the return."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    FakeForward.made = []
+    ok = sshforward.PrintSocketResult(ok=True, path="/remote/api.sock")
+    holder = {}
+
+    class StoppingForward(FakeForward):
+        def start(self):
+            super().start()
+            holder["transport"].stop()  # the stop lands the instant the child is up
+
+    transport = sshforward.RemoteTransport(
+        CONNECTION, on_lost=lambda text: None, print_socket=lambda c: ok,
+        make_forward=StoppingForward, probe=lambda path: "live",
+    )
+    holder["transport"] = transport
+    with pytest.raises(sshforward.ForwardError, match="stopped"):
+        transport.start("app")
+    assert FakeForward.made[0].stopped >= 1 and not FakeForward.made[0].alive
+    assert transport.forward is None
+
+
+def test_a_death_in_the_first_instant_is_this_forwards(tmp_path, monkeypatch):
+    """Nit 6: `self.forward` is known before start(), so a child that dies at
+    once is reported, not dropped as a stranger's."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    FakeForward.made = []
+    lost = []
+    ok = sshforward.PrintSocketResult(ok=True, path="/remote/api.sock")
+
+    class DyingForward(FakeForward):
+        def start(self):
+            super().start()
+            self.die(255, "Connection closed by remote host")
+
+    transport = sshforward.RemoteTransport(
+        CONNECTION, on_lost=lost.append, print_socket=lambda c: ok,
+        make_forward=DyingForward, probe=lambda path: "live",
+    )
+    transport.start("app")
+    assert len(lost) == 1 and "Connection closed by remote host" in lost[0]
+
+
+def test_the_pid_file_is_written_and_a_stale_forward_ended(tmp_path):
+    """Q2: the ssh child's pid, this client's and the socket, beside the
+    socket; a later start on the same socket ends the recorded child when
+    its command line is still that forward's."""
+    local = str(tmp_path / "a.sock")
+    # A real child standing in for ssh, its argv carrying the -L the sweep
+    # looks for (bash's `exec -a` names it ssh; a sh without it leaves the
+    # name, and the sweep must then touch nothing).
+    child = subprocess.Popen(
+        ["bash", "-c", f'exec -a ssh bash -c "sleep 300" x -N -L {local}:/remote/api.sock'],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.3)
+        sshforward.write_pid_file(local, child.pid)
+        record = sshforward.read_pid_file(sshforward.pid_path(local))
+        assert record == {"ssh": child.pid, "client": os.getpid(), "socket": local}
+        assert os.stat(sshforward.pid_path(local)).st_mode & 0o777 == 0o600
+        ours = sshforward.is_our_forward(child.pid, local)
+        ended = sshforward.end_stale_forward(local)
+        if ours:
+            assert ended == child.pid
+            child.wait(5)
+            assert child.poll() is not None
+        else:
+            assert ended is None and child.poll() is None
+        assert not os.path.exists(sshforward.pid_path(local))
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_the_sweep_touches_no_living_clients_forward_and_no_reused_pid(tmp_path):
+    directory = str(tmp_path)
+    live_local = os.path.join(directory, "live.sock")
+    # Another client of this device, alive (this process): left alone.
+    sshforward.write_pid_file(live_local, 2)
+    # A client that is gone (a pid nobody has), whose "ssh" pid is this
+    # process: not an ssh, so nothing is signalled; the file is removed.
+    dead_local = os.path.join(directory, "dead.sock")
+    path = sshforward.pid_path(dead_local)
+    with open(path, "w") as fh:
+        json.dump({"ssh": os.getpid(), "client": 2**22 - 1, "socket": dead_local}, fh)
+    (tmp_path / "junk.pid").write_text("not json")
+    assert sshforward.sweep_orphans(directory) == []
+    assert os.path.exists(sshforward.pid_path(live_local))
+    assert not os.path.exists(path)
+
+
+def test_read_pid_file_validates(tmp_path):
+    path = str(tmp_path / "x.pid")
+    for raw in ('{"ssh": "4", "client": 5, "socket": "/a"}', '{"ssh": 4, "client": 5, "socket": "/a b"}',
+                "[]", "x" * 5000, '{"ssh": 0, "client": 5, "socket": "/a"}'):
+        with open(path, "w") as fh:
+            fh.write(raw)
+        assert sshforward.read_pid_file(path) is None
+    assert sshforward.read_pid_file(str(tmp_path / "none")) is None
+
+
+def test_forward_start_writes_the_pid_file_and_stop_removes_it(tmp_path):
+    local = tmp_path / "a.sock"
+    procs = []
+
+    def popen(argv, **kwargs):
+        procs.append(FakeProc(argv, **kwargs))
+        return procs[-1]
+
+    forward = sshforward.Forward(CONNECTION, "/remote/api.sock", local_path=str(local), popen=popen)
+    forward.start()
+    record = sshforward.read_pid_file(sshforward.pid_path(str(local)))
+    assert record["ssh"] == 4242 and record["client"] == os.getpid()
+    forward.stop()
+    forward._reader.join(5)
+    assert not os.path.exists(sshforward.pid_path(str(local)))

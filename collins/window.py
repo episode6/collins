@@ -712,6 +712,9 @@ class MainWindow(Adw.ApplicationWindow):
         # from the link's loss until the connection manager is back,
         # over content that stays readable.
         self.reconnect_banner = Adw.Banner(title=_("Reconnecting to the Collins service"))
+        # Plain text, pinned: a connection's name and ssh's last line go in
+        # the title as they are (rule 5; the property's default is markup).
+        self.reconnect_banner.set_use_markup(False)
         self.reconnect_banner.set_revealed(False)
         # The same place says "Restarting when idle" while a restart waits
         # for the sessions, with the button that calls it off (§3.21).
@@ -1122,10 +1125,11 @@ class MainWindow(Adw.ApplicationWindow):
         if self._banner_reconnecting:
             name = getattr(self, "_banner_name", "")
             if name:
-                title = _("Reconnecting to {name}").format(name=name)
                 detail = getattr(self, "_banner_detail", "")
                 if detail:
-                    title = f"{title}: {detail}"
+                    title = _("Reconnecting to {name}: {detail}").format(name=name, detail=detail)
+                else:
+                    title = _("Reconnecting to {name}").format(name=name)
                 banner.set_title(title)
             else:
                 banner.set_title(_("Reconnecting to the Collins service"))
@@ -5898,14 +5902,29 @@ class MainWindow(Adw.ApplicationWindow):
         nothing over the list that brings these tabs back."""
         pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
         for page in pages:
-            self._close_ok.add(page)
             tab = page.get_child()
-            if not isinstance(tab, TerminalTab) or self._page_settling(page):
+            if not isinstance(tab, TerminalTab):
+                self._close_ok.add(page)
                 continue
+            # A page mid-close (a graceful exit draining, a /bg handoff, a
+            # close dialog open) leaves too: its close belonged to the old
+            # service and can never finish here, and a page kept would
+            # re-attach its old pty id on the new service (S2 of PR 623's
+            # review). Its session is left running, never ended: the
+            # settling state is dropped and the page detaches like the
+            # rest; a close dialog still open finds its page gone
+            # (`_page_alive`) and does nothing.
+            self._closing_pages.discard(page)
+            self._bg_closing.discard(page)
+            self._close_asking.discard(page)
+            self._bg_ok.discard(page)
+            if page in self._bg_queue:
+                self._bg_queue.remove(page)
+            self._close_ok.add(page)
             fate = self._quit_fate(tab, "detach")
             if fate == quitrules.DETACH:
                 self._detached_pages.add(page)
-            elif fate == quitrules.RELEASE:
+            else:  # RELEASE, or no pty at all: closes as a plain close would, with no ask
                 self._confirmed_closes.add(page)
         for page in pages:
             self.tab_view.close_page(page)

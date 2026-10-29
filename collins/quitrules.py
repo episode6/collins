@@ -117,3 +117,34 @@ def restart_body(*, sessions: int, busy: int, background: int) -> str:
                        "the service's.").format(n=background))
     parts.append(_("Collins and its status icon stay while the service restarts."))
     return " ".join(parts)
+
+
+# -- the protocol mismatch over a forward (`App._mismatch_at_startup`, §3.24) ----------
+
+MISMATCH_LOCAL = "local"  # *Connect to This Computer*
+MISMATCH_QUIT = "quit"
+
+
+def mismatch_words(*, remote_name: str, service: object, client: int) -> tuple[str, str, list]:
+    """The dialog for a service reached over ssh that speaks another
+    protocol (ruled 2026-10-29, the review of PR 623, Q1): never *Restart
+    Service* — the client cannot stop a process on another machine, and
+    the local service is not the one that refused. The heading, the body
+    (naming the connection and the side to upgrade) and the choices as
+    `dialogs.answer_dialog` takes them: *Connect to This Computer* only;
+    the dialog's own Cancel is *Quit* at launch and "stay disconnected" on
+    a reconnect."""
+    shown = service if service is not None else "?"
+    heading = _("Collins and {name} speak different protocols").format(name=remote_name)
+    if isinstance(service, int) and service < client:
+        body = _(
+            "The service on {name} speaks protocol {service} and this Collins speaks "
+            "protocol {client}: upgrade Collins on {name}."
+        ).format(name=remote_name, service=shown, client=client)
+    else:
+        body = _(
+            "The service on {name} speaks protocol {service} and this Collins speaks "
+            "protocol {client}: upgrade Collins here."
+        ).format(name=remote_name, service=shown, client=client)
+    choices = [(MISMATCH_LOCAL, _("Connect to This Computer"), "suggested")]
+    return heading, body, choices

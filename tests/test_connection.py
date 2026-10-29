@@ -723,7 +723,7 @@ def test_start_remote_starts_the_forward_and_connects_on_its_socket():
     assert world.manager.started_how == "forward" and world.manager.is_remote
     assert world.states == ["starting", "waiting", "connecting", "connected"]
     assert world.link.path == transport.path  # the link dials the forward's local socket
-    assert world.link.proved == 1  # the proof is sent; the service refuses it (D11)
+    assert world.link.proved == 0  # this device's proof never crosses a forward (D11)
 
 
 def test_start_remote_raises_the_starts_word():
@@ -907,3 +907,72 @@ def test_the_sockets_word_never_replaces_the_forwards():
     world.link.on_lost("sync: the service closed the connection")
     assert world.manager.last_error == "ssh to box ended: signal 9"
     assert world.states.count("lost") == states
+
+
+def test_a_forward_death_while_waiting_leaves_one_poll_chain():
+    """S1 of PR 623's review: the forward dies between its spawn and its
+    bind (the round is WAITING, a poll chain runs). The loss must cancel
+    that chain, or two chains find the retry's socket together and shake
+    hands twice. One handshake, one on_connected."""
+    world = World(live=True)
+    world.manager.start_local()
+    transport = FakeTransport(world)
+    # The forward stays unbound for a while: find says none after the start
+    # (the manager binds `transport.find` once, so the override reads a flag).
+    unbound = {"on": True}
+    transport.find = lambda app_id: (
+        (transport.path, "none") if unbound["on"] else FakeTransport.find(transport, app_id)
+    )
+    world.manager.switch(transport)
+    # The switch's round: find none → start → WAITING, a poll chain armed.
+    assert world.manager.state == "waiting" and world.timers
+    world.fire()  # one poll tick: still none, re-armed
+    assert world.manager.state == "waiting"
+    unbound["on"] = False  # the next forward binds
+    transport.die("ssh to box ended: exit 255")
+    assert world.manager.state == "lost"
+    connects_before = world.link.connects
+    connected_before = list(world.connected)
+    for _ in range(12):
+        world.fire()
+    assert world.manager.state == "connected"
+    assert world.link.connects == connects_before + 1
+    assert world.connected == [*connected_before, False]
+
+
+def test_a_mismatch_over_a_forward_reaches_on_mismatch_and_says_remote():
+    """M1 of PR 623's review: the owner's mismatch dialog must know the
+    service that refused is the remote one (never SIGTERM the local
+    service, never *Restart Service*)."""
+    from collins.api.client import ProtocolMismatch
+
+    mismatches = []
+    world = World(live=False)
+    world.manager.on_mismatch = mismatches.append
+    transport = FakeTransport(world)
+
+    class MismatchLink(FakeLink):
+        def connect(self):
+            self.connects += 1
+            raise ProtocolMismatch("the service speaks protocol 9", 9, 1)
+
+    world.link = MismatchLink()
+    world.manager.link = world.link
+    world.link.on_lost = world.manager._on_link_lost
+    try:
+        world.manager.start_remote(transport)
+    except ProtocolMismatch:
+        pass  # the blocking first connect raises it to the owner
+    else:
+        raise AssertionError("expected ProtocolMismatch")
+    assert world.manager.is_remote
+    # On a reconnect it lands as the mismatch state, with no retry.
+    world.manager.state = "connected"
+    world.link.on_lost("closed")
+    world.fire()
+    for _ in range(4):
+        if world.manager.state == "mismatch":
+            break
+        world.fire()
+    assert world.manager.state == "mismatch" and len(mismatches) == 1
+    assert world.manager.is_remote and transport.stopped == 0  # the owner decides; the forward stands

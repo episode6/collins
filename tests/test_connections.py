@@ -198,3 +198,14 @@ def test_last_names_only_a_connection_that_exists(tmp_path):
         _ui(tmp_path, rows=[{"id": ID_A, "name": "box", "kind": "ssh", "target": "h"}], last=ID_A)
     )
     assert store.last is not None and store.last.id == ID_A
+
+
+def test_names_refuse_unicode_format_characters():
+    """Nit 8 of PR 623's review: a right-to-left override or a zero-width
+    joiner would render in the banner and the dialog as it is."""
+    assert not connections.valid_name("box‮")
+    assert not connections.valid_name("b‍ox")
+    assert connections.valid_name("Kästchen 🙂")
+    assert connections.from_record(
+        {"id": ID_A, "name": "x‮", "kind": "ssh", "target": "h"}
+    ) is None

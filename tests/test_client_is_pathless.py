@@ -203,7 +203,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "updatecheck": 5,
         "buildinfo": 3,
         "connection": 7,
-        "sshforward": 5,  # the ssh forward: this device's ssh and its local socket (PR-3.1)
+        "sshforward": 12,  # the ssh forward: this device's ssh, its local socket and pid file (PR-3.1)
         "prefs": 1,
         "sidebar": 1,
         "openwith": 5,
@@ -213,7 +213,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "attachpanel": 2,
         "lightbox": 2,
     }
-    assert len(DEVICE) == 78
+    assert len(DEVICE) == 85
     # `openwith`'s five device sites are lookups of this device's terminal
     # preference; its launchers are local extras and nowhere else.
     assert {s for s in DEVICE if s.startswith("openwith:")} == {

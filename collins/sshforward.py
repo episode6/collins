@@ -38,11 +38,15 @@ died is restarted.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
+import signal
 import stat
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -58,11 +62,35 @@ PRINT_SOCKET_TIMEOUT_S = 10.0
 SERVER_ALIVE_INTERVAL_S = 15
 SERVER_ALIVE_COUNT_MAX = 3
 SSH_EXIT_FAILED = 255  # ssh's own failure: no connection, no key, no host key
-REMOTE_COMMAND = ["collins-service", "--print-socket"]
+SHELL_EXIT_NOT_FOUND = 127  # the remote shell found no collins-service
+# The remote command, run through the box's login shell (ruled 2026-10-29,
+# the review of PR 623, Q3): `ssh host cmd` gets a non-login PATH that
+# misses `~/.local/bin`, where a pipx install puts collins-service, while
+# the guide (rightly) says "the login shell's PATH". One fixed string; the
+# app id goes inside the single quotes, validated to [A-Za-z0-9._-] by
+# `connections.valid_app_id`, so the remote shell reads nothing of a
+# person's. `$SHELL` is what sshd runs the command with, so it is set.
+REMOTE_COMMAND = "collins-service --print-socket"
+REMOTE_SHELL_PREFIX = 'exec "$SHELL" -lc '
 # How much of the child's stderr is kept: the last line, this long.
 DETAIL_MAX = 240
 STOP_WAIT_S = 2.0
 STARTED_HOW = "forward"  # the manager's `started_how` for a remote start
+# What the remote may print as its socket's path (M3 of PR 623's review):
+# ssh expands `${VAR}` and `%`-tokens of a LocalForward connect path on the
+# client and sends the result to the box, so whatever prints the last line
+# of `--print-socket` would choose which of this device's variables cross.
+# Letters, digits, dot, underscore, dash and slash, absolute, within the
+# kernel's sun_path bound on the far side; a ':' would misparse -L.
+SOCKET_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]{1,107}$")
+# The pid file beside each forward's socket (ruled 2026-10-29, the review
+# of PR 623, Q2): the ssh child's pid, this client's pid and the socket, so
+# a forward left by a client that crashed is ended before the socket is
+# bound again (`end_stale_forward`) and by the next launch on this device
+# (`sweep_orphans`: a client pid that no longer lives). No PR_SET_PDEATHSIG:
+# a `preexec_fn` in a client with threads may deadlock between fork and
+# exec, and the signal is per parent *thread* (the reconnect's worker).
+PID_FILE_MAX = 4096
 
 # The words the dialog and the banner show (msgids: translated with
 # `i18n.translate` here, since the detail is ssh's own text and may hold
@@ -72,6 +100,7 @@ MSG_CONNECT_FAILED = N_("ssh could not connect to {target}: {detail}")
 MSG_REMOTE_FAILED = N_("collins-service failed on {target} (exit {code}): {detail}")
 MSG_TIMEOUT = N_("no answer from {target} within {seconds} s")
 MSG_BAD_PATH = N_("collins-service on {target} printed no socket path")
+MSG_NOT_ON_PATH = N_("collins-service is not on the login shell's PATH on {target}")
 MSG_FORWARD_ENDED = N_("ssh to {target} ended: {detail}")
 MSG_FORWARD_CLOSED = N_("the ssh forward to {target} closed")
 MSG_FORWARD_EXIT = N_("the ssh forward to {target} ended (exit {code}): {detail}")
@@ -96,10 +125,17 @@ class ForwardError(OSError):
 def ssh_options(target: Target) -> list[str]:
     """The options every run of this module shares (see the module
     docstring), the port when the target names one."""
+    # RemoteCommand=none and RequestTTY=no for the same reason as
+    # ControlMaster=no: a Host block's RemoteCommand makes `ssh host cmd`
+    # exit 255 ("Cannot execute command-line and remote command") and a
+    # `RequestTTY force` would give the print-socket run a tty; the user's
+    # config must not change what these two runs are (PR 623's review).
     argv = [
         "-o", "BatchMode=yes",
         "-o", "ControlMaster=no",
         "-o", "ControlPath=none",
+        "-o", "RemoteCommand=none",
+        "-o", "RequestTTY=no",
         "-o", f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_S}",
         "-o", f"ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}",
     ]  # fmt: skip
@@ -120,16 +156,25 @@ def print_socket_argv(connection: Connection) -> list[str]:
     remote command is a fixed list; the app id was validated on the way in
     (`connections.valid_app_id`) and holds nothing a shell reads."""
     target = _target(connection)
-    command = list(REMOTE_COMMAND)
+    command = REMOTE_COMMAND
     if connection.remote_app_id:
-        command += ["--app-id", connection.remote_app_id]
-    return [SSH, *ssh_options(target), target.destination, *command]
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", connection.remote_app_id):
+            raise ValueError(f"connection {connection.id!r} has an app id a shell could read")
+        command = f"{command} --app-id {connection.remote_app_id}"
+    return [SSH, *ssh_options(target), target.destination, f"{REMOTE_SHELL_PREFIX}'exec {command}'"]
 
 
 def forward_argv(connection: Connection, local_path: str, remote_path: str) -> list[str]:
     """§3.2's forward: ``ssh -o ExitOnForwardFailure=yes … -N -L
     <local>:<remote> TARGET``."""
     target = _target(connection)
+    # Both halves of -L are expanded by ssh on this side (`${VAR}`, `%u`):
+    # the remote half was checked by `print_socket`, and the local half is
+    # this module's own text (the runtime dir and a 32-hex id); refuse
+    # anything else all the same.
+    for path in (local_path, remote_path):
+        if not SOCKET_PATH_RE.fullmatch(path):
+            raise ValueError(f"not a socket path ssh may be handed: {path!r}")
     return [
         SSH,
         "-o", "ExitOnForwardFailure=yes",
@@ -230,7 +275,9 @@ class PrintSocketResult:
 
 
 def _valid_socket_path(line: str) -> bool:
-    return bool(line) and line.startswith("/") and len(line) <= 4096 and "\x00" not in line
+    """`SOCKET_PATH_RE`: what may go after the colon of -L (see the
+    constant: ssh expands `${VAR}` and `%` tokens there, on this side)."""
+    return bool(SOCKET_PATH_RE.fullmatch(line))
 
 
 def print_socket(
@@ -267,12 +314,144 @@ def print_socket(
         return PrintSocketResult(ok=False, code=code, detail=detail, text=text, batch_mode_hint=True)
     if code != 0:
         text = translate(MSG_REMOTE_FAILED, {"target": target, "code": code, "detail": detail or "-"})
+        if code == SHELL_EXIT_NOT_FOUND:
+            text = f"{text}\n{translate(MSG_NOT_ON_PATH, {'target': target})}"
         return PrintSocketResult(ok=False, code=code, detail=detail, text=text)
     path = last_line(completed.stdout)
     if not _valid_socket_path(path):
         return PrintSocketResult(ok=False, code=code, detail=detail,
                                  text=translate(MSG_BAD_PATH, {"target": target}))
     return PrintSocketResult(ok=True, path=path, code=code, detail=detail)
+
+
+# ---- the pid file beside each socket --------------------------------------------------
+
+
+def pid_path(local_path: str) -> str:
+    """``<runtime dir>/collins/remote/<connection id>.pid`` for that socket."""
+    return local_path[: -len(".sock")] + ".pid" if local_path.endswith(".sock") else local_path + ".pid"
+
+
+def write_pid_file(local_path: str, ssh_pid: int) -> None:
+    """Record the forward: its ssh pid, this client's pid and the socket,
+    0600. Fails soft (the sweep then has nothing to go on)."""
+    record = {"ssh": int(ssh_pid), "client": os.getpid(), "socket": local_path}
+    try:
+        fd = os.open(pid_path(local_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(record))
+    except OSError as exc:
+        log.warning("sshforward: could not write %s: %s", pid_path(local_path), exc)
+
+
+def read_pid_file(path: str) -> dict | None:
+    """The record at *path*, or None when it is not one of ours (rule 5:
+    a bounded read, integer pids, a socket path of the allowed shape)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as fh:
+            raw = fh.read(PID_FILE_MAX + 1)
+    except OSError:
+        return None
+    if len(raw) > PID_FILE_MAX:
+        return None
+    try:
+        record = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    ssh_pid, client, sock = record.get("ssh"), record.get("client"), record.get("socket")
+    if not (isinstance(ssh_pid, int) and 1 < ssh_pid < 2**22):
+        return None
+    if not (isinstance(client, int) and 1 < client < 2**22):
+        return None
+    if not isinstance(sock, str) or not SOCKET_PATH_RE.fullmatch(sock):
+        return None
+    return {"ssh": ssh_pid, "client": client, "socket": sock}
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii") as fh:
+            state = fh.read().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return False
+    return state not in ("Z", "X")
+
+
+def is_our_forward(pid: int, local_path: str) -> bool:
+    """Whether *pid* still runs an ``ssh … -L <local_path>:…``: the pid may
+    have been reused since the file was written, so nothing is signalled
+    unless the command line is the forward's own."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            argv = fh.read(PID_FILE_MAX).split(b"\0")
+    except OSError:
+        return False
+    if not argv or os.path.basename(argv[0]) != b"ssh":
+        return False
+    want = (local_path + ":").encode()
+    return any(arg.startswith(want) for arg in argv)
+
+
+def end_stale_forward(local_path: str) -> int | None:
+    """End the ssh child a pid file beside *local_path* names, when it is
+    still that forward (its command line says so), and remove the file.
+    Returns the pid ended, None when there was nothing to end. Called
+    before a new forward binds the socket, and by `sweep_orphans`."""
+    path = pid_path(local_path)
+    record = read_pid_file(path)
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    if record is None or record["socket"] != local_path:
+        return None
+    pid = record["ssh"]
+    if not is_our_forward(pid, local_path):
+        return None
+    log.info("sshforward: ending the forward left at %s (ssh pid %d)", local_path, pid)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return None
+    deadline = time.monotonic() + STOP_WAIT_S
+    while time.monotonic() < deadline:
+        if not pid_alive(pid) or not is_our_forward(pid, local_path):
+            return pid
+        time.sleep(0.05)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+    return pid
+
+
+def sweep_orphans(directory: str | None = None) -> list[int]:
+    """At launch: every pid file whose *client* no longer lives names a
+    forward left by a client that crashed — end it. A file whose client
+    still lives is another client's on this device and is left alone.
+    Returns the pids ended."""
+    directory = directory or remote_dir()
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    ended: list[int] = []
+    for name in names:
+        if not name.endswith(".pid"):
+            continue
+        path = os.path.join(directory, name)
+        record = read_pid_file(path)
+        if record is None:
+            continue
+        if pid_alive(record["client"]):
+            continue  # a living client's (this one's included): left alone
+        pid = end_stale_forward(record["socket"])
+        if pid is not None:
+            ended.append(pid)
+    return ended
 
 
 # ---- the forward child ------------------------------------------------------------------
@@ -312,8 +491,11 @@ class Forward:
         return self.proc is not None and self.proc.poll() is None
 
     def start(self) -> None:
-        """Raises OSError (a non-socket at the local path, no `ssh`)."""
+        """Raises OSError (a non-socket at the local path, no `ssh`). A
+        forward an earlier client left on this socket (its pid file) is
+        ended first; the new child's pid file is written beside the socket."""
         ensure_remote_dir(os.path.dirname(self.local_path))
+        end_stale_forward(self.local_path)
         unlink_socket(self.local_path)
         self.proc = self._popen(
             self.argv,
@@ -322,6 +504,7 @@ class Forward:
             stderr=subprocess.PIPE,
             close_fds=True,
         )
+        write_pid_file(self.local_path, self.proc.pid)
         log.info("ssh forward to %s started (pid %s): %s -> %s",
                  self.connection.target, self.proc.pid, self.local_path, self.remote_path)
         self._reader = threading.Thread(target=self._read, name="collins-ssh-forward", daemon=True)
@@ -357,7 +540,13 @@ class Forward:
         of the forward."""
         self.stopped = True
         proc = self.proc
-        if proc is None or proc.poll() is not None:
+        if proc is None:
+            return
+        try:
+            os.unlink(pid_path(self.local_path))
+        except OSError:
+            pass
+        if proc.poll() is not None:
             return
         try:
             proc.terminate()
@@ -401,6 +590,11 @@ class RemoteTransport:
         self.remote_path = ""
         self._restart_wanted = False
         self.stopped = False
+        # `start` runs on the manager's worker thread while `stop` (a
+        # switch, a quit) comes from the main loop: the lock makes "stopped"
+        # and "the forward" one state, so a stop that lands while
+        # print-socket runs leaves no child behind (M2 of PR 623's review).
+        self._lock = threading.Lock()
 
     @property
     def name(self) -> str:
@@ -415,24 +609,42 @@ class RemoteTransport:
 
     def start(self, _app_id: str) -> str:
         """The two runs; raises `ForwardError` with the person's word."""
-        if self.stopped:
-            raise ForwardError("stopped")
-        self._restart_wanted = False
-        if self.forward is not None:
-            self.forward.stop()
-            self.forward = None
-        result = self._print_socket(self.connection)
+        with self._lock:
+            if self.stopped:
+                raise ForwardError("stopped")
+            self._restart_wanted = False
+            old, self.forward = self.forward, None
+        if old is not None:
+            old.stop()
+        result = self._print_socket(self.connection)  # up to PRINT_SOCKET_TIMEOUT_S
         if not result.ok:
             raise ForwardError(result.text)
-        self.remote_path = result.path
         forward = self._make_forward(
             self.connection, result.path, local_path=self.local_path, on_exit=self._exited
         )
+        with self._lock:
+            if self.stopped:  # a switch or a quit landed meanwhile: spawn nothing
+                raise ForwardError("stopped")
+            self.remote_path = result.path
+            # Known before it starts, so a death in its first instant is
+            # reported as this forward's, not dropped as a stranger's.
+            self.forward = forward
         try:
             forward.start()
         except OSError as exc:
+            with self._lock:
+                if self.forward is forward:
+                    self.forward = None
             raise ForwardError(str(exc)) from exc
-        self.forward = forward
+        with self._lock:
+            if self.stopped:  # stopped between the spawn and here: end it, quietly
+                self.forward = None
+                stop_now = True
+            else:
+                stop_now = False
+        if stop_now:
+            forward.stop()
+            raise ForwardError("stopped")
         return STARTED_HOW
 
     def _exited(self, forward: Forward, code: int | None, detail: str) -> None:
@@ -452,10 +664,11 @@ class RemoteTransport:
         self._restart_wanted = True
 
     def stop(self) -> None:
-        self.stopped = True
-        if self.forward is not None:
-            self.forward.stop()
-            self.forward = None
+        with self._lock:
+            self.stopped = True
+            forward, self.forward = self.forward, None
+        if forward is not None:
+            forward.stop()
         try:
             unlink_socket(self.local_path)
         except OSError:

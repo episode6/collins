@@ -95,6 +95,9 @@ UNIT = "collins-service.service"
 POLL_MS = 100
 WAIT_S = 10.0
 BACKOFF_S = (1, 2, 5, 10, 30)
+# How much of a reason the banner gets (`last_error`): ssh's line is cut to
+# `sshforward.DETAIL_MAX` already; a link's or a handshake's error is not.
+ERROR_MAX = 240
 
 IDLE = "idle"
 STARTING = "starting"
@@ -339,7 +342,7 @@ class ConnectionManager:
         # for the local service; and the last reason given for a loss, a
         # failed start or a failed connect (the banner's detail).
         self._transport = None
-        self.last_error = ""
+        self._last_error = ""
         self._unit_state = unit_state or globals()["unit_state"]
         self.on_notice = on_notice  # the owner's one-line word to the user (a toast)
         # Set when a systemd start was queued, the wait found no socket and
@@ -386,6 +389,25 @@ class ConnectionManager:
         import threading
 
         threading.Thread(target=fn, name="collins-reconnect", daemon=True).start()
+
+    @property
+    def last_error(self) -> str:
+        """The last reason given (a loss, a failed start, a failed connect),
+        bounded to `ERROR_MAX` for the banner."""
+        return self._last_error
+
+    @last_error.setter
+    def last_error(self, reason: str) -> None:
+        self._last_error = (reason or "")[:ERROR_MAX]
+
+    def _cancel_pending(self) -> None:
+        """Drop the scheduled retry or poll, if the owner's loop can."""
+        if self._pending is not None and self._cancel is not None:
+            try:
+                self._cancel(self._pending)
+            except Exception:
+                pass
+        self._pending = None
 
     @staticmethod
     def _default_find(app_id: str) -> tuple[str, str]:
@@ -559,12 +581,7 @@ class ConnectionManager:
         start, wait, connect, the banner meanwhile."""
         if self.stopped:
             return
-        if self._pending is not None and self._cancel is not None:
-            try:
-                self._cancel(self._pending)
-            except Exception:
-                pass
-        self._pending = None
+        self._cancel_pending()
         self._generation += 1  # a handshake or a start in flight is nobody's now
         self.link.close()
         self._use_transport(transport)
@@ -623,7 +640,10 @@ class ConnectionManager:
         self._set_state(CONNECTING)
         self.link.path = self.path  # the socket find named: the local one's or the forward's
         self.link.connect()
-        self.link.prove_local()
+        if self._transport is None:
+            # The proof is this device's and names this device's service; over
+            # a forward it would only be refused (D11): it never leaves.
+            self.link.prove_local()
         self._connected_how(self._systemd_regained())
         first = not self.connected_once
         self.connected_once = True
@@ -656,6 +676,11 @@ class ConnectionManager:
                 self._set_state(LOST)
             return
         self._generation += 1  # a handshake in flight is nobody's now
+        # A poll chain still running from a WAITING round (the forward died
+        # before it bound) is cancelled too: two chains would find the
+        # retry's socket together and shake hands twice (S1 of PR 623's
+        # review); `_poll` also stops on its own when the generation moved.
+        self._cancel_pending()
         self.last_error = reason
         self._set_state(LOST)
         if self.on_lost is not None:
@@ -708,7 +733,7 @@ class ConnectionManager:
             self._start_failed(exc, None)
             return False
         self._set_state(WAITING)
-        self._poll(self._now() + WAIT_S, _Wait())
+        self._poll(self._now() + WAIT_S, _Wait(), self._generation)
         return False
 
     def _start_async(self) -> None:
@@ -729,29 +754,35 @@ class ConnectionManager:
         if self.stopped or generation != self._generation or self.state != STARTING:
             return  # a loss, a switch or a newer attempt moved on meanwhile
         self._set_state(WAITING)
-        self._poll(self._now() + WAIT_S, _Wait())
+        self._poll(self._now() + WAIT_S, _Wait(), generation)
 
     def _start_failed(self, exc: BaseException, generation: int | None) -> None:
         if self.stopped or (generation is not None and generation != self._generation):
             return
         log.warning("connection: could not start the service: %s", exc)
+        self._cancel_pending()
         self.last_error = str(exc)
         self._set_state(LOST)
         self._retry_later()
 
-    def _poll(self, deadline: float, wait: _Wait) -> bool:
+    def _poll(self, deadline: float, wait: _Wait, generation: int | None = None) -> bool:
         """One poll of the socket; at *deadline* the rule of `_timeout_ask`
         decides, asked off the main loop, and its verdict lands in
-        `_timeout_verdict`."""
+        `_timeout_verdict`. *generation* is the round this chain belongs
+        to: a chain whose round a loss or a switch has ended stops here
+        rather than finding the next round's socket beside it (S1)."""
         if self.stopped:
             return False
         self._pending = None  # the timer that ran this poll (if one did) is spent
+        if generation is None:
+            generation = self._generation
+        elif generation != self._generation or self.state != WAITING:
+            return False
         self.path, found = self._find(self.app_id)
         if found == "live":
             self._try_connect()
             return False
         if self._now() >= deadline:
-            generation = self._generation
 
             def ask() -> None:
                 verdict, state = self._timeout_ask(wait)
@@ -759,14 +790,14 @@ class ConnectionManager:
 
             self._run_async(ask)
             return False
-        self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline, wait))
+        self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline, wait, generation))
         return False
 
     def _timeout_verdict(self, verdict: str, state: str, wait: _Wait, generation: int) -> None:
         if self.stopped or self.state != WAITING or generation != self._generation:
             return  # a loss or a newer attempt moved on meanwhile
         if verdict == EXTEND:
-            self._poll(self._now() + WAIT_S, wait)
+            self._poll(self._now() + WAIT_S, wait, generation)
             return
         if verdict == FAILED:
             self._mark_systemd_failed(state)  # the next attempt's start is the spawn fallback
@@ -783,7 +814,8 @@ class ConnectionManager:
             try:
                 self.link.path = self.path
                 self.link.connect()
-                self.link.prove_local()
+                if self._transport is None:
+                    self.link.prove_local()  # never over a forward (D11): see _connect
                 regained = self._systemd_regained()  # may ask systemctl: here, off the loop
             except Exception as exc:
                 error = exc  # the except name is cleared before the landing runs
@@ -859,12 +891,7 @@ class ConnectionManager:
         the old service is gone): the lost path, with no backoff."""
         if self.stopped:
             return
-        if self._pending is not None and self._cancel is not None:
-            try:
-                self._cancel(self._pending)
-            except Exception:
-                pass
-        self._pending = None
+        self._cancel_pending()
         self.attempts = 0
         self._set_state(LOST)
         self._retry()

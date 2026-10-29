@@ -730,7 +730,33 @@ ssh could read as an option cannot be spelled), `connectdialog.py` the
 `App.switch_connection` the switch: `open_tabs` flushed and frozen, every
 window's `detach_all_tabs()` (the quit's detach loop without the quit),
 `jobclient.reset`, then `ConnectionManager.switch`; `_on_connected(False)`
-resets the mirrors and reopens the new service's `open_tabs`. A tab's (and a
+resets the mirrors and reopens the new service's `open_tabs`. **From the
+review of PR 623 (ruled 2026-10-29):** the remote command runs through the
+box's login shell (`exec "$SHELL" -lc 'exec collins-service
+--print-socket'`, one fixed string, the app id validated inside it), since
+`ssh host cmd` gets a non-login PATH without `~/.local/bin`; the printed
+path is taken only when it matches `sshforward.SOCKET_PATH_RE` (ssh
+expands `${VAR}` and `%u` of a `-L` path on the client, so an attacker's
+line would pick this device's variables); `RemoteCommand=none` and
+`RequestTTY=no` join `ControlMaster=no`; each forward writes
+`<id>.pid` beside its socket (ssh pid, client pid, socket) and
+`Forward.start` ends a recorded forward whose cmdline is still that `-L`
+before unlinking, while `sweep_orphans` at app start ends those whose
+client pid no longer lives (no `PR_SET_PDEATHSIG`: `preexec_fn` in a
+threaded client, and the signal is per parent thread); `RemoteTransport`
+takes a lock so a `stop` landing during `--print-socket` or right after
+the spawn leaves no child (`start` raises `ForwardError("stopped")`), and
+`self.forward` is set before `start()` so a death in the first instant is
+reported; a protocol mismatch over a forward never offers *Restart
+Service* (`quitrules.mismatch_words`: *Connect to This Computer*, the body
+names the side to upgrade; the forward is stopped before any exit); the
+`local` proof is not sent over a forward at all; `_on_link_lost` cancels
+a WAITING round's poll chain and `_poll` stops when its generation moved
+(two chains once shook hands twice); `detach_all_tabs` drops a page's
+settling state (`_closing_pages`, `_bg_closing`, `_close_asking`,
+`_bg_queue`) so every page leaves the old service instead of re-attaching
+its old pty id on the new one; `expect_restart` is skipped for a remote
+restart (the pid is the box's). A tab's (and a
 panel shell's) client is an `api.client.PtyClient` from
 `terminal._pty_client`: `request`, `send_input`, `send_event`, `close`, fed the
 output frames and events of the ptys it spawned or attached. Tests and
