@@ -520,7 +520,9 @@ alone; nothing in the second list affects *Restart to apply*. Every call
 that means *whose grants* passes the box; the workspace is passed only
 where `grant_reason` and the defaults need it and as the folder
 chooser's starting point. *Allow a directory…*
-(`Gtk.FileDialog.select_folder`, modal, closes the popover — so the verdict
+(`choosers.choose_folder`: the desktop's folder chooser for a `local`
+client, the path picker over the service's folders otherwise; either
+closes the popover — so the verdict
 goes out as a toast either way) is `allow_directory`: a `sandbox.allow`
 request (scope ``session``), on whose service `host.allow` decides —
 its refusal is a toast and ends there; then `grants.allow(workspace,

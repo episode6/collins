@@ -60,6 +60,17 @@ downloads of each version, see the
   Collins speaks another protocol gets a dialog naming the side to
   upgrade, never a *Restart service*. See
   [A service on another machine](/guide/remote).
+- **A folder on the box is picked on the box.** When the service is on
+  another machine, every chooser that picks a folder it will use (a new
+  session's, *Add project*, *Continue*, a new chat, the clone
+  destination, a sandbox's *Allow a directory…*) opens Collins' own path
+  picker over the box's filesystem: a path entry where `~` is the box's
+  home and Tab completes, the box's home and the sidebar's projects as
+  shortcuts, *Show hidden*, *New folder*. The composer's *Attach file*
+  stays your desktop's chooser and sends the picked file to the box, as a
+  dropped file is, and the copy is what the agent is told about. On the
+  service's machine both are as they were. See [Picking a folder on the
+  box](/guide/remote#picking-a-folder-on-the-box).
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch

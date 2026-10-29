@@ -152,6 +152,16 @@ Enter opens, Esc closes.
   and reconnects. `collins --connect NAME` does the same from a terminal
   (`local` names this computer); the connection used last is the next
   launch's. See [A service on another machine](/guide/remote).
+- **The path picker.** A window on another machine than its service
+  picks every folder the service will use — a new session's, *Add
+  project*, *Continue*, a new chat, the clone destination, a sandbox's
+  *Allow a directory…* — in Collins' own picker over the box's
+  filesystem: a path entry (`~` is the box's home; typing filters after
+  a 300 ms pause, Tab completes), the box's home and the sidebar's
+  projects as shortcuts, *Up*, *Show hidden* (off at every open) and *New
+  folder*, a link to a folder marked and followed like any folder. On the
+  service's machine the desktop's chooser opens as before. See [Picking a
+  folder on the box](/guide/remote#picking-a-folder-on-the-box).
 - **Local extras.** Every path Collins shows is a path on the service's
   machine. A window running on that same machine proves it when it
   connects, and keeps the things that hand such a path to something on
@@ -445,7 +455,10 @@ belongs to its session, and it is there when you come back to it.
   what the prompt mentions; files
   copied or dropped from a file manager are mentioned in place, or sent
   over as copies (64 MiB each at most) when Collins runs on another machine
-  than its service.
+  than its service. The attach button's chooser is this computer's either
+  way: on the service's machine the picked file is mentioned in place,
+  from another machine it is sent over the same way and the copy is
+  mentioned.
 - **Floating or docked.** The composer floats translucent over the
   terminal; its dock button turns it into a panel below the terminal
   instead, where it stays for that session's later visits.

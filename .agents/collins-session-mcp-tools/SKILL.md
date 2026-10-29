@@ -221,8 +221,9 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
 - `set_session_title` — writes Collins' manual name slot (beats generated and
   CLI titles).
 - `open_in_editor` — resolves a path against the tab's live cwd and editor
-  root (`ToolClient.resolve_file`; a `~` path is the service's `fs.stat`,
-  which expands it with the service's home, PR-3.0 item 4), opens it at a
+  root (`ToolClient.resolve_file`: every trial, at most two, is the
+  service's `fs.stat`, D54 (7); a `~` path is expanded there with the
+  service's home, PR-3.0 item 4), opens it at a
   line (`window.open_in_tab_editor`, which honours the pop-out rule).
 - `show_diff` — opens the git page quietly on the working tree / index /
   branch / a commit (`open_git_page(focus=False)`), waits for the read to
