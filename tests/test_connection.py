@@ -1,7 +1,8 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """The connection manager (collins.connection, spec §3.20) with a fake
 transport: start → wait → connect → lost → backoff → reconnect →
-resubscribe, the systemd-or-spawn starter, and the backoff ladder."""
+resubscribe, the systemd-or-spawn starter, the backoff ladder, and the
+remote path (a transport in place of find and start, §3.24)."""
 
 import os
 
@@ -666,3 +667,201 @@ def test_a_restart_wait_that_outlives_its_bound_proceeds():
         if world.started:
             break
     assert world.started == ["com.example.Test"]
+
+
+# ---- remote: a transport in place of find and start (spec §3.24, PR-3.1) ---------------
+
+
+class FakeTransport:
+    """What `sshforward.RemoteTransport` offers the manager, with the
+    forward's fate in the test's hands."""
+
+    def __init__(self, world, name="box", start_fails=0):
+        self.world = world
+        self.name = name
+        self.path = "/run/user/1/collins/remote/aaaa.sock"
+        self.forward_up = False
+        self.starts = 0
+        self.start_fails = start_fails
+        self.failed_connects = 0
+        self.restart_wanted = False
+        self.stopped = 0
+
+    def find(self, app_id):
+        if not self.forward_up or self.restart_wanted:
+            return self.path, "none"
+        return self.path, "live"
+
+    def start(self, app_id):
+        self.starts += 1
+        if self.start_fails > 0:
+            self.start_fails -= 1
+            raise OSError("ssh could not connect to box: Permission denied")
+        self.restart_wanted = False
+        self.forward_up = True
+        return "forward"
+
+    def connect_failed(self):
+        self.failed_connects += 1
+        self.restart_wanted = True
+
+    def stop(self):
+        self.stopped += 1
+        self.forward_up = False
+
+    def die(self, text="ssh to box ended: Connection closed by remote host"):
+        """The forward child exited: what the transport lands as `lost`."""
+        self.forward_up = False
+        self.world.manager.lost(text)
+
+
+def test_start_remote_starts_the_forward_and_connects_on_its_socket():
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    assert transport.starts == 1 and world.started == []  # the local starter is not touched
+    assert world.manager.started_how == "forward" and world.manager.is_remote
+    assert world.states == ["starting", "waiting", "connecting", "connected"]
+    assert world.link.path == transport.path  # the link dials the forward's local socket
+    assert world.link.proved == 1  # the proof is sent; the service refuses it (D11)
+
+
+def test_start_remote_raises_the_starts_word():
+    world = World(live=False)
+    transport = FakeTransport(world, start_fails=1)
+    try:
+        world.manager.start_remote(transport)
+    except OSError as exc:
+        assert "Permission denied" in str(exc)
+        assert world.manager.last_error == str(exc)
+    else:
+        raise AssertionError("expected OSError")
+
+
+def test_start_remote_gives_up_when_the_forwards_socket_never_answers():
+    from collins.api.client import ConnectionLost
+
+    world = World(live=False)
+    transport = FakeTransport(world)
+    transport.find = lambda app_id: (transport.path, "none")  # the forward never binds
+    try:
+        world.manager.start_remote(transport, wait_s=1.0)
+    except ConnectionLost:
+        pass
+    else:
+        raise AssertionError("expected ConnectionLost")
+    # A forward start is never systemd's: no unit is asked, the round is over.
+    assert transport.starts == 1
+
+
+def test_the_forwards_death_is_lost_and_the_retry_restarts_it():
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    transport.die()
+    assert world.manager.state == "lost"
+    assert world.lost == ["ssh to box ended: Connection closed by remote host"]
+    assert world.manager.last_error == world.lost[0]
+    assert [ms for ms, _ in world.timers] == [1000]
+    for _ in range(6):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected"
+    assert transport.starts == 2 and world.link.connects == 2
+    assert world.connected == [True, False]
+
+
+def test_a_failed_hello_over_a_live_forward_restarts_the_remote_service():
+    """The forward accepts (ssh is up) but nobody answers (the remote
+    service died): the manager tells the transport, whose next find says
+    none, so the start runs --print-socket again."""
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    world.link.fail_connects = 1
+    world.link.on_lost("primary: the service closed the connection")
+    world.fire()  # the retry: find says live (the forward is up), connect fails
+    for _ in range(3):
+        if transport.failed_connects:
+            break
+        world.fire()
+    assert transport.failed_connects == 1 and transport.restart_wanted
+    assert world.manager.state == "lost"
+    for _ in range(8):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert transport.starts == 2 and world.manager.state == "connected"
+
+
+def test_a_failed_remote_start_backs_off_with_its_word():
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    transport.start_fails = 1
+    transport.die("ssh to box ended: exit 255")
+    world.fire()  # the retry's start fails
+    assert world.manager.state == "lost"
+    assert "Permission denied" in world.manager.last_error
+    assert [ms for ms, _ in world.timers] == [2000]  # the ladder goes on
+    for _ in range(8):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected" and transport.starts == 3
+
+
+def test_switch_closes_the_link_stops_the_old_transport_and_connects_the_new():
+    world = World(live=True)
+    world.manager.start_local()
+    assert not world.manager.is_remote
+    transport = FakeTransport(world)
+    world.manager.switch(transport, "switching to box")
+    # No loss is reported for the deliberate close; the owner hears on_lost
+    # with the switch's reason, then the new round runs at once.
+    assert world.link.closed >= 1
+    assert world.lost == ["switching to box"]
+    for _ in range(6):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected" and transport.starts == 1
+    assert world.link.path == transport.path and world.manager.is_remote
+    assert world.connected == [True, False]
+    # And back to the local service: the transport is stopped, the local
+    # find and start are in place again.
+    world.manager.switch(None, "switching to this computer")
+    assert transport.stopped == 1 and not world.manager.is_remote
+    for _ in range(6):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected" and world.link.path == "/tmp/x/api.sock"
+    assert world.started == []  # the local service was live: no start
+
+
+def test_switch_cancels_a_retry_in_flight_and_a_late_landing_is_ignored():
+    world = World(live=True)
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("closed")  # a retry is scheduled
+    assert world.timers
+    transport = FakeTransport(world)
+    cancelled = []
+    world.manager._cancel = cancelled.append
+    world.manager.switch(transport)
+    assert cancelled  # the pending retry was cancelled
+    for _ in range(6):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected" and world.manager.is_remote
+
+
+def test_stop_stops_the_transport():
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    world.manager.stop()
+    assert transport.stopped == 1 and world.link.closed >= 1

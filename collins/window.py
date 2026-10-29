@@ -32,6 +32,7 @@ from . import (
     chats,
     checkouts,
     clonedialog,
+    connectdialog,
     contextmenu,
     desktopentry,
     dialogs,
@@ -1098,9 +1099,14 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._quit_requested = False
 
-    def set_reconnecting(self, reconnecting: bool) -> None:
-        """Raise or lower the reconnect banner (`App._on_connection_state`)."""
+    def set_reconnecting(self, reconnecting: bool, name: str = "", detail: str = "") -> None:
+        """Raise or lower the reconnect banner (`App._on_connection_state`).
+        *name* is a remote connection's ("Reconnecting to <name>", §3.24),
+        "" for the local service; *detail* the last reason given (ssh's
+        last line), shown after it."""
         self._banner_reconnecting = bool(reconnecting)
+        self._banner_name = name or ""
+        self._banner_detail = detail or ""
         self._sync_service_banner()
 
     def set_restart_pending(self, pending: bool) -> None:
@@ -1114,7 +1120,15 @@ class MainWindow(Adw.ApplicationWindow):
         if banner is None:
             return
         if self._banner_reconnecting:
-            banner.set_title(_("Reconnecting to the Collins service"))
+            name = getattr(self, "_banner_name", "")
+            if name:
+                title = _("Reconnecting to {name}").format(name=name)
+                detail = getattr(self, "_banner_detail", "")
+                if detail:
+                    title = f"{title}: {detail}"
+                banner.set_title(title)
+            else:
+                banner.set_title(_("Reconnecting to the Collins service"))
             banner.set_button_label(None)
             banner.set_revealed(True)
         elif self._banner_restart_pending:
@@ -1669,6 +1683,8 @@ class MainWindow(Adw.ApplicationWindow):
             "undo-archive": lambda *_: self._undo_archive_now(),
             # The app menu's *Restart service* (§3.21).
             "restart-service": lambda *_: self._ask_restart_service(),
+            # The app menu's *Connect to…* (§3.24): the connections dialog.
+            "connect-to": lambda *_: self._open_connect_dialog(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
@@ -5871,6 +5887,34 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._ask_save_editors([tab], go)
         return True
+
+    def detach_all_tabs(self) -> None:
+        """A switch of connections (§3.24, D2: `App.switch_connection`):
+        every tab closes with no question and its session keeps running on
+        the service it belongs to — the quit's `do_detach` without the quit.
+        A page mid-close drains as it would; an unstarted New Thread or a
+        shell left after its CLI ends with the tab (quitrules). The app has
+        recorded and frozen `open_tabs` before this, so the closes write
+        nothing over the list that brings these tabs back."""
+        pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
+        for page in pages:
+            self._close_ok.add(page)
+            tab = page.get_child()
+            if not isinstance(tab, TerminalTab) or self._page_settling(page):
+                continue
+            fate = self._quit_fate(tab, "detach")
+            if fate == quitrules.DETACH:
+                self._detached_pages.add(page)
+            elif fate == quitrules.RELEASE:
+                self._confirmed_closes.add(page)
+        for page in pages:
+            self.tab_view.close_page(page)
+
+    def _open_connect_dialog(self) -> None:
+        app = self.get_application()
+        if not hasattr(app, "switch_connection"):
+            return
+        connectdialog.ConnectDialog(app).present(self)
 
     def _ask_restart_service(self) -> None:
         """*Restart service* (§3.21): the blast radius first — the sessions

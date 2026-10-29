@@ -1558,6 +1558,9 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("Show archived sessions"), "win.show-archived")
         menu.append(_("Delete archived sessions…"), "win.trash-archived")
         menu.append(_("MCP servers"), "win.mcp-servers")
+        # Which Collins service this window shows: this machine's, or one
+        # reached over ssh (split-service spec §3.24).
+        menu.append(_("Connect to…"), "win.connect-to")
         menu.append(_("Keyboard Bindings"), "win.keyboard-bindings")
         menu.append(_("Preferences"), "win.preferences")
         # Only when nothing has put Collins in the app grid yet: a pip or pipx

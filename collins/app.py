@@ -25,6 +25,7 @@ from . import (
     apilink,
     buildinfo,
     connection,
+    connections,
     desktopentry,
     dialogs,
     ghwelcome,
@@ -42,9 +43,11 @@ from . import (
     remotefiles,
     remotegit,
     sandboxstatus,
+    sshforward,
     statusicon,
     tooltipmute,
     traymodel,
+    uistate,
     updatecheck,
     welcome,
 )
@@ -60,6 +63,7 @@ from .remotenotify import RemoteNotifications
 from .remoteprs import RemotePrStore
 from .remotestate import RemoteState
 from .remotestore import RemoteStore
+from .state import _ui_state_file, device_defaults
 from .toolclient import ToolClient
 from .window import HIDE_NOTICE_ID, MainWindow, session_window
 
@@ -1564,6 +1568,18 @@ class App(Adw.Application):
             _("Install the desktop entry, app icon and metainfo for the current user"),
             None,
         )
+        # `--connect NAME` (split-service spec §3.24, PR-3.1): the connection
+        # to open, by its name in the connect dialog's list; "local" is the
+        # service on this machine. A running instance switches to it.
+        self.add_main_option(
+            "connect",
+            0,
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.STRING,
+            _("Connect to a saved connection by name (\"local\" for this computer)"),
+            "NAME",
+        )
+        self._connect_request: str | None = None
 
     def do_handle_local_options(self, options: GLib.VariantDict) -> int:
         """Handle --install-desktop here in the local process, and exit.
@@ -1571,9 +1587,25 @@ class App(Adw.Application):
         Returning a non-negative value is how a GApplication says "done, exit
         with this code" before anything registers or activates — no display is
         touched, so this works over ssh and on a machine with no session.
+
+        `--connect NAME` is kept for `_start_service` when this process
+        becomes the primary instance, and handed to the running one as its
+        `connect` action otherwise (the GApplication idiom: register here,
+        and `get_is_remote` says which this process is).
         """
         if options.contains("install-desktop"):
             return desktopentry.install_cli()
+        name = options.lookup_value("connect", GLib.VariantType("s"))
+        if name is not None:
+            self._connect_request = name.get_string()
+            try:
+                self.register(None)
+            except GLib.Error as exc:
+                log.warning("could not register the application: %s", exc)
+                return -1
+            if self.get_is_remote():
+                self.activate_action("connect", GLib.Variant.new_string(self._connect_request))
+                return 0
         return -1
 
     def do_startup(self) -> None:
@@ -1662,6 +1694,11 @@ class App(Adw.Application):
         new_window = Gio.SimpleAction.new("new-window", None)
         new_window.connect("activate", lambda *_: self._new_window())
         self.add_action(new_window)
+
+        # `collins --connect NAME` reaching a running instance (§3.24).
+        connect_action = Gio.SimpleAction.new("connect", GLib.VariantType("s"))
+        connect_action.connect("activate", self._on_connect_action)
+        self.add_action(connect_action)
 
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", lambda *_: self.quit_all_windows())
@@ -2188,10 +2225,112 @@ class App(Adw.Application):
         # A restart that waits for the sessions to be idle, by the pid of
         # the service asked (restart_service).
         self._restart_idle_pid: int | None = None
+        # The connections this device knows (§3.24): one UiState, shared
+        # with the state mirror so ui-state.json has one writer here.
+        self._ui = uistate.UiState(_ui_state_file(), device_defaults())
+        self.connections = connections.Connections(self._ui)
+        self.current_connection = connections.LOCAL
+        self._start_connection(self._initial_connection())
+
+    def _initial_connection(self) -> connections.Connection:
+        """`--connect NAME` when given, else the connection used last
+        (`last_connection`), else the local service. An unknown name is
+        said and the local service taken."""
+        request = self._connect_request
+        if request:
+            connection = self.connections.find(request)
+            if connection is not None:
+                return connection
+            log.warning("--connect: no connection named %r; connecting locally", request)
+            return connections.LOCAL
+        return self.connections.last or connections.LOCAL
+
+    def _start_connection(self, connection: connections.Connection) -> None:
+        """The first connect, blocking (no window exists yet). A local
+        service that cannot be reached is fatal, as before; a remote one
+        that cannot be reached is asked about: connect to this computer
+        instead, or quit."""
+        if connection.is_local:
+            self.current_connection = connections.LOCAL
+            self.connections.set_last(None)
+            try:
+                self._connection.start_local()
+            except ProtocolMismatch as mismatch:
+                self._mismatch_at_startup(mismatch)
+            return
+        self.current_connection = connection
+        self.connections.set_last(connection)
         try:
-            self._connection.start_local()
+            self._connection.start_remote(self._transport_for(connection))
         except ProtocolMismatch as mismatch:
             self._mismatch_at_startup(mismatch)
+        except Exception as exc:  # ConnectionLost, ForwardError
+            log.warning("could not connect to %s: %s", connection.name, exc)
+            answer = self._ask_before_any_window(
+                _("Could not connect to {name}").format(name=connection.name),
+                _("{detail}\n\nConnect to the Collins service on this computer instead?").format(
+                    detail=self._connection.last_error or str(exc)
+                ),
+                [("local", _("Connect to This Computer"), "suggested")],
+            )
+            if answer != "local":
+                log.info("quitting: the remote connection failed")
+                sys.exit(0)
+            self._start_connection(connections.LOCAL)
+
+    def _transport_for(self, connection: connections.Connection) -> sshforward.RemoteTransport:
+        """The ssh forward for *connection*, its exit landing on the main
+        loop as the manager's `lost`."""
+        return sshforward.RemoteTransport(
+            connection,
+            on_lost=lambda text: self._connection.lost(text),
+            land=lambda fn: GLib.idle_add(
+                lambda: (fn(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT
+            ),
+        )
+
+    def switch_connection(self, connection: connections.Connection) -> None:
+        """Change services while running (D2: one at a time; the connect
+        dialog's *Connect*, the `connect` action): the open tabs are
+        recorded for the service they belong to, every tab detaches with no
+        question (its session runs on where it is), the connection manager
+        closes the link and connects to the new service, and
+        `_on_connected` resets the mirrors and reopens that service's
+        tabs. The banner says "Reconnecting to <name>" meanwhile."""
+        if connection.id == self.current_connection.id or self._connection is None:
+            return
+        log.info("switching to connection %r (%s)", connection.name, connection.kind)
+        self._flush_open_tabs()
+        self._open_tabs_frozen = True
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.detach_all_tabs()
+        jobclient.reset(self._service_link)
+        self._set_restart_pending(None)
+        self.current_connection = connection
+        self.connections.set_last(connection)
+        transport = None if connection.is_local else self._transport_for(connection)
+        self._connection.switch(
+            transport,
+            _("Switching to {name}").format(name=self.connection_label()),
+        )
+
+    def connection_label(self) -> str:
+        """The connection's name as the banner says it; "" for the local service."""
+        connection = getattr(self, "current_connection", None)
+        if connection is None or connection.is_local:
+            return ""
+        return connection.name
+
+    def _on_connect_action(self, _action, param: GLib.Variant) -> None:
+        """`app.connect NAME` (a second `collins --connect NAME` reaching the
+        running instance): switch, or say the name is unknown."""
+        name = param.get_string()
+        connection = self.connections.find(name)
+        if connection is None:
+            self._show_refused_write(_("No connection is named {name}").format(name=name))
+            return
+        self.switch_connection(connection)
 
     def _find_service(self, app_id: str):
         from .api import server as api_server
@@ -2209,7 +2348,7 @@ class App(Adw.Application):
         # Every other ask of the service (PRs, jobs, tools, token use)
         # goes over the same connection (apilink.current).
         apilink.set_current(link)
-        self.state = RemoteState(link, on_refused=self._show_refused_write)
+        self.state = RemoteState(link, ui=self._ui, on_refused=self._show_refused_write)
         # The PR hub too is mirrored (remoteprs): the service keeps it, gh runs
         # there, and the same subscribe fills the copy.
         self.store = RemoteStore(link, self.state, pr_store=RemotePrStore(link))
@@ -2274,9 +2413,14 @@ class App(Adw.Application):
 
     def _on_connection_state(self, state: str) -> None:
         reconnecting = state not in ("connected", "mismatch") and getattr(self, "store", None) is not None
+        # A remote connection's banner names it and carries the last reason
+        # given (ssh's last line, a failed start's word: §3.24); the local
+        # service's banner reads as before.
+        name = self.connection_label()
+        detail = self._connection.last_error if name and self._connection is not None else ""
         for window in self.get_windows():
             if isinstance(window, MainWindow):
-                window.set_reconnecting(reconnecting)
+                window.set_reconnecting(reconnecting, name=name, detail=detail)
 
     def _on_connection_notice(self, msgid: str) -> None:
         """The connection manager's one word to the user (the systemd unit
