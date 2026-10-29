@@ -23,6 +23,8 @@ apart.
 
 from __future__ import annotations
 
+from . import mcptools
+
 # The page's groups, top to bottom. "cli" is the untitled pair of rows above
 # everything (which claude Collins runs); the rest are titled groups.
 GROUPS: tuple[str, ...] = (
@@ -65,6 +67,44 @@ GROUP_SIDES: dict[str, str] = {
     "git": "mixed",
     "caffeine": "device",
     "editor": "device",
+}
+
+# The settings each group's rows write (the service-and-client spec, §3.24;
+# PR-3.3), by group, in no particular order. Prefs builds a group from the
+# rows whose setting is listed here, and a "mixed" group (GROUP_SIDES) is
+# two groups of one title, one per page: the rows whose setting is in
+# state.SERVICE_SETTINGS on the Service page, the rest on This device.
+# tests/test_state_split.py pins every group's side against
+# state.SERVICE_SETTINGS / DEVICE_SETTINGS, so a setting cannot sit in a
+# group on the wrong side of the split.
+GROUP_SETTINGS: dict[str, tuple[str, ...]] = {
+    "cli": ("claude_cli_path",),
+    "general": ("language", "color_scheme", "status_icon", "show_tab_bar", "show_folder_path",
+                "project_icon_size", "panel_tab_drag_handles", "clone_directory",
+                "check_for_updates", "show_usage_panel"),
+    "token_use": ("title_model", "icon_model", "auto_renew_login"),
+    "mcp_tools": tuple(mcptools.default_tool_settings()),
+    "sessions": ("archive_running_session", "quit_with_running_sessions", "restore_last_session",
+                 "archive_worktree", "archive_on_claude_ai", "auto_delete_archived_after",
+                 "auto_delete_archived_unit", "cli_title_sessions", "pr_title_sessions",
+                 "attach_prompt_prs", "background_status_poll", "progress_termprop"),
+    "sandbox": ("sandbox_new_sessions", "sandbox_bypass_permissions", "sandbox_share_gh",
+                "sandbox_share_ssh", "sandbox_settings_editable",
+                *mcptools.default_sandbox_tool_settings()),
+    "notifications": ("inapp_notifications", "notification_color_scheme", "notification_sound",
+                      "bell_notifications", "announce_finished_runs"),
+    "composer": ("composer_enter_sends", "composer_on_typing", "composer_spell_click",
+                 "attach_overlay_button"),
+    "terminal": ("font", "scrollback", "terminal_theme", "terminal_max_width", "easy_copy_paste"),
+    "footer_apps": ("footer_apps",),
+    "pull_requests": ("pr_font_scale", "pr_inline_images", "open_pr_panel_on_attach",
+                      "confirm_merges", "refresh_prs_on_launch"),
+    "git": ("git_layout", "git_line_numbers", "git_wrap_lines", "git_word_diff",
+            "git_hide_whitespace", "git_untracked", "git_log_page", "git_parent_branch"),
+    "caffeine": ("caffeine_on_launch", "caffeine_launch_timer", "caffeine_idle_grace_minutes",
+                 "caffeine_keep_screen_on"),
+    "editor": ("editor_style_scheme", "editor_font", "editor_show_line_numbers",
+               "editor_show_hidden_files", "editor_narrow_width", "editor_pop_out_screen_width"),
 }
 
 # The Token use group's rows, top to bottom, by the setting each one writes.

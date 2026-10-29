@@ -4,7 +4,7 @@
 spend the user's Claude quota sit together, directly under General."""
 
 from collins import prefslayout, tokenrefresh
-from collins.state import DEFAULT_SETTINGS
+from collins.state import DEFAULT_SETTINGS, SERVICE_SETTINGS
 
 
 def test_token_use_sits_directly_under_general():
@@ -21,6 +21,25 @@ def test_mcp_tools_follow_token_use():
 
 def test_the_page_starts_with_the_cli_rows():
     assert prefslayout.GROUPS[:2] == ("cli", "general")
+
+
+def test_every_group_has_its_settings_and_each_setting_one_group():
+    assert set(prefslayout.GROUP_SETTINGS) == set(prefslayout.GROUPS)
+    seen: dict[str, str] = {}
+    for group, keys in prefslayout.GROUP_SETTINGS.items():
+        for key in keys:
+            assert key in DEFAULT_SETTINGS, (group, key)
+            assert key not in seen, (key, seen.get(key), group)
+            seen[key] = group
+
+
+def test_a_mixed_group_has_rows_on_both_sides_and_the_others_on_one():
+    for group, side in prefslayout.GROUP_SIDES.items():
+        halves = {
+            "service" if key in SERVICE_SETTINGS else "device"
+            for key in prefslayout.GROUP_SETTINGS[group]
+        }
+        assert halves == ({"service", "device"} if side == "mixed" else {side}), group
 
 
 def test_group_names_are_unique():

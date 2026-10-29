@@ -153,7 +153,9 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
   - `favorites` / `archived`: lists of uuids (a project whose sessions are all
     favorited or archived shows an empty header — count 0).
   - `expanded_groups`: groups start **collapsed**; list `"proj:<project-name>"`
-    for each project plus `"fav:"` for favorites.
+    for each project plus `"fav:"` for favorites. (The fold state is the
+    device's since PR-3.3: a fresh `ui-state.json` takes this list once, as
+    its seed; an existing one keeps its own.)
   - `settings`: set `"welcome_seen": true` (otherwise the first-launch
     welcome dialog — collins/welcome.py — opens over every shot; leave it
     unset only to shoot that dialog), `"title_model": "none"` (otherwise

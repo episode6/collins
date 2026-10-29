@@ -391,6 +391,11 @@ downloads of each version, see the
   It now copies every subpackage, installs the service's command and user
   unit, and depends on `gir1.2-soup-3.0` (and the markdown libraries); CI
   installs the built .deb into a scratch root and imports the app from it.
+- **Which sidebar groups are expanded is this device's.** The fold state
+  used to be kept by the service, so a laptop and a phone's window sharing
+  one service folded each other's sidebars. It is now kept in this
+  device's own file, per service; the first time a device meets a service
+  it takes the service's old value, once, so nothing refolds.
 
 ### v0.1.4 — 2026-09-27
 

@@ -22,7 +22,8 @@ the app reads, are in
   of its title — icon included, shown as a caret under the pointer — folds
   and unfolds the group, as do ←/→ on a focused header (plus a
   collapse-all/expand-all toggle). Which projects are expanded is
-  remembered across restarts, and **dragging a project header** reorders
+  remembered across restarts, per device (a second computer on the same
+  service folds its own sidebar), and **dragging a project header** reorders
   the projects — the order is yours and persists.
 - A **Favorites** section pinned on top — star any session to move it there.
 - **Compact single-line rows**: name, relative time, status — with an

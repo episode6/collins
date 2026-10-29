@@ -152,42 +152,8 @@ def test_the_service_scoped_settings_are_device_settings():
     assert uistate.DEVICE_RECORDS == ("panel_layout", "editor_states")
 
 
-# Each Preferences group's side, with the settings that decide it: every
-# group is pinned, and a group's side has to agree with the lists for
-# every setting it builds (prefs.py's _build_*_group).
-GROUP_SETTINGS = {
-    "cli": ("claude_cli_path",),
-    "general": ("language", "color_scheme", "status_icon", "show_tab_bar", "show_folder_path",
-                "project_icon_size", "panel_tab_drag_handles", "clone_directory",
-                "check_for_updates", "show_usage_panel"),
-    "token_use": ("title_model", "icon_model", "auto_renew_login"),
-    "mcp_tools": tuple(mcptools.default_tool_settings()),
-    "sessions": ("archive_running_session", "quit_with_running_sessions", "restore_last_session",
-                 "archive_worktree", "archive_on_claude_ai", "auto_delete_archived_after",
-                 "auto_delete_archived_unit", "cli_title_sessions", "pr_title_sessions",
-                 "attach_prompt_prs", "background_status_poll", "progress_termprop"),
-    "sandbox": ("sandbox_new_sessions", "sandbox_bypass_permissions", "sandbox_share_gh",
-                "sandbox_share_ssh", "sandbox_settings_editable",
-                *mcptools.default_sandbox_tool_settings()),
-    "notifications": ("inapp_notifications", "notification_color_scheme", "notification_sound",
-                      "bell_notifications", "announce_finished_runs"),
-    "composer": ("composer_enter_sends", "composer_on_typing", "composer_spell_click",
-                 "attach_overlay_button"),
-    "terminal": ("font", "scrollback", "terminal_theme", "terminal_max_width", "easy_copy_paste"),
-    "footer_apps": ("footer_apps",),
-    "pull_requests": ("pr_font_scale", "pr_inline_images", "open_pr_panel_on_attach",
-                      "confirm_merges", "refresh_prs_on_launch"),
-    "git": ("git_layout", "git_line_numbers", "git_wrap_lines", "git_word_diff",
-            "git_hide_whitespace", "git_untracked", "git_log_page", "git_parent_branch"),
-    "caffeine": ("caffeine_on_launch", "caffeine_launch_timer", "caffeine_idle_grace_minutes",
-                 "caffeine_keep_screen_on"),
-    "editor": ("editor_style_scheme", "editor_font", "editor_show_line_numbers",
-               "editor_show_hidden_files", "editor_narrow_width", "editor_pop_out_screen_width"),
-}
-
-
 def test_the_prefslayout_sides_agree_with_the_split():
-    assert set(prefslayout.GROUP_SIDES) == set(prefslayout.GROUPS) == set(GROUP_SETTINGS)
+    assert set(prefslayout.GROUP_SIDES) == set(prefslayout.GROUPS) == set(prefslayout.GROUP_SETTINGS)
     assert prefslayout.GROUP_SIDES == {
         "cli": "service",
         "general": "mixed",
@@ -204,7 +170,7 @@ def test_the_prefslayout_sides_agree_with_the_split():
         "caffeine": "device",
         "editor": "device",
     }
-    for group, keys in GROUP_SETTINGS.items():
+    for group, keys in prefslayout.GROUP_SETTINGS.items():
         for key in keys:
             assert key in DEFAULT_SETTINGS, (group, key)
         sides = {"service" if key in SERVICE_SETTINGS else "device" for key in keys}
@@ -212,10 +178,10 @@ def test_the_prefslayout_sides_agree_with_the_split():
         assert prefslayout.GROUP_SIDES[group] == expected, group
     for key in prefslayout.TOKEN_USE_ROWS:
         if key != "model_list":
-            assert key in GROUP_SETTINGS["token_use"]
+            assert key in prefslayout.GROUP_SETTINGS["token_use"]
     for key in prefslayout.SANDBOX_ROWS:
         if key not in ("status", "sandbox_tools"):
-            assert key in GROUP_SETTINGS["sandbox"]
+            assert key in prefslayout.GROUP_SETTINGS["sandbox"]
 
 
 # -- a v0.1.4 state.json, migrated ----------------------------------------
@@ -322,6 +288,11 @@ def test_first_start_migrates_with_every_key_accounted_for(app_state, v014):
     assert block["panel_layout"] == v014["panel_layout"]
     assert block["editor_states"] == v014["editor_states"]
     assert block["open_tabs"] == []
+    # The fold state stays in the service's file as it was (frozen, PR-3.3)
+    # and the block has not chosen yet: its first read takes the service's.
+    assert service["expanded_groups"] == ["proj:proj"]
+    assert "expanded_groups" not in block
+    assert state.is_group_expanded("proj:proj")
     assert uistate._is_id(ui["client_id"])
     assert ui["connections"] == []
     assert ui["last_connection"] == ""
