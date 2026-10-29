@@ -11,6 +11,8 @@ with a lightbox overlay:
 - a texture dropped on the composer is uploaded (`PUT /api/upload`) into
   the service's pending uploads (the bare view has no session: D37), the
   mention names the upload, and the thumbnail fills from the blob GET;
+  a third link on another device is refused that upload (PR-3.5: a
+  pending upload is served to the device that sent it only);
 - a file dropped by the client that isn't `local` is uploaded under its
   basename and the mention names the upload, never the client's path; the
   `local` client's mention names the dropped file itself and nothing is
@@ -202,6 +204,16 @@ def main() -> int:
         len(pictures_) == 1 and pictures_[0].get_paintable() is not None,
     )
     check("…and nothing was reported", notes == [], notes)
+    # PR-3.5: the pending folder is every device's, so the drop is served
+    # back to the device that sent it and to no other client that is not
+    # local (a second device on the same service).
+    phone = SocketLink(api_server.socket_path(app_id), app_id="", device="phone")
+    phone.connect()
+    mine = remote.http_get(blobcache.file_url(upload))[0]
+    theirs = phone.http_get(blobcache.file_url(upload))[0]
+    check("…served to the device that dropped it", mine == 200, mine)
+    check("…and refused to another device", theirs == 403, theirs)
+    phone.close()
     window.close()
 
     # -- a dropped file: uploaded for a remote client, its own path for a local one --

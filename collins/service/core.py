@@ -167,6 +167,7 @@ from .. import (
     sessions,
     trust,
 )
+from .. import uploads as uploads_mod
 from ..api import protocol
 from ..i18n import N_, english
 from ..shellinput import shell_command
@@ -323,6 +324,9 @@ class ServiceCore:
         # The files a session's transcript says were delivered, each by the
         # path it resolved to when first seen (D51): what `as=file` admits.
         self.delivered_files = blobs_mod.DeliveredFiles()
+        # The device each pending upload came from (PR-3.5): a drop made
+        # before its session had an id is served back to that device only.
+        self.pending_owners = uploads_mod.PendingOwners()
         self.file_blobs = blobs_mod.FileBlobs(self)
         self.remote_blobs = blobs_mod.RemoteBlobs(self)
         self.icon_blobs = blobs_mod.IconBlobs(self)

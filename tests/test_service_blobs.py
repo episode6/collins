@@ -53,6 +53,13 @@ class Core:
         self.store = None
         self.image_registry = blobs.ImageRegistry()
         self.delivered_files = blobs.DeliveredFiles(spawn=lambda fn, name: fn())
+        self.pending_owners = uploads.PendingOwners()
+
+    def pending(self, name, data, device="laptop"):
+        """A pending upload *device* sent (what `UploadBlobs.put` records)."""
+        path = uploads.write(None, name, data)
+        self.pending_owners.record(path, device)
+        return path
 
     def landed(self):
         """Every session's transcript landed: what `ServiceCore.
@@ -63,8 +70,9 @@ class Core:
 
 
 class Client:
-    def __init__(self, local=False):
+    def __init__(self, local=False, device="laptop"):
         self.local = local
+        self.device = device
 
 
 def _inline(cls, core, **kwargs):
@@ -173,14 +181,51 @@ def test_a_handle_names_a_live_session_only_until_it_resolves(picture):
 
 def test_the_sessions_uploads_and_the_pending_ones_are_admitted(tmp_path, monkeypatch):
     monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    core = Core()
     mine = uploads.write("sid-1", "a.png", b"\x89PNG")
-    pending = uploads.write(None, "b.png", b"\x89PNG")
+    pending = core.pending("b.png", b"\x89PNG")
     other = uploads.write("sid-2", "c.png", b"\x89PNG")
-    feed = _inline(blobs.FileBlobs, Core())
+    feed = _inline(blobs.FileBlobs, core)
     assert _get(feed, f"path={mine}&session=sid-1")[0] == 200
     assert _get(feed, f"path={pending}&session=sid-1")[0] == 200
     assert _get(feed, f"path={pending}")[0] == 200
     assert _get(feed, f"path={other}&session=sid-1")[0] == 403
+
+
+def test_a_pending_upload_is_served_to_the_device_that_sent_it_only(tmp_path, monkeypatch):
+    """PR-3.5 (the Fable review of PR 615, call 5): the pending folder is
+    every device's, so a drop there is served to a client that is not
+    `local` only on the device that uploaded it, picture or not, with any
+    session; one whose device nobody recorded (sent with none, or the
+    service restarted since) is served to no such client. A `local` client
+    is answered as before, and the session's own uploads are its session's
+    whatever the device."""
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    core = Core([Session()])
+    feed = _inline(blobs.FileBlobs, core)
+    picture = core.pending("shot.png", b"\x89PNG pending")
+    document = core.pending("notes.pdf", b"%PDF pending")
+    forgotten = uploads.write(None, "lost.png", b"\x89PNG lost")
+    nameless = core.pending("anon.png", b"\x89PNG anon", device="")
+    mine = uploads.write("sid-1", "mine.png", b"\x89PNG mine")
+    laptop, phone, nobody = Client(device="laptop"), Client(device="phone"), Client(device="")
+    for query in (f"path={picture}", f"path={picture}&session=sid-1", f"path={picture}&as=file"):
+        assert _get(feed, query, laptop)[0] == 200, query
+        assert _get(feed, query, phone)[0] == 403, query
+        assert _get(feed, query, nobody)[0] == 403, query
+    assert _get(feed, f"path={document}&session=sid-1&as=file", laptop)[0] == 200
+    assert _get(feed, f"path={document}&session=sid-1&as=file", phone)[0] == 403
+    for path in (forgotten, nameless):
+        for client in (laptop, phone, nobody):
+            assert _get(feed, f"path={path}&session=sid-1", client)[0] == 403, (path, client.device)
+    assert _get(feed, f"path={mine}&session=sid-1", phone)[0] == 200
+    local = Client(local=True, device="phone")
+    assert _get(feed, f"path={picture}", local)[0] == 200
+    assert _get(feed, f"path={forgotten}", local)[0] == 200
+    # A request that names no client (no header: `client` None) is no device.
+    got = []
+    feed.blob(None, f"path={picture}", None, lambda *answer: got.append(answer))
+    assert got[0][0] == 403
 
 
 def test_only_an_image_is_a_file_blob_and_the_cap_holds(picture, monkeypatch):
@@ -417,9 +462,10 @@ def test_a_file_that_is_no_picture_is_never_served_without_a_session(tmp_path, m
     non-picture needs its session; a pending picture is served as before
     (the composer's preview of a drop made before the session has an id)."""
     monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
-    document = uploads.write(None, "notes.pdf", b"%PDF pending")
-    picture = uploads.write(None, "shot.png", b"\x89PNG pending")
-    feed = _inline(blobs.FileBlobs, Core([Session()]))
+    core = Core([Session()])
+    document = core.pending("notes.pdf", b"%PDF pending")
+    picture = core.pending("shot.png", b"\x89PNG pending")
+    feed = _inline(blobs.FileBlobs, core)
     assert _get(feed, f"path={document}&as=file")[0] == 400
     assert _get(feed, f"path={document}&session=&as=file")[0] == 400
     assert _get(feed, f"path={picture}&as=file")[0] == 200
@@ -436,10 +482,10 @@ def test_a_session_nobody_knows_gets_no_file_that_is_no_picture(tmp_path, monkey
     a live one's id, its handle only while it has no id, or an id the
     store lists."""
     monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
-    document = uploads.write(None, "notes.pdf", b"%PDF pending")
-    picture = uploads.write(None, "shot.png", b"\x89PNG pending")
-    theirs = uploads.write("sid-9", "theirs.csv", b"a,b\n")
     core = Core([Session()])
+    document = core.pending("notes.pdf", b"%PDF pending")
+    picture = core.pending("shot.png", b"\x89PNG pending")
+    theirs = uploads.write("sid-9", "theirs.csv", b"a,b\n")
     feed = _inline(blobs.FileBlobs, core)
     for session in ("nobody-at-all", "x", "../..", "s-1", "sid-9"):
         # Unknown, unknown, no valid name, a resolved session's handle, and
@@ -452,6 +498,7 @@ def test_a_session_nobody_knows_gets_no_file_that_is_no_picture(tmp_path, monkey
         assert _get(feed, query)[0] == 200, query
     # A session with no id yet is named by its handle...
     unresolved = Core([Session(session_id=None, handle="s-7")])
+    unresolved.pending_owners = core.pending_owners  # the same service's record of who sent it
     assert _get(_inline(blobs.FileBlobs, unresolved), f"path={document}&session=s-7&as=file")[0] == 200
     # ...and one that is not live by the id the store lists.
 

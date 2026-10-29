@@ -33,7 +33,8 @@ the main loop — and the `PUT /api/upload` the server hands its body to:
   none (or one the gate refuses). The root must be one the service knows.
 - **`PUT /api/upload?session=<id>&name=<basename>`** (`UploadBlobs.put`):
   the body written by `uploads.write` under the session's directory, or
-  the pending one with no `session` (D37); the reply is JSON
+  the pending one with no `session` (D37), held there to the uploading
+  client's device (`uploads.PendingOwners`, PR-3.5); the reply is JSON
   ``{"path": …}``. A session id the service doesn't know is `403`, an
   empty body `400`.
 
@@ -400,6 +401,12 @@ class FileBlobs(_Feed):
     made before its session has an id), and a non-picture in the pending
     folder is served to a request that names any *known* session, not
     only the one the drop is for (the pending folder is not per session).
+    **Either is served only to the device that uploaded it** (PR-3.5:
+    `uploads.PendingOwners`, the core's `pending_owners`, keyed by the
+    file's resolved path and the uploading client's hello ``device``), so
+    a second device on the service never reads the first one's drops; a
+    pending upload whose device is not known (none sent, or the service
+    restarted since) is served to no client that is not `local`.
     The same handle rule holds the show_image registry: a path admitted
     under a session's id and handle is served by the handle only while
     the session has no id. A `local` client is never served one (it
@@ -446,6 +453,10 @@ class FileBlobs(_Feed):
         if not session_named:
             admitted = frozenset()
         handed = delivered.paths(session) if delivered is not None and session_named else frozenset()
+        # Whose drops the pending folder may hand this client: its own
+        # device's only (PR-3.5).
+        owners = getattr(self.core, "pending_owners", None)
+        device = getattr(client, "device", "") or ""
 
         def work() -> tuple[int, dict, bytes]:
             real = os.path.realpath(path)
@@ -456,7 +467,16 @@ class FileBlobs(_Feed):
             # when it was named (D38, D51): its uploads, a tool call's
             # registered path, a delivered file's as the service first saw
             # its record. A link swapped in since resolves elsewhere.
-            uploaded = uploads.inside(real, session or None) and (picture or session_named)
+            # The pending folder is every device's (D37): a drop there counts
+            # as uploaded only for the device that sent it (PR-3.5).
+            own_folder = uploads.inside(real, session or None, pending=False)
+            pending = (
+                not own_folder
+                and uploads.in_pending(real)
+                and owners is not None
+                and owners.serves(real, device)
+            )
+            uploaded = (own_folder or pending) and (picture or session_named)
             exact = uploaded or real in admitted or real in handed
             # A picture the transcript scan found is admitted as before
             # PR-2.8, by what its record's key resolves to now (D38).
@@ -608,6 +628,11 @@ class UploadBlobs(_Feed):
             self._answer(respond, 403)
             return
 
+        # The device a pending upload is held to (PR-3.5), read here on the
+        # main loop: the hello's, "" for a request that names no client.
+        device = getattr(client, "device", "") or ""
+        owners = getattr(self.core, "pending_owners", None)
+
         def work() -> tuple[int, dict, bytes]:
             try:
                 path = uploads.write(session, name, body)
@@ -616,6 +641,8 @@ class UploadBlobs(_Feed):
             except OSError as error:
                 log.warning("blobs: an upload could not be written: %s", error)
                 return 500, {}, b""
+            if session is None and owners is not None:
+                owners.record(path, device)
             reply = json.dumps({"path": str(path)}).encode("utf-8")
             return 200, {"Content-Type": "application/json"}, reply
 

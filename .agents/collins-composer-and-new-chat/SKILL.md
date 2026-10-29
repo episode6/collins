@@ -54,7 +54,10 @@ are mentioned in place (`dropimages.mention_text`) only when the link proved
 (`remoteuploads.upload_files`). The upload lands in
 `~/.local/share/collins/uploads/<session id>/` (removed with the session) —
 the host's `upload_session()` — or `_pending/` when there is no id yet (the
-new-chat screen, a tab that hasn't resolved: D37, swept after a week); the
+new-chat screen, a tab that hasn't resolved: D37, swept after a week),
+held there to the uploading client's hello `device`
+(`uploads.PendingOwners`, PR-3.5: its preview is served back to that device
+only, and to no client that is not `local` once the service restarted); the
 service uniquifies the name. Every upload and its mention land after the
 PUT, at `PRIORITY_DEFAULT`. A preview strip shows image thumbnails, each a
 blob (`pictures.fetch` of the path, `kind=file`, the host's
