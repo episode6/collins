@@ -81,6 +81,14 @@ downloads of each version, see the
   fails is logged and skipped. *Send test* runs it once, attached or
   not. See [A service on another
   machine](/guide/remote#notifications-while-you-are-away).
+- **Two windows on one session.** When two computers show the same
+  session (each connected to the same service), the terminal's size
+  belongs to the one that last typed, clicked or focused into it. The
+  other keeps the terminal at that size instead of redrawing it to fit,
+  under a *Sized for \<device\>* banner whose **Use this size** (or a key,
+  or a click) takes the size over. A picture or file dropped before its
+  session has started is shown back only to the computer that dropped it.
+  See [Two windows on one session](/guide/remote#two-windows-on-one-session).
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch
