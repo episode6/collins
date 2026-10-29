@@ -601,7 +601,7 @@ class ServiceCore:
             session_id=message.get("session"),
             fork=bool(message.get("fork")),
             options=options,
-            command_override=message.get("command_override"),
+            continue_recent=bool(message.get("continue_recent")),
             cwd=message.get("cwd"),
             jsonl_path=message.get("jsonl_path"),
             # The service's ProgressWatch reads the stream's Progress events,

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-18. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1693,7 +1693,7 @@ class TerminalTab(Gtk.Box):
         provider: Provider | None = None,
         jsonl_path: str | Path | None = None,
         options=None,
-        command_override: str | None = None,
+        continue_recent: bool = False,
         initial_size: tuple[int, int] | None = None,
         new_chat: bool = False,
         worktree_default: bool = False,
@@ -1711,7 +1711,10 @@ class TerminalTab(Gtk.Box):
         the screen's Send (the "new-chat-send" signal, via the window)
         reaches. *worktree_default* is what its worktree checkbox starts
         on, *sandbox_default* what its Sandboxed box starts on. Only a
-        fresh session (no id, no command override) is ever a new chat.
+        fresh session (no id, no continue) is ever a new chat.
+        *continue_recent* asks the service for a --continue of the newest
+        conversation in *cwd*: the service assembles that command, as it
+        does every launch, from its own claude (PR-3.0 item 1).
         *options* carries a resumed session's sandbox decision too (see
         MainWindow.open_session): the plan is written here, at spawn."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -1740,7 +1743,7 @@ class TerminalTab(Gtk.Box):
             session_id=session_id,
             fork=fork,
             options=options,
-            command_override=command_override,
+            continue_recent=continue_recent,
             cwd=cwd,
             jsonl_path=str(jsonl_path) if jsonl_path else None,
         )
@@ -1991,7 +1994,7 @@ class TerminalTab(Gtk.Box):
         # stay put through the flip. A tab that isn't a new chat skips the
         # stack — the console is the leaf, as it always was.
         stage: Gtk.Widget = self._overlay
-        if new_chat and session_id is None and command_override is None:
+        if new_chat and session_id is None and not continue_recent:
             self._new_chat = NewChatView(
                 cwd=cwd or str(Path.home()),
                 pick_attach=self._pick_file_for_composer,
@@ -2189,10 +2192,6 @@ class TerminalTab(Gtk.Box):
     @property
     def _options(self):
         return self.session.options
-
-    @property
-    def _command_override(self) -> str | None:
-        return self.session.command_override
 
     @property
     def _cwd(self) -> str | None:
@@ -2461,7 +2460,7 @@ class TerminalTab(Gtk.Box):
     def _service_spawn(self, cwd: str | None, prompt: str = "") -> None:
         """Ask the service for this tab's session: a `spawn` of kind agent
         carrying what the session is built from (the id to resume, the
-        fork, the options, the command override, the transcript, a
+        fork, the options, a --continue, the transcript, a
         new-chat *prompt* to type once the CLI is at its box) at this
         terminal's grid; then show its pty. The service builds the shell's
         environment, progress declarations included, from its own, and the
@@ -2475,8 +2474,8 @@ class TerminalTab(Gtk.Box):
             request["session"] = session.session_id
         if session.fork:
             request["fork"] = True
-        if session.command_override:
-            request["command_override"] = session.command_override
+        if session.continue_recent:
+            request["continue_recent"] = True
         if session.transcript_path:
             request["jsonl_path"] = session.transcript_path
         if self._fork_resolve:

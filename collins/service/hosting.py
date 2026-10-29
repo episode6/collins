@@ -409,7 +409,7 @@ class SessionRecord:
             "fork": bool(session.fork),
             "provider": str(getattr(session.provider, "id", "") or "")[: protocol.SHORT_MAX],
             "options": options_record(session.options),
-            "command_override": session.command_override,
+            "continue_recent": bool(session.continue_recent),
             "cwd": session.cwd,
             "agent_cwd": self._sent.get("agent_cwd", session.cwd),
             "pid": session.child_pid(),

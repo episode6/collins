@@ -469,10 +469,9 @@ class Provider:
 
     def continue_command(self, options=None) -> str | None:
         """Shell command to continue the most recent session in the cwd.
-        The tab prepends the sandbox wrapper and appends `session_flags`
-        itself at spawn (it is typed as a command override, and the plan is
-        only known then), so *options* is unused here and kept for
-        symmetry."""
+        The session on the service prepends the sandbox wrapper and appends
+        `session_flags` itself at spawn (the plan is only known then), so
+        *options* is unused here and kept for symmetry."""
         cli = self.cli_path()
         if cli is None:
             return None

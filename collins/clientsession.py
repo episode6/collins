@@ -84,7 +84,7 @@ _FIELD_DEFAULTS: dict[str, Any] = {
 _ONE_SHOTS = ("landed", "reset", "finished", "forked")
 # What `apply` may set: the facts above and the identity the tab was opened
 # with (a `session` event carries nothing else the mirror has a home for).
-_IDENTITY = ("session_id", "fork", "options", "command_override", "cwd")
+_IDENTITY = ("session_id", "fork", "options", "continue_recent", "cwd")
 _SETTABLE = frozenset(_FIELD_DEFAULTS) | frozenset(_IDENTITY)
 
 # What a `cut` event asks of the tab (`cut_action`): seed the composer,
@@ -107,7 +107,7 @@ class ClientSession:
         session_id: str | None = None,
         fork: bool = False,
         options: SessionOptions | None = None,
-        command_override: str | None = None,
+        continue_recent: bool = False,
         cwd: str | None = None,
         jsonl_path: str | None = None,
     ) -> None:
@@ -118,7 +118,9 @@ class ClientSession:
         self.session_id = session_id
         self.fork = bool(fork)
         self.options = options
-        self.command_override = command_override
+        # A --continue of the newest conversation in the cwd: the service
+        # assembles the command (PR-3.0 item 1); the tab only asks for it.
+        self.continue_recent = bool(continue_recent)
         self.cwd = cwd
         self.transcript_path: str | None = str(jsonl_path) if jsonl_path else None
         self.exited = False

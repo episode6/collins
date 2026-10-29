@@ -8,6 +8,7 @@ when asked for, and the service refuses a device setting written through
 the API."""
 
 import json
+import os
 
 import inproc as loopback
 import pytest
@@ -317,11 +318,27 @@ def _pump(seconds, until):
     return until()
 
 
+def _sleeping_cli(tmp_path, monkeypatch) -> None:
+    """A `claude` first on the PATH that sleeps (and answers `agents` with
+    none): the service assembles the agent's command from its own lookup
+    (PR-3.0 item 1), so the test stages the CLI rather than a command."""
+    from collins import clisetup
+
+    monkeypatch.setattr(clisetup, "_search_base", None)
+    directory = tmp_path / "cli-bin"
+    directory.mkdir(exist_ok=True)
+    cli = directory / "claude"
+    cli.write_text('#!/bin/sh\nif [ "$1" = agents ]; then echo "[]"; exit 0; fi\nexec sleep 300\n')
+    cli.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 def _spawn(link, cwd, store, **extra):
-    """An agent pty whose CLI (`sleep 300` under /bin/sh) runs, its row in
-    the table once the /proc poll's read (made by hand here) says so."""
+    """An agent pty whose CLI (the staged `claude`, `sleep 300` under
+    /bin/sh: `_sleeping_cli`) runs, its row in the table once the /proc
+    poll's read (made by hand here) says so."""
     message = {"t": "spawn", "kind": "agent", "cwd": str(cwd), "cols": 80, "rows": 24}
-    pty = link.call({**message, "command_override": "sleep 300", **extra})["pty"]
+    pty = link.call({**message, **extra})["pty"]
     core = store._core
     record = core.sessions[pty]
     assert _pump(5, lambda: record.session.has_running_command())
@@ -331,6 +348,7 @@ def _spawn(link, cwd, store, **extra):
 
 def test_a_running_session_is_a_running_row_until_its_pty_exits(world, tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")
+    _sleeping_cli(tmp_path, monkeypatch)
     store, remote, _state, ids, link = world
     heard = []
     remote.connect("running-changed", lambda _s, sid: heard.append(sid))
@@ -350,6 +368,7 @@ def test_a_running_session_is_a_running_row_until_its_pty_exits(world, tmp_path,
 
 def test_a_fresh_spawn_is_an_unresolved_running_pty(world, tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")
+    _sleeping_cli(tmp_path, monkeypatch)
     store, remote, _state, _ids, link = world
     pty = _spawn(link, tmp_path, store)
     assert remote.unresolved_ptys() == {pty: str(tmp_path)}

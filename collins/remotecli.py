@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from . import apilink, clisetup
+from . import apilink, clisetup, providers
 from .api.protocol import RequestRefused
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,22 @@ def missing() -> bool:
     a service that never said must not bring up an ask whose answer it
     could not take (rule 4: an undocumented surface fails soft)."""
     return _found == ""
+
+
+def available_providers() -> list[providers.Provider]:
+    """The agents the client offers to launch: every provider, unless the
+    service said it has no CLI. The service assembles every command from
+    its own lookup (PR-3.0 item 1), so this client's PATH says nothing
+    about it: `Provider.available()` is the service's question, never
+    asked here."""
+    return [] if missing() else list(providers.ALL_PROVIDERS)
+
+
+def default_provider() -> providers.Provider:
+    """The agent a plain "new session" starts: the first one offered, else
+    Claude (as `providers.default_provider` answers on the service)."""
+    offered = available_providers()
+    return offered[0] if offered else providers.get_provider("claude")
 
 
 def detect() -> str:

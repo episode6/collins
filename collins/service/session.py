@@ -14,9 +14,11 @@ name it had as a forwarder, so nothing that talks to a tab had to change.
 
 What lives here:
 
-- the session's identity as launched: id, fork, provider, options, the
-  command override, the directory it was handed;
-- launching: the command typed into the shell (resume, fresh, override),
+- the session's identity as launched: id, fork, provider, options,
+  whether it continues the newest conversation, the directory it was
+  handed;
+- launching: the command typed into the shell (resume, fresh, continue),
+  assembled here from the service's own claude (no client sends one),
   the environment the shell spawns with, a reaped worktree put back first,
   the sandbox plan settled at the last moment (adopted, minted, narrowed to
   a reserved worktree, or dropped with a warning), the live grants told,
@@ -483,7 +485,7 @@ class Session:
         session_id: str | None = None,
         fork: bool = False,
         options=None,
-        command_override: str | None = None,
+        continue_recent: bool = False,
         cwd: str | None = None,
         jsonl_path: str | Path | None = None,
         progress: bool = True,
@@ -518,7 +520,10 @@ class Session:
         # The SessionOptions the session was launched with (a start_session
         # caller's model and permission mode, the sandbox decision), or None.
         self.options = options
-        self.command_override = command_override
+        # A --continue of the newest conversation in the cwd (the window's
+        # "Continue last session"), assembled here like every other launch
+        # (PR-3.0 item 1: no client sends a command).
+        self.continue_recent = bool(continue_recent)
         # The directory the tab was handed, until the spawn settles on where
         # the shell actually runs: what cwd readers (the dock's shells, the
         # composer's file picker) answer with while nothing is spawned — the
@@ -1728,11 +1733,11 @@ class Session:
         # polling: the newest one *existing* at (re)start belongs to some other
         # session — a submitted prompt creates the file well within the ~3 min
         # background budget, so anything from a pause can't be ours either.
-        # `--continue` (command_override) reuses the newest existing
+        # `--continue` (continue_recent) reuses the newest existing
         # transcript, which is exactly the session it resumes.
         self._known_transcripts = (
             set(self.provider.transcripts_for_cwd(self.resolver_cwd))
-            if self.command_override is None
+            if not self.continue_recent
             else set()
         )
         self._baselined_dirs = {self.resolver_cwd}
@@ -1800,7 +1805,7 @@ class Session:
         ):
             if live not in self._baselined_dirs:
                 self._baselined_dirs.add(live)
-                if self.command_override is None:
+                if not self.continue_recent:
                     self._known_transcripts |= {
                         p
                         for p in self.provider.transcripts_for_cwd(live)
@@ -1850,7 +1855,7 @@ class Session:
         return (
             self.resolver_cwd is not None
             and self.session_id is None
-            and self.command_override is None
+            and not self.continue_recent
             and self.takes_prompt()
         )
 
@@ -2095,11 +2100,11 @@ class Session:
             self.initial_command = command
             # A fresh launch that asked for a worktree is the one launch that
             # can die before the agent ever draws a frame, and the session is
-            # what notices (see _check_worktree_launch). Resumes and command
-            # overrides don't cut worktrees, so they have nothing to watch.
+            # what notices (see _check_worktree_launch). Resumes and
+            # continues don't cut worktrees, so they have nothing to watch.
             self.worktree_launch = (
                 session_id is None
-                and self.command_override is None
+                and not self.continue_recent
                 and bool(self.options and self.options.worktree)
             )
         return command
@@ -2209,8 +2214,8 @@ class Session:
 
     def _launch_command(self, cwd: str, session_id: str | None, restart: bool = False) -> str | None:
         """The agent command to type into the shell for a launch in *cwd*:
-        the command override (a --continue, or a check script's stand-in),
-        the resume for *session_id*, or a fresh start — with the sandbox
+        the --continue of the newest conversation (`continue_recent`), the
+        resume for *session_id*, or a fresh start — with the sandbox
         settled first, since the plan is a function of the settled cwd (a
         recreated worktree included) and is written here, at the last
         moment. None with no CLI.
@@ -2218,20 +2223,23 @@ class Session:
         *restart* turns the first two around: a --continue session that has
         since resolved its id resumes *that* session rather than whatever
         is newest in the directory now. Only the sandbox restart passes it;
-        an initial spawn honours the override it was handed."""
+        an initial spawn honours the continue it was asked for."""
         if self.options is not None and self.options.sandbox:
-            fresh = session_id is None and self.command_override is None
+            fresh = session_id is None and not self.continue_recent
             self.options = self._sandbox_options(cwd, fresh=fresh)
         self.host.sandbox_changed()
         resume_first = restart and session_id is not None
-        if self.command_override is not None and not resume_first:
+        if self.continue_recent and not resume_first:
             # The wrapper in front, and the flags an existing conversation
             # takes from the settled options (the permission mode) behind —
             # settled, so a box that couldn't be built never leaves a
             # bypass flag typed.
+            command = self.provider.continue_command(self.options)
+            if command is None:
+                return None
             return (
                 self.provider.sandbox_prefix(self.options)
-                + self.command_override
+                + command
                 + self.provider.session_flags(self.options)
             )
         if session_id is not None:
@@ -2258,7 +2266,7 @@ class Session:
             self.sandboxed
             and not self.fork
             and not self.sandbox_plan_adopted
-            and (self.session_id is not None or self.command_override is not None)
+            and (self.session_id is not None or self.continue_recent)
             and self.restart_ticks is None
         )
 
@@ -2434,7 +2442,7 @@ class Session:
         # grants when it resolves (MainWindow._on_session_resolved).
         box = options.sandbox_box or self.sandbox_box
         if not box and host is not None:
-            seeded = self.command_override is None
+            seeded = not self.continue_recent
             # Seeded against what the session can write: a default inside
             # the checkout is not "already inside" a worktree's box.
             box = host.mint_box(worktree or cwd, seed=seeded)

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-18. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -88,9 +88,10 @@ from .licenses import legal_sections
 from .models import SessionItem
 from .notifycenter import Notification, NotificationCenter, sound_display_name
 from .prefs import PreferencesDialog
-from .providers import SessionOptions, available_providers, default_provider, get_provider
+from .providers import SessionOptions, get_provider
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
+from .remotecli import available_providers, default_provider
 from .remotestate import RemoteState
 from .remotestore import RemoteStore, transcript_export
 from .replayview import ReplayTab
@@ -2214,7 +2215,8 @@ class MainWindow(Adw.ApplicationWindow):
         return f"{emoji} {name}" if emoji else name
 
     def _default_provider(self):
-        """First installed agent (Claude when present), used by the quick button."""
+        """The agent a plain new session starts, used by the quick button: the
+        service's word on its CLI (remotecli), never this process's PATH."""
         return default_provider()
 
     def _visible_project_dir(self) -> str | None:
@@ -3009,7 +3011,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         tab = TerminalTab(
             cwd=cwd, settings=self.state.settings, provider=provider,
-            command_override=provider.continue_command(options), options=options,
+            continue_recent=True, options=options,
         )
         self._add_tab(tab, GLib.path_get_basename(cwd), f"continue {provider.name} — {cwd}")
 

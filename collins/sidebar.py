@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-22. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -52,7 +52,7 @@ from .formatting import format_size
 from .gitinfo import current_branch, default_branch, github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
-from .providers import default_provider, get_provider
+from .providers import get_provider
 from .prstatus import (
     PullRequest,
     describe_all,
@@ -60,6 +60,7 @@ from .prstatus import (
     known,
     newest_titled,
 )
+from .remotecli import default_provider
 from .remotestore import RemoteStore
 from .scrolling import offset_into_view
 from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
@@ -2273,7 +2274,8 @@ class SessionSidebar(Gtk.Box):
         was opened for, else -- a live tab the window hasn't described,
         which shouldn't happen -- the agent a plain new session starts.
         Each answer is only computed when the one before it is missing:
-        the last one probes PATH (see default_provider)."""
+        the last one asks what the service said of its CLI (see
+        remotecli.default_provider)."""
         icon_name = self._placeholder_icons.get(placeholder_id)
         if icon_name:
             return icon_name

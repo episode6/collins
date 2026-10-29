@@ -34,10 +34,17 @@ os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
-for _path in (f"{E2E}/projects", f"{E2E}/chats"):
+for _path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin"):
     os.makedirs(_path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as _fh:
     _fh.write("{}")
+# The tab's agent: a `claude` that exits at once, first on the PATH the
+# service looks it up on (it assembles the command itself, PR-3.0 item 1;
+# the tab was handed `true` before), so no real CLI runs.
+with open(f"{E2E}/bin/claude", "w", encoding="utf-8") as _fh:
+    _fh.write("#!/bin/sh\nexit 0\n")
+os.chmod(f"{E2E}/bin/claude", 0o755)
+os.environ["PATH"] = f"{E2E}/bin:{os.environ['PATH']}"
 
 import gi
 
@@ -70,7 +77,7 @@ def main() -> int:
     # transport, as the app installs it on every connect (PR-2.6).
     remotefiles.install(e2e_service.harness_link())
     assert apilink.current() is not None
-    tab = terminal_mod.TerminalTab(cwd=root, command_override="true")
+    tab = terminal_mod.TerminalTab(cwd=root)
     assert tab.link_root == root, tab.link_root
 
     matchers = [

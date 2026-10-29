@@ -247,7 +247,7 @@ each taken from the code the message replaces:
   the counts of ptys, busy sessions and clients.
 - The session on the service (PR-1.12a, §3.19). `spawn` for an agent
   carries what `service.session.Session` is built from (`fork`,
-  `command_override`, `jsonl_path`, `sandbox_plan`, `fork_resolve`, the
+  `continue_recent`, `jsonl_path`, `sandbox_plan`, `fork_resolve`, the
   new chat's `prompt`) and answers with the session's `handle`; a shell's
   `spawn` names its agent's `handle` so the service re-files its history
   when the session resolves. The `session` event is the facts a client
@@ -899,7 +899,7 @@ _SESSION_FIELDS = {
     "fork": _BOOL,
     "provider": _SHORT,
     "options": _null(Field(K_JSON_OBJECT)),
-    "command_override": _null(_s(PATH_MAX)),
+    "continue_recent": _BOOL,
     "cwd": _null(_PATH),
     "agent_cwd": _null(_PATH),
     "pid": _null(_i(1, PID_MAX)),
@@ -1116,11 +1116,14 @@ _TABLE: tuple[MessageType, ...] = (
                 "sandbox": _BOOL,
                 "sandbox_box": _ID,
                 # The rest of what an agent's `Session` is built from
-                # (PR-1.12a, §3.19): the session forked, a command override
-                # (a --continue, a check's stand-in), the transcript to tail,
-                # a sibling's derived plan, a sandboxed fork's resolver mode.
+                # (PR-1.12a, §3.19): the session forked, a --continue of
+                # the newest conversation in `cwd` (`continue_recent`: the
+                # service assembles every command itself from its own
+                # claude, PR-3.0 item 1; no client sends a command), the
+                # transcript to tail, a sibling's derived plan, a sandboxed
+                # fork's resolver mode.
                 "fork": _BOOL,
-                "command_override": _s(PATH_MAX),
+                "continue_recent": _BOOL,
                 "jsonl_path": _PATH,
                 "sandbox_plan": _PATH,
                 "fork_resolve": _BOOL,

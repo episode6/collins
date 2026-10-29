@@ -58,6 +58,7 @@ from . import (
     gitloads,
     mcptools,
     notifycenter,
+    remotecli,
     remoteimages,
 )
 from .api.protocol import RequestRefused
@@ -995,8 +996,9 @@ class ToolClient:
             options = replace(options, sandbox_plan=sibling_plan, sandbox_box=sibling_box)
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
-        # anything is spawned.
-        if provider.new_command(options) is None:
+        # anything is spawned. The CLI is the service's (it assembles the
+        # command, PR-3.0 item 1): its word, never this process's PATH.
+        if remotecli.missing():
             _drop_sibling_box(sibling_plan, sibling_box)
             return False, f"The {provider.name} CLI isn't available to start a session."
 
