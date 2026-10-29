@@ -55,6 +55,10 @@ downloads of each version, see the
   No port, no token: ssh's keys and host verification are all of it, and a
   window reaching a service over ssh never gets the local extras, whatever
   the far side says. See [A service on another machine](/guide/remote).
+- **Restart service is in the app menu**, where the guide said it was:
+  the action existed since the service split, but no menu item offered
+  it, so a restart could only be reached from the protocol-mismatch
+  dialog or a custom keybinding.
 - **The service finds `claude` where its terminals do, and starts every
   session itself.** A service started over a non-interactive ssh command
   said it had no `claude` CLI while every session it launched found one:

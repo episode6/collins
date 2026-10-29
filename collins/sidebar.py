@@ -1561,6 +1561,10 @@ class SessionSidebar(Gtk.Box):
         # Which Collins service this window shows: this machine's, or one
         # reached over ssh (split-service spec §3.24).
         menu.append(_("Connect to…"), "win.connect-to")
+        # *Restart service* (§3.21): the window's action existed since
+        # PR-1.12c, with no menu item appending it until PR-3.1 (ruled under
+        # §5: the spec, the guide and the skills all place it here).
+        menu.append(_("Restart service"), "win.restart-service")
         menu.append(_("Keyboard Bindings"), "win.keyboard-bindings")
         menu.append(_("Preferences"), "win.preferences")
         # Only when nothing has put Collins in the app grid yet: a pip or pipx
