@@ -2261,6 +2261,20 @@ class MainWindow(Adw.ApplicationWindow):
             return None
         return cwd if known[1] else None
 
+    def _ask_visible_project_dir_if_unknown(self) -> None:
+        """`_refresh_visible_project_dir` when the visible session's
+        directory has no answer yet: a tab that resolved its session while
+        selected, or whose row the store has only now (the Fable review of
+        PR 622, S1), so the next new session started from it finds the
+        answer rather than opening the chooser."""
+        candidate = self._visible_project_candidate()
+        if candidate is None:
+            return
+        session_id, cwd = candidate
+        known = self._project_dirs_there.get(session_id)
+        if known is None or known[0] != cwd:
+            self._refresh_visible_project_dir()
+
     def _refresh_visible_project_dir(self) -> None:
         """Ask the service whether the visible session's project directory
         is a directory (`fs.stat`, off the main loop), and keep the answer
@@ -3364,6 +3378,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_status(session_id)
         self._update_active_row()  # the resolved tab may be the selected one
         self._apply_resolved_sessions()
+        # The visible tab's session is known now: whether its project
+        # directory is there is asked at once (PR-3.0 item 9, review S1).
+        self._ask_visible_project_dir_if_unknown()
         # Half of registering: the id is known. The gate stays shut until the
         # store gives it a row, which _on_store_refreshed picks up.
         self._refresh_background_affordances()
@@ -3433,6 +3450,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         self._sync_trash_archived_action()
+        # A resolved session's row may land after the resolve itself.
+        self._ask_visible_project_dir_if_unknown()
         if self._reopen_waiting:
             self._apply_reopen_waiting()
         if self._restore_session_id is not None:
