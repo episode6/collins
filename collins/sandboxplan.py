@@ -93,7 +93,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import mcptools, sandboxrun, sessions, trust
+from . import clisetup, mcptools, sandboxrun, sessions, trust
 
 log = logging.getLogger(__name__)
 
@@ -1312,7 +1312,7 @@ def resolved_claude() -> tuple[str, str] | None:
     into `~/.local/share/claude/versions/<v>`: the whole `~/.local/share/
     claude` is bound so the launcher's sibling files resolve. `~/.claude/
     local` and an npm prefix bind their own directory."""
-    found = shutil.which("claude")
+    found = clisetup.which()
     if not found:
         return None
     real = os.path.realpath(found)
@@ -1356,7 +1356,7 @@ def gather_inputs(
     grants = tuple(
         os.path.normpath(g) for g in state.get_sandbox_grants(box) if isinstance(g, str) and g
     )
-    launcher = shutil.which("claude")
+    launcher = clisetup.which()
     return Inputs(
         workspace=ws,
         home=home,

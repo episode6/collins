@@ -1025,7 +1025,7 @@ def test_a_generated_app_id_builds_a_plan(monkeypatch, tmp_path, no_shared_tmp):
     monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
     monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "sbx"))
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
-    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name, **_: None)
     app_id = "com.episode6.Collins.e2e-abc123"
     assert app_id not in mcptools.STABLE_APP_IDS
     config = mcptools.config_path(app_id)
@@ -1158,14 +1158,14 @@ def test_resolved_claude_binds_the_native_install_whole(monkeypatch, tmp_path):
     launcher.parent.mkdir(parents=True)
     launcher.symlink_to(real)
     monkeypatch.setattr(sandboxplan.Path, "home", classmethod(lambda cls: home))
-    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: str(launcher))
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name, **_: str(launcher))
     assert sandboxplan.resolved_claude() == (str(real), str(home / ".local" / "share" / "claude"))
     npm = tmp_path / "npm" / "bin" / "claude"
     npm.parent.mkdir(parents=True)
     npm.write_text("#!/bin/sh\n")
-    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: str(npm))
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name, **_: str(npm))
     assert sandboxplan.resolved_claude() == (str(npm), str(npm.parent))
-    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name, **_: None)
     assert sandboxplan.resolved_claude() is None
 
 
@@ -1423,7 +1423,7 @@ def _host(monkeypatch, tmp_path, home, state, **kw):
     monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
-    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name, **_: None)
     monkeypatch.setattr(sandboxplan, "anchor_roots", lambda: ("/mnt", "/srv"))
     return sandboxplan.SandboxHost("com.example.App", state, **kw)
 

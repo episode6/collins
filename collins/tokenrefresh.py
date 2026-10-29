@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import subprocess
 import threading
 import time
@@ -121,7 +120,7 @@ def refresh() -> bool:
     hiccup). Blocking for up to the run's timeout — call from a worker
     thread.
     """
-    cli = shutil.which(clisetup.CLI_NAME)
+    cli = clisetup.which()
     if cli is None:
         log.warning("tokenrefresh: no %s on PATH to refresh with", clisetup.CLI_NAME)
         return False

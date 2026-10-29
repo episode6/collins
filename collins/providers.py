@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-22. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -14,13 +14,12 @@ from __future__ import annotations
 import json
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
-from . import sessions
+from . import clisetup, sessions
 from .dropimages import cell_width
 from .sessions import (
     _UUID_RE,
@@ -355,8 +354,14 @@ class Provider:
     def projects_dir(self) -> Path:
         raise NotImplementedError
 
+    def cli_path(self) -> str | None:
+        """Where this agent's CLI is, or None: a lookup on the search path
+        (`clisetup.which`), which on the service is its session
+        environment's PATH, where the shells it spawns look too."""
+        return clisetup.which(self.cli)
+
     def available(self) -> bool:
-        return shutil.which(self.cli) is not None
+        return self.cli_path() is not None
 
     def watch_dirs(self) -> list[Path]:
         """Directories to file-monitor so the session list stays live.
@@ -432,7 +437,7 @@ class Provider:
         """Shell command to type into the terminal to resume a session.
         *options* carries the sandbox decision and the permission mode for
         a resumed session (its other fields are a new session's)."""
-        cli = shutil.which(self.cli)
+        cli = self.cli_path()
         if cli is None:
             return None
         cmd = f"{shlex.quote(cli)} --resume {shlex.quote(session_id)}"
@@ -449,7 +454,7 @@ class Provider:
         """Shell command to start a fresh session, optionally with the
         SessionOptions' CLI flags (model / effort / permission-mode / extra
         dirs / worktree), inside a sandbox when the options say so."""
-        cli = shutil.which(self.cli)
+        cli = self.cli_path()
         if cli is None:
             return None
         return (
@@ -468,7 +473,7 @@ class Provider:
         itself at spawn (it is typed as a command override, and the plan is
         only known then), so *options* is unused here and kept for
         symmetry."""
-        cli = shutil.which(self.cli)
+        cli = self.cli_path()
         if cli is None:
             return None
         return f"{shlex.quote(cli)} --continue{self._mcp_config_flag()}"
@@ -852,7 +857,7 @@ class ClaudeProvider(Provider):
             None,
         )
         if agent is not None:
-            cli = shutil.which(self.cli)
+            cli = self.cli_path()
             return f"{shlex.quote(cli)} attach {shlex.quote(agent.job_id)}"
         return cmd
 
@@ -883,7 +888,7 @@ class ClaudeProvider(Provider):
         resume_command()'s attach-vs-resume choice, since the daemon refuses
         a plain `--resume` for as long as it lists the job, done or not.
         """
-        cli = shutil.which(self.cli)
+        cli = self.cli_path()
         if cli is None:
             return []
         try:
@@ -971,7 +976,7 @@ class ClaudeProvider(Provider):
         return out
 
     def chat_variants(self) -> list[ChatVariant]:
-        if shutil.which(self.cli) is None:
+        if self.cli_path() is None:
             return []
         # One variant: writeable, with per-tool approval cards (the control
         # protocol gates every Edit/Write/Bash).
@@ -983,7 +988,7 @@ class ClaudeProvider(Provider):
         # routes every tool-use permission through the stdio control channel
         # (control_request / control_response) so the GUI can show approve/deny
         # cards — without it `default` mode silently auto-denies all tool use.
-        cli = shutil.which(self.cli)
+        cli = self.cli_path()
         if cli is None:
             return None
         argv = [

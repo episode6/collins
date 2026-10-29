@@ -1134,7 +1134,7 @@ def _real_host(monkeypatch, tmp_path, home, state):
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.setattr(sandboxplan, "RW_ABSOLUTE", ("/var/tmp",))
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
-    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name, **_: None)
     monkeypatch.setattr(sandboxplan, "anchor_roots", lambda: ("/mnt",))
     return sandboxplan.SandboxHost("com.example.App", state)
 

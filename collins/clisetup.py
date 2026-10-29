@@ -33,9 +33,11 @@ appending, not prepending, so a directory someone once picked can never
 shadow `git` or `gh` for the rest of the app. An answer can also change
 mid-run (Preferences); applying the new one first takes back the entry the
 old one added — only ever that entry, never a directory the user's own
-PATH brought. Everything downstream (providers, titles, icongen, and every
-tab's shell, which inherits the environment) then finds the CLI the way it
-always did: `shutil.which`.
+PATH brought. Everything downstream (providers, titles, icongen, the login
+repair, the sandbox's mount) then finds the CLI through `which`: on the
+service, a lookup on its session environment's PATH (the login shell's,
+merged; `set_search_base`) with that entry on the end, so the CLI is found
+where the shells the service spawns find it.
 
 Gtk-free, like ghsetup, so it stays testable where GTK isn't.
 """
@@ -46,6 +48,7 @@ import logging
 import os
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -103,16 +106,51 @@ def known_locations() -> list[Path]:
 # what apply() takes back off before putting a changed answer's entry on.
 _appended: str | None = None
 
+# Where a lookup searches when it is not told: the service's own session
+# environment's PATH (the login shell's merged over the process's, which
+# `collins-service` installs at start: `set_search_base`), else this
+# process's PATH. A service started by a non-interactive ssh command has a
+# process PATH without `~/.local/bin` while every shell it spawns has it, so
+# the CLI is looked up where the shells look (PR-3.0 item 10).
+_search_base: Callable[[], str | None] | None = None
+
+
+def set_search_base(base: Callable[[], str | None] | None) -> None:
+    """Make *base* (a PATH, read at each lookup) what a lookup searches when
+    it is not told; None goes back to this process's PATH."""
+    global _search_base
+    _search_base = base
+
+
+def search_path(base: str | None = None) -> str:
+    """The PATH a CLI lookup searches: *base*, or the installed search base,
+    or this process's PATH, with the entry apply() added for a stored answer
+    at the end when it is not there already (a captured environment is a
+    snapshot taken before the answer was applied)."""
+    if base is None and _search_base is not None:
+        base = _search_base()
+    if base is None:
+        base = os.environ.get("PATH", "")
+    parts = [p for p in base.split(os.pathsep) if p]
+    if _appended is not None and _appended not in parts:
+        parts.append(_appended)
+    return os.pathsep.join(parts)
+
+
+def which(name: str = CLI_NAME, base: str | None = None) -> str | None:
+    """Where *name* is on `search_path(base)`, or None."""
+    return shutil.which(name, path=search_path(base))
+
 
 def on_path() -> bool:
     """Whether the CLI is findable right now, PATH as it currently stands."""
-    return shutil.which(CLI_NAME) is not None
+    return which() is not None
 
 
-def found_at() -> str | None:
-    """Where a `claude` lookup lands right now, PATH as it stands — the
-    answer to "which one is actually in use?"."""
-    return shutil.which(CLI_NAME)
+def found_at(base: str | None = None) -> str | None:
+    """Where a `claude` lookup lands right now, on *base* (a PATH) or the
+    search base — the answer to "which one is actually in use?"."""
+    return which(CLI_NAME, base)
 
 
 def validate(text: str) -> str:

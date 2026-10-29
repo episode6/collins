@@ -171,7 +171,7 @@ def _capture_popen(monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(icongen.subprocess, "Popen", popen)
-    monkeypatch.setattr(icongen.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(icongen.clisetup.shutil, "which", lambda _name, **_: "/usr/bin/claude")
     monkeypatch.setattr(icongen.AppState, "get_setting", lambda _self, _key: "claude-sonnet-5")
     return calls
 

@@ -2183,6 +2183,46 @@ def test_service_status_says_whether_gh_is_ready(server, monkeypatch):
     assert server.core.gh_status == ghsetup.LOGGED_OUT
 
 
+def test_the_cli_is_looked_up_on_the_session_environments_path(tmp_path, monkeypatch):
+    """PR-3.0 item 10: `service.status`'s `cli` and `cli.check`'s `found`
+    are a lookup on the PATH the service spawns its shells with (the login
+    shell's, merged), not on the process's own: a service started by a
+    non-interactive ssh command has no `~/.local/bin` on its own PATH and a
+    shell that finds the CLI there."""
+    from collins import clisetup
+
+    monkeypatch.setattr(clisetup, "_appended", None)
+    monkeypatch.setattr(clisetup, "_search_base", None)
+    bare = tmp_path / "process-bin"
+    bare.mkdir()
+    monkeypatch.setenv("PATH", str(bare))  # the process's PATH: no claude on it
+    captured = tmp_path / "login-bin"
+    captured.mkdir()
+    cli = captured / "claude"
+    cli.write_text("#!/bin/sh\nexit 0\n")
+    cli.chmod(0o755)
+    environment = {**os.environ, "PATH": f"{bare}{os.pathsep}{captured}"}
+    core = ServiceCore(state_dir=tmp_path / "pty", environment=lambda: dict(environment))
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        assert clisetup.found_at() is None  # the process's own lookup misses
+        assert client.request({"t": "service.status"})["cli"] == str(cli)
+        assert client.request({"t": "cli.check"})["found"] == str(cli)
+        # An environment without it: "" (none), whatever the process has.
+        environment["PATH"] = str(bare)
+        assert client.request({"t": "service.status"})["cli"] == ""
+        # A stored answer applied on the service is searched too, on top of
+        # the captured environment (a snapshot taken before it was applied).
+        assert clisetup.apply(str(cli)) is True
+        assert client.request({"t": "service.status"})["cli"] == str(cli)
+    finally:
+        clisetup.apply("")
+        srv.shutdown()
+        pump(0.3)
+
+
 def test_the_archive_sweep_runs_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):
     import time as time_mod
 

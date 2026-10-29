@@ -47,7 +47,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import prstatus, sessions, state
+from . import clisetup, prstatus, sessions, state
 from .claudemodels import NO_MODEL, ClaudeModel, pick_model, resolve_model, short_name
 from .i18n import _
 
@@ -420,7 +420,7 @@ def _run_claude(prompt: str, setting: str | None = None) -> str:
     was queued before the switch, so a run that reads it is a bug, and
     answering with a model anyway would spend what was turned off.
     """
-    cli = shutil.which("claude")
+    cli = clisetup.which()
     if cli is None:
         raise TitleError("claude CLI not found on PATH", fatal=True)
     if setting is None:

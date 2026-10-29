@@ -26,12 +26,11 @@ handling are unit-testable headless; the dialog owns widgets and threading.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import threading
 from pathlib import Path
 
-from . import projecticons
+from . import clisetup, projecticons
 from .claudemodels import pick_model
 from .state import AppState
 from .titles import headless_argv, scratch_workdir
@@ -215,7 +214,7 @@ class IconRun:
         with none given, the icon_model preference (resolved per run, like
         titles, so a just-changed preference applies to the next generation
         without a restart)."""
-        cli = shutil.which("claude")
+        cli = clisetup.which()
         if cli is None:
             raise IconGenError("claude CLI not found on PATH")
         model = pick_model(model or AppState().get_setting("icon_model"))

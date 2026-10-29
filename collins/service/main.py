@@ -312,6 +312,13 @@ class Service:
         from .. import clisetup
 
         core = self.core
+        # Every claude lookup of this process (the spawn's command, titles,
+        # icons, the login repair, the sandbox's mount, the background
+        # agents' poll, `service.status`) searches the session environment's
+        # PATH, where the shells it spawns look: a service started by a
+        # non-interactive ssh command has a process PATH without
+        # `~/.local/bin` (PR-3.0 item 10).
+        clisetup.set_search_base(lambda: self.environment.get("PATH"))
         clisetup.apply_saved(core.state)
         core.start_store()
         core.start_activity()
