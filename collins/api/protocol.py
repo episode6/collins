@@ -1547,6 +1547,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "removed": _BOOL,
                 "project": _s(PATH_MAX),
                 "cwd": _null(_PATH),
+                # Where a resume of the session starts, worked out on the
+                # service (`sessions.resume_cwd`'s rule: the transcript's last
+                # cwd while it is a directory, else `cwd`; PR-3.0 item 3).
+                "resume_cwd": _null(_PATH),
                 "display_name": _NAME,
                 "cli_title": _NAME,
                 "subtitle": _s(256),
@@ -2589,6 +2593,10 @@ _TABLE: tuple[MessageType, ...] = (
                 # Absent from an older service, which the client reads as
                 # found, so nothing asks.
                 "cli": _CLI_PATH,
+                # The service's home folder (`Path.home()` on its machine):
+                # what a client abbreviates the service's paths with and
+                # where a shell row with no cwd starts (PR-3.0 item 3).
+                "home": _PATH,
             }
         ),
     ),

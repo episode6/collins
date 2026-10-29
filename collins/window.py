@@ -99,7 +99,6 @@ from .sessions import (
     Session,
     path_within,
     project_name_for_cwd,
-    resume_cwd,
     session_from_file,
     worktree_project_root,
 )
@@ -2130,7 +2129,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._update_active_row()
                 return
 
-        cwd = resume_cwd(session)
+        cwd = session.resume_at  # the service's answer (PR-3.0 item 3)
         # A session the Collins service already runs is shown, not resumed
         # a second time (D31): a tab over its pty, its facts arriving with
         # the attach. A fork always starts its own.
@@ -3648,7 +3647,7 @@ class MainWindow(Adw.ApplicationWindow):
         if variant is None:
             return
         tab = ChatSessionTab(
-            cwd=resume_cwd(session), provider=provider, variant=variant,
+            cwd=session.resume_at, provider=provider, variant=variant,
             resume_session_id=session_id,
         )
         page = self.tab_view.append(tab)
@@ -6031,7 +6030,7 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         if shutil.which(provider.cli) is None:
             return
-        cwd = resume_cwd(session)
+        cwd = session.resume_at  # the service's answer (PR-3.0 item 3)
         cwd = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
         subprocess.Popen(
             [_GHOSTTY, f"--working-directory={cwd}", "-e",

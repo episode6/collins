@@ -2271,6 +2271,14 @@ def test_service_status_says_whether_gh_is_ready(server, monkeypatch):
     assert server.core.gh_status == ghsetup.LOGGED_OUT
 
 
+def test_service_status_says_the_services_home(server, tmp_path, monkeypatch):
+    """PR-3.0 item 3: what a client abbreviates the service's paths with."""
+    monkeypatch.setenv("HOME", str(tmp_path / "svc-home"))
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    assert client.request({"t": "service.status"})["home"] == str(tmp_path / "svc-home")
+
+
 def test_the_cli_is_looked_up_on_the_session_environments_path(tmp_path, monkeypatch):
     """PR-3.0 item 10: `service.status`'s `cli` and `cli.check`'s `found`
     are a lookup on the PATH the service spawns its shells with (the login

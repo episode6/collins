@@ -5,6 +5,7 @@ from collins.formatting import (
     BodyImage,
     blast_radius_body,
     body_head,
+    display_path,
     format_relative,
     markup_ok,
     md_to_pango,
@@ -413,3 +414,30 @@ def test_md_never_returns_markup_pango_rejects():
     out = md_to_pango(text)
     assert markup_ok(out)
     assert "<b>" not in out and "&lt;d&gt;" in out
+
+
+# -- the service's home (PR-3.0 item 3) ----------------------------------------
+
+
+def test_a_path_is_abbreviated_with_the_services_home(monkeypatch):
+    from collins import apilink
+
+    class _Link(apilink.Link):
+        def _request(self, message, timeout=None):
+            return {}
+
+    monkeypatch.setenv("HOME", "/home/me")
+    monkeypatch.setattr(apilink, "_current", None)
+    # No link: the process's own home, which on the service is the service's.
+    assert apilink.service_home() == "/home/me"
+    assert display_path("/home/me/src") == "~/src"
+    link = _Link()
+    monkeypatch.setattr(apilink, "_current", link)
+    # A link whose service has not said: nothing is abbreviated.
+    assert apilink.service_home() is None
+    assert display_path("/home/me/src") == "/home/me/src"
+    link.service_home = "/srv/u"
+    assert display_path("/srv/u/src") == "~/src" and display_path("/srv/u") == "~"
+    assert display_path("/home/me/src") == "/home/me/src"  # this device's home is not the service's
+    link.service_home = "relative"  # not a path: not a home
+    assert apilink.service_home() is None

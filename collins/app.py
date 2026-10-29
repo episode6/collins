@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-20. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -2265,6 +2265,10 @@ class App(Adw.Application):
             status = {}
         sandboxstatus.set_probe_reason(status.get("sandbox"))
         remotecli.set_found(status.get("cli"))
+        # The service's home, kept on the link (PR-3.0 item 3): what the
+        # service's paths are abbreviated with, never this device's.
+        home = status.get("home")
+        self._service_link.service_home = home if isinstance(home, str) else None
 
     # -- the connection's life (§3.20) ------------------------------------------
 

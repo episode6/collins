@@ -463,3 +463,14 @@ def test_a_forgotten_event_is_announced(world):
     remote.connect("forgotten", lambda _s, sid: seen.append(sid))
     link.dispatch({"t": "forgotten", "session": ids["alpha1"]})
     assert seen == [ids["alpha1"]]
+
+
+def test_a_rows_resume_directory_is_the_services_answer(world):
+    """PR-3.0 item 3: the `item` carries `resume_cwd`, worked out by the
+    service's scan; the mirror's session answers it (`resume_at`) with no
+    transcript read here."""
+    store, remote, _state, ids, _link = world
+    service = store.get_session(ids["alpha1"])
+    mirrored = remote.get_session(ids["alpha1"])
+    assert service.resume_dir == "/home/user/alpha"  # the tail's cwd, gone here: the starting one
+    assert mirrored.resume_dir == service.resume_dir and mirrored.resume_at == service.resume_at

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-22. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 import json
 import os
@@ -480,6 +480,34 @@ def test_resume_cwd_keeps_a_worktree_a_chat_moved_into(tmp_path, monkeypatch):
     p = tmp_path / "abc.jsonl"
     _write_transcript(p, [own, str(worktree)])
     assert resume_cwd(session_from_file(p)) == str(worktree)
+
+
+def test_the_scan_works_out_where_a_resume_starts(projects_dir, tmp_path):
+    """PR-3.0 item 3: discovery records `resume_cwd`'s answer on the
+    session (`resume_dir`, the `item`'s `resume_cwd`), from the tail it
+    already reads; `resume_at` is that, else the starting directory."""
+    root, ids = projects_dir
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    path = next(root.glob(f"*/{ids['alpha1']}.jsonl"))
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n" + json.dumps({"type": "user", "cwd": str(worktree), "message": {"content": "moved"}}))
+    found = {s.session_id: s for s in sessions.discover_sessions()}
+    assert found[ids["alpha1"]].resume_dir == str(worktree)
+    assert found[ids["alpha1"]].resume_at == str(worktree)
+    assert found[ids["alpha1"]].resume_dir == resume_cwd(found[ids["alpha1"]])  # the same rule
+    # A tail cwd that is no directory any more: the starting one.
+    assert found[ids["beta1"]].resume_at == "/home/user/beta" == resume_cwd(found[ids["beta1"]])
+    # A session nobody worked it out for falls back to its cwd.
+    bare = session_from_file(path)
+    assert bare.resume_dir is None and bare.resume_at == bare.cwd
+
+
+def test_resume_cwd_from_is_the_rule_on_a_recorded_cwd(tmp_path):
+    assert sessions.resume_cwd_from("/proj", str(tmp_path)) == str(tmp_path)
+    assert sessions.resume_cwd_from("/proj", str(tmp_path / "gone")) == "/proj"
+    assert sessions.resume_cwd_from("/proj", None) == "/proj"
+    assert sessions.resume_cwd_from(None, None) is None
 
 
 def test_resume_cwd_without_cwd_entries(tmp_path):

@@ -25,8 +25,9 @@ from .sessions import (
     _UUID_RE,
     Session,
     SessionDetails,
-    _scan_tail,
+    _scan_tail_facts,
     _scan_transcript,
+    resume_cwd_from,
     transcript_is_stub,
 )
 from .sessions import parse_details as _claude_parse_details
@@ -1041,7 +1042,7 @@ class ClaudeProvider(Provider):
                 # after the munged worktree path.
                 if transcript_is_stub(cwd, preview):
                     continue
-                state, cli_title = _scan_tail(jsonl)
+                state, cli_title, tail_cwd = _scan_tail_facts(jsonl)
                 found.append(
                     Session(
                         session_id=jsonl.stem,
@@ -1054,6 +1055,9 @@ class ClaudeProvider(Provider):
                         state=state,
                         provider=self.id,
                         cli_title=cli_title,
+                        # Worked out here, on the scan's worker: the
+                        # `item`'s `resume_cwd` (PR-3.0 item 3).
+                        resume_dir=resume_cwd_from(cwd, tail_cwd),
                     )
                 )
         return found

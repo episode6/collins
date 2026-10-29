@@ -490,6 +490,7 @@ SAMPLES = {
         "removed": False,
         "project": "/home/u/project",
         "cwd": "/home/u/project",
+        "resume_cwd": "/home/u/project/.claude/worktrees/fix",
         "display_name": "Fix the build",
         "cli_title": "Build fix",
         "subtitle": "2 minutes ago",
@@ -994,6 +995,7 @@ REPLIES = {
         "pid": 4242,
         "gh": "logged-out",
         "cli": "/home/u/.local/bin/claude",
+        "home": "/home/u",
     },
     "cli.check": {"found": "", "detected": "/home/u/.local/bin/claude", "status": "versioned"},
 }

@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import fuzzy
+from . import apilink, fuzzy
 
 # The GitHub list: 100 a page (the API's ceiling), newest push first, and at
 # most ten pages. A member of a huge organization can see thousands of
@@ -305,8 +305,9 @@ def filter_repos(repos: list[Repo], query: str, limit: int = DEFAULT_LIMIT) -> l
 
 def parent_directory(setting: str | None, home: str | None = None) -> str:
     """The clone_directory setting as a path: `~` expanded, empty meaning
-    the home folder."""
-    home = home if home is not None else str(Path.home())
+    the home folder. The home is the service's (`apilink.service_home`,
+    PR-3.0 item 3): the clone runs there."""
+    home = home if home is not None else (apilink.service_home() or str(Path.home()))
     text = (setting or "").strip()
     if not text or text == "~":
         return home

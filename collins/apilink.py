@@ -33,12 +33,13 @@ GTK-free.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 
 from .api import protocol
 from .api.protocol import RequestRefused
 
-__all__ = ["Link", "RequestRefused", "call", "current", "is_local", "set_current"]
+__all__ = ["Link", "RequestRefused", "call", "current", "is_local", "service_home", "set_current"]
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,10 @@ class Link:
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable[[dict], None]]] = {}
+        # The service's home folder, as its `service.status` said at connect
+        # (`home`; the app keeps it here, like the CLI's word): None until
+        # said, or from a service older than the field.
+        self.service_home: str | None = None
 
     def on(self, event_type: str, handler: Callable[[dict], None]) -> None:
         """Call *handler* with every event of *event_type*."""
@@ -134,6 +139,19 @@ def is_local() -> bool:
     Ghostty, a dropped file mentioned by its own path), which are hidden,
     not disabled, for a client that is not local. With no link, False."""
     return bool(getattr(_current, "local", False))
+
+
+def service_home() -> str | None:
+    """The service's home folder (PR-3.0 item 3): what its paths are
+    abbreviated with (`formatting.display_path`) and where a shell with no
+    folder of its own starts. With no link at all (the service's own
+    process, a test) it is this process's home, which is the service's.
+    None while a link's service has not said: nothing is abbreviated with
+    a home that may be another machine's."""
+    if _current is None:
+        return os.path.expanduser("~")
+    home = getattr(_current, "service_home", None)
+    return home if isinstance(home, str) and home.startswith("/") else None
 
 
 def call(message: dict, timeout: float | None = None) -> dict:

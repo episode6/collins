@@ -22,7 +22,6 @@ import logging
 import shutil
 import threading
 from collections.abc import Callable
-from pathlib import Path
 
 import gi
 
@@ -48,7 +47,7 @@ from . import (
 )
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
-from .formatting import format_size
+from .formatting import display_path, format_size
 from .gitinfo import current_branch, default_branch, github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
@@ -63,7 +62,7 @@ from .prstatus import (
 from .remotecli import default_provider
 from .remotestore import RemoteStore
 from .scrolling import offset_into_view
-from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
+from .sessions import Session, project_name_for_cwd, worktree_project_root
 from .state import merge_project_order
 from .svgtexture import svg_texture
 from .titles import regenerate_name_label
@@ -157,18 +156,12 @@ def _session_child_indent(icon_size: int) -> int:
 
 
 def _abbreviate_path(path: str | None) -> str:
-    """Show the folder path with $HOME collapsed to ~ for compactness."""
+    """Show the folder path with the service's home collapsed to ~ for
+    compactness (`formatting.display_path`: the paths are the service's,
+    PR-3.0 item 3)."""
     if not path:
         return ""
-    try:
-        home = str(Path.home())
-    except OSError:
-        return path
-    if path == home:
-        return "~"
-    if path.startswith(home + "/"):
-        return "~" + path[len(home):]
-    return path
+    return display_path(path)
 
 
 def _group_state_key(group_key: tuple) -> str:
@@ -1987,11 +1980,12 @@ class SessionSidebar(Gtk.Box):
     def _sweep_prs(
         self, targets: list[tuple[str, list[PullRequest], Session, str | None]]
     ) -> None:
-        """Run the sweep. Off the main loop — it is a `gh` call per directory,
-        after a transcript tail for every session whose tab isn't open."""
+        """Run the sweep. Off the main loop — it is a `gh` call per directory
+        (a session whose tab isn't open is swept in the directory the
+        service says a resume starts in, `Session.resume_at`)."""
         try:
             swept = remoteprs.sweep(
-                (session_id, prs, live or resume_cwd(session))
+                (session_id, prs, live or session.resume_at)
                 for session_id, prs, session, live in targets
             )
         except Exception:
@@ -2416,7 +2410,9 @@ class SessionSidebar(Gtk.Box):
             except Exception:
                 log.exception("sidebar: pty_shown failed")
                 continue
-            rows[f"pty:{pty}"] = cwd or str(Path.home())
+            # The service's home, where its spawn would land a pty with no
+            # folder (PR-3.0 item 3).
+            rows[f"pty:{pty}"] = cwd or apilink.service_home() or ""
         return rows
 
     def refresh_running_rows(self) -> None:
@@ -2698,7 +2694,7 @@ class SessionSidebar(Gtk.Box):
         # running in a worktree or subdirectory hands that folder over. Chat
         # sessions live in throwaway directories nobody wants opened — but the
         # gate is on the *resolved* directory, so a chat that moved into a real
-        # worktree (which resume_cwd deliberately honors) still gets the menu.
+        # worktree (which a resume deliberately honors) still gets the menu.
         rows: list[Gtk.Widget] = []
         cwd = self._session_cwd(row.item.session)
         if local and cwd and not is_chat_cwd(cwd):
@@ -2989,10 +2985,11 @@ class SessionSidebar(Gtk.Box):
         The session's recorded cwd is only where it *started* — an agent that
         moved into a worktree or subdirectory left it behind long ago. An open
         tab knows its live directory (see live_cwd); for everything else the
-        transcript's tail holds the last cwd the agent recorded, which is also
-        what resuming and "Open in Ghostty" use.
+        service read the last cwd the agent recorded off the transcript's tail
+        (the `item`'s `resume_cwd`, `Session.resume_at`: PR-3.0 item 3), which
+        is also what resuming and "Open in Ghostty" use.
         """
-        return self.live_cwd(session.session_id) or resume_cwd(session)
+        return self.live_cwd(session.session_id) or session.resume_at
 
     def _open_with_menu(self, cwd: str, rows: list[Gtk.Widget]) -> Gio.Menu:
         """The "Open In…" submenu: ways to hand a folder — a project's, or a

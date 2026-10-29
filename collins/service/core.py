@@ -1057,6 +1057,9 @@ class ServiceCore:
             "pid": os.getpid(),
             "cli": self.cli_found(),
         }
+        home = str(Path.home())
+        if home.startswith("/") and len(home) <= protocol.PATH_MAX:
+            fields["home"] = home
         reason = sandboxplan.probe_reason()
         if reason is not None:
             fields["sandbox"] = reason[: protocol.ARG_TEXT_MAX]
