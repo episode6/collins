@@ -493,7 +493,9 @@ own** (below): they are the seam the transport sits on.
 **Git goes over the API (split-service spec §3.23, PR-2.1, D33).** In
 the app every runner is routed through `remotegit.Transport`
 (`gitops.set_transport`, installed by `remotegit.install(link)` on every
-hello whose caps list `git`, `App._install_git_transport`; a caller that
+hello, `App._install_git_transport`: since PR-3.0 (D54 (6)) whatever the
+caps say, so a client never runs git itself and a service without the
+`git` capability refuses each ask; a caller that
 brings its own `run=` — a test's fake — never sees it, and the service's
 process never has one: `GitFeed.__init__` refuses to start with a
 transport installed, so its own `file_patch` / `run_plan` / `file_at`
@@ -602,12 +604,17 @@ between two safe refs, two-dot ranges are refused), `loaded_ok`,
 `short_ref`, `breadcrumb` / `tab_title`, `load_for_key` (Ctrl+1/2/3 as
 integers), `initial_mode`, `encode_state` / `decode_state` /
 `decode_sidebar`, the `show_diff` tool's `show_diff_load` and
-`diff_file_path` plus `SHOW_DIFF_DEADLINE_S` / `SHOW_DIFF_POLL_MS`, the
+`diff_file_path` (a file against the repository root, asking no disk and
+no home: the service resolved a `~` and the agent's-cwd rule before the
+call came, `service.diffs.resolve_tool_files`, PR-3.0 item 5) plus
+`SHOW_DIFF_DEADLINE_S` / `SHOW_DIFF_POLL_MS`, the
 git calls behind a commit's name (`commit_subject`, `commit_message` —
 one `git log -1 --format=%H%x00%an%x00%aI%x00%s%x00%b` into a
 `CommitMessage`, every field bounded, the body at
 `COMMIT_BODY_MAX_CHARS` — and `resolve_commit`, `GIT_TIMEOUT_S`; each
-one `gitops.run_git`, `commit_subject` and `resolve_commit` answering
+one `gitops.run_git` — with gitops' own runner unless a test hands its
+`run=`: `gitloads` names no `subprocess.run` of its own since PR-3.0 —
+`commit_subject` and `resolve_commit` answering
 the value, None for "git says no" and `""` for `GitResult.unreachable`),
 `Options.from_settings` →
 `Options(layout, untracked, log_page, line_numbers, wrap, word_diff,
@@ -989,11 +996,9 @@ the digests it had seen (or, when it had seen none yet, delivering the
 new watch's first compare unconditionally); `_drop_watch` (`_close_view`, another cwd)
 sends `git.unwatch {handle}`. The mirror remembers every live watch and sends
 them again on `reset` (a reconnect: the service dropped them with the
-client). **When git is local** — the service's hello has no `git`
-capability (`App._install_git_transport` uninstalls the transport: an
-older service build serving this window until *Restart service*, which
-`PROTOCOL` still at 1 and D13 make a legitimate peer), or a bare page
-in a widget check — `_install_watch` runs the same `_Watch` in this
+client). **When git is local** — a bare page in a widget check, with no
+transport installed (the app installs one on every hello since PR-3.0,
+whatever the service's caps) — `_install_watch` runs the same `_Watch` in this
 process instead (`gitfeed.local_watch(cwd, paths, state, deliver)`:
 GLib's idle and a thread as the host, the page's `_on_git_changed` as
 the deliverer, `_drop_watch` stops it; the next load on the same cwd

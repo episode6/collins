@@ -229,7 +229,11 @@ login shell's `PATH`.
   too), except `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and
   systemd's own variables, which stay as the service was started with,
   and the service's own leading `PATH` entries stay first. `SSH_AUTH_SOCK` is yours to provide there, as
-  it is over ssh.
+  it is over ssh. Every `claude` the service itself looks up (what the
+  window's welcome asks about, the command a session starts with, titles,
+  icons) is found on that same `PATH`, so a service started by
+  `--print-socket` over a non-interactive ssh command finds the CLI that
+  `--check` reports.
 
 `collins-service --print-socket` starts the service if needed and prints the
 socket's path.

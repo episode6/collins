@@ -25,24 +25,36 @@ the cwd with every non-alphanumeric character replaced by `-`.
 (`titles.is_scratch_project`), empty files, non-UUID names and metadata-only
 stubs (`transcript_is_stub` — e.g. worktree agent runs that never got a
 prompt), and reads a **small prefix** for `cwd`, the first user prompt and the
-creation time plus a **64 KB tail** for the interrupted marker and the CLI's
-own title records (`_scan_tail`). Nothing else is read at scan time; the
-store does this off the main thread and lands on `PRIORITY_DEFAULT`.
+creation time plus a **64 KB tail** for the interrupted marker, the CLI's
+own title records and the last recorded cwd (`_scan_tail_facts`; that cwd
+gives `Session.resume_dir`, where a resume starts by `resume_cwd`'s rule,
+worked out on the scan's worker: PR-3.0 item 3). Nothing else is read at
+scan time; the store does this off the main thread and lands on
+`PRIORITY_DEFAULT`.
 
 `Provider` is the abstraction over the CLI: resume/new/continue command
-strings (with the `--mcp-config` flag), graceful exit (`Ctrl+C Ctrl+C`),
+strings (with the `--mcp-config` flag; assembled **on the service only**,
+from `Provider.cli_path`, its lookup on the service's session PATH:
+PR-3.0 items 1 and 10), graceful exit (`Ctrl+C Ctrl+C`),
 background exit (`/bg`), `background_agents()` (`claude agents --json`, with
 `stdin=DEVNULL` — the CLI raw-modes any tty stdin even for that subcommand),
 the prompt-line grammar (`takes_prompt`, `entered_prompt`,
 `clear_prompt_keys`), worktree-failure detection and `file_reference`
 (`@path#L2-4`; column syntax is not parsed by the CLI). Only
 `ClaudeProvider` exists and only ever will — keep the abstraction, don't
-advertise it.
+advertise it. **The client never asks its own PATH for the CLI**
+(`Provider.available` and `providers.available_providers` /
+`default_provider` are the service's): the window's and the sidebar's
+menus read `remotecli.available_providers` / `default_provider` (every
+provider unless `service.status`'s `cli` said the service has none), and
+native chat's entries (`chat_variants`) are a gated local extra (D54 (3),
+hidden for a client that is not local; slated for removal).
 
 Transcript facts the data layer relies on (all undocumented, verified against
 real files): the first `cwd` is **not** where a session began (a `/bg` fork
 copy rewrites every `cwd` to the worktree); `resume_cwd` uses the last
-recorded cwd; a `worktree-state` record says which worktree a session lived
+recorded cwd (on the service: a client reads the `item`'s `resume_cwd`,
+`Session.resume_at`, and imports `sessions.resume_cwd` no more); a `worktree-state` record says which worktree a session lived
 in; `bridge-session` names a claude.ai counterpart; `ai-title` /
 `custom-title` / `agent-name` records carry the CLI's names, the last of any
 type winning; `pr-link` records name PRs; every user turn carries
@@ -141,7 +153,12 @@ resubscribes and `reset()`s and refills both mirrors.
   `SessionItem`s and the store's lookups and mutators. The snapshot sends
   an `item` per row and one `rows`; each service refresh sends the items
   that moved (changed fields only) then `rows`, which is the client's
-  `refreshed`. **Busy, unread and status are the service's**:
+  `refreshed`. An `item` carries `resume_cwd` (where a resume starts, the
+  scan's `Session.resume_dir`; the mirror's `Session.resume_at`), and the
+  paths a row shows are abbreviated with the service's home
+  (`service.status`'s `home`, kept on the link: `apilink.service_home`,
+  read by `formatting.display_path` and `sidebar._abbreviate_path`;
+  nothing is abbreviated before the service said, PR-3.0 item 3). **Busy, unread and status are the service's**:
   the tracker runs there (`service/tracking.py`, D29) and sets
   `busy` and a counted finish's `unread` on the items itself; the client
   sends `store.flags` only for what the person did at its screen —
@@ -624,8 +641,12 @@ controlling tty, so ssh can't prompt either). Cancel or closing the
 dialog `killpg`s it, and git removes its half-made folder. The list is
 cached module-wide for the app's lifetime. The dialog's starting folder
 is the `clone_directory` setting (`"~"` by default; Preferences stores a
-picked folder as `~/…` under home). `scripts/check_clone_repo.py` drives
-all of it with a `gh` shim.
+picked folder as `~/…` under home; `clonerepo.parent_directory` expands
+it with the service's home). Whether the clone landed is the service's
+`fs.stat` of the job's `done` path, and the note's "with gh / git" reads
+`service.status`'s `gh`, asked as the dialog opens (PR-3.0 item 9: the
+dialog opens no folder and runs no `which` of this device's).
+`scripts/check_clone_repo.py` drives all of it with a `gh` shim.
 
 ## Footguns
 

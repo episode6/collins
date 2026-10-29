@@ -36,7 +36,7 @@ Most of the methods this skill names are the session's, not the tab's:
 
 | Lives in `Session` | Stays in `TerminalTab` / `MainWindow` |
 | --- | --- |
-| identity: `session_id`, `fork`, `provider`, `options`, `command_override`, `cwd` | widgets, overlays, dialogs, the footer, the dock, the editor |
+| identity: `session_id`, `fork`, `provider`, `options`, `continue_recent`, `cwd` | widgets, overlays, dialogs, the footer, the dock, the editor |
 | launch: `spawn`, `_finish_spawn`, `_launch_command`, `agent_environment` (was `_agent_tab_environment`), the sandbox plan (`_sandbox_options`, `_reserve_worktree`, `_register/_unregister_sandbox_box`, `_release_sandbox_plan`, `shell_exited`), `_check_worktree_launch` / `relaunch_without_worktree`, `restart_sandboxed` and its poll, the new-chat prompt poll, a reaped worktree put back (`_recreated`) | the `spawn` request that builds the session (`TerminalTab._service_spawn`) and the attach |
 | reads: `takes_prompt`, `entered_prompt`, `prompt_block`, `unstarted_thread` (minus the new-chat screen), `visible_screen_text`, `worktree_exit_prompt_keystrokes`, `screen_first_column`, `mention_leading_space` (Add to chat and a drop's tokens: `mention`, and `write` with `mention: true`) | — |
 | writes: `inject_prompt(_unfocused)`, `switch_model/effort`, the open-cut (`begin_cut` → settle → apply → verify), `send_composed`, `restore_draft` (paste-back), `foreign_paste_in_box` | the composer widget, its open/close/dock, the stash (`_stash_draft`) |
@@ -145,9 +145,9 @@ this tab already launched in, else minted by the host's `mint_box(cwd)`,
 seeded with the project's default grants unless this is a `--continue`
 launch, whose box is settled when it resolves) — or adopts the plan and box
 the options already carry (a sibling's derived ones) — `Provider.
-sandbox_prefix` prepends the wrapper (and the tab appends
-`provider.session_flags` — the permission mode — behind a `--continue`
-override), `_register_sandbox_box` tells the live grants
+sandbox_prefix` prepends the wrapper (and the session appends
+`provider.session_flags` — the permission mode — behind a `--continue`),
+`_register_sandbox_box` tells the live grants
 (the service's, `core.sandbox_grants`) the box is up once the plan is settled,
 `_unregister_sandbox_box(then)` has what was mounted into it unmounted on
 the grants' worker and calls `then` when it is (the restart's relaunch,
@@ -170,15 +170,25 @@ tab's short message to the window's toast overlay. See
 
 A tab asks the service to spawn the user's `$SHELL` (a `spawn` request, see
 "The tab on the pty server") in the session's resume cwd — the **last** cwd its transcript recorded, mapped back
-through worktree recovery — with the environment from
+through worktree recovery; the service's scan works it out and the row
+carries it (`Session.resume_at`, the `item`'s `resume_cwd`: PR-3.0 item 3,
+the client reads no transcript for it) — with the environment from
 `agent_environment()` (`service/session.py`; the app's env plus `ConEmuANSI=ON` and
 `TERM_PROGRAM=kitty`, which are the two spoofs that make the CLI emit
-ST-terminated OSC 9;4 progress that VTE parses; they fail soft). Then it
-types the provider's command: `claude --resume <id>` (or `--fork-session`,
-`--continue`, or a fresh `claude` with `--mcp-config`, `--model`, `--effort`,
-`-w`), or `claude attach <job-id>` when `background_agents(include_finished=
-True)` lists the session — the daemon refuses a plain resume for any id it
-still lists. `attach` is not exclusive: a second client can attach to the same
+ST-terminated OSC 9;4 progress that VTE parses; they fail soft). Then the
+session on the service types the provider's command, **assembled there**
+(PR-3.0 item 1, D54 (1): no client sends a command; `command_override` is
+gone from the `spawn` request and the identity, and the window's
+*Continue last session* asks for `continue_recent`): `claude --resume <id>`
+(or `--fork-session`, `--continue`, or a fresh `claude` with
+`--mcp-config`, `--model`, `--effort`, `-w`), or `claude attach <job-id>`
+when `background_agents(include_finished=True)` lists the session — the
+daemon refuses a plain resume for any id it still lists. The `claude` it
+types is the service's own lookup on its session environment's PATH
+(`Provider.cli_path` → `clisetup.which`; `collins-service` installs that
+PATH as `clisetup`'s search base at start, PR-3.0 item 10), never this
+device's. Tests stage a `claude` on the PATH instead of typing a command
+(`tests/test_core.py`'s `stage_cli`). `attach` is not exclusive: a second client can attach to the same
 job, which is how live sessions are probed without typing into them.
 
 The VTE's `set_size(cols, rows)` before the `spawn` request is the grid the
@@ -441,9 +451,13 @@ resolution is a pure function over the snapshot (`_click_target`, with
 `_resolve_wrapped_at` / `_resolve_wrapped_url_at` / `_resolve_from_transcript_at`
 taking the snapshot, never the terminal), whose only side reads are an
 `exists` predicate (`linkpatterns.resolve_path` / `resolve_file_reference` /
-`resolve_wrapped_reference` take it as a required argument; the click passes
-`remotefiles.present`, an `fs.stat` remembered for the click, and the
-attachment log passes `os.path.exists`) and `links_of` (the transcript's
+`resolve_wrapped_reference` take it as a required argument and return the
+path it answers with; the click passes `remotefiles.locate`, an `fs.stat`
+remembered for the click, and the attachment log passes
+`attachrecords.here`, its own disk. **A `~` path is handed to it as
+written** (`linkpatterns.home_led`): the service's `fs.stat` expands it
+with the service's home and answers the absolute path, PR-3.0 item 4; no
+client expands a `~`) and `links_of` (the transcript's
 links, asked once and only when a click gets that far). The answer lands at
 `PRIORITY_DEFAULT` in `_on_click_resolved`, which opens a URL or
 `_open_file_reference`: one `fs.stat` of the path with the tab's editor root
@@ -455,10 +469,15 @@ swallowed where it used to fall through to the terminal; a click on no
 candidate (the token under the pointer stands in) is not claimed and opens
 on the reply. **The default app is a local extra** (§3.12, PR-2.8):
 `_launch_default` (a directory, a file outside the project) and
-`_launch_uri`'s `file:` URI with no path return at once unless
-`apilink.is_local()` (the branch goes by `linkpatterns.uri_scheme`, the
-scheme lower-cased, never a prefix test: `FILE:///x` is a file URI to GIO); an http(s) link, the editor and the lightbox are
-not local extras and open for every client. The transcript is the
+`_launch_local_uri` return at once unless `apilink.is_local()`.
+`_launch_uri` sends an http, https or mailto link to `_launch_web` (any
+client: a web or mail address names nothing of the service's machine)
+and **every other scheme** to `_launch_local_uri` (a `file:` URI with no
+path the click could open, `ssh:`, an editor's `vscode:`, a desktop's
+own handlers: PR-3.0 item 8), by one GTK-free rule,
+`linkpatterns.scheme_is_remote_safe` (the scheme lower-cased, never a
+prefix test: `FILE:///x` is a file URI to GIO). The editor and the
+lightbox are not local extras and open for every client. The transcript is the
 service's file:
 `transcriptlinks.fetch(session)` is `store.transcript-tail`, answered by
 `service/transcripttail.py` (the last 2 MiB parsed once per size and mtime,
@@ -722,7 +741,7 @@ resume). `save_panel_history` is the `panel.history` request.
   `row_text` cuts a row's cells, `visible_text` joins on the wrap flags.
 - **The spawn.** `TerminalTab._service_spawn`: one `spawn` request (kind
   `agent`, the cwd, the VTE's grid, and what the `Session` is built from:
-  `session`, `fork`, `command_override`, `jsonl_path`, the options'
+  `session`, `fork`, `continue_recent`, `jsonl_path`, the options'
   fields, `sandbox_plan`, `fork_resolve`, a new chat's `prompt`); the
   service builds the session, runs `Session.spawn` (its `spawn_shell` is
   `PtyServer.spawn`, then `shell_spawned` types the command), answers

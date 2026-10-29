@@ -221,8 +221,9 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
 - `set_session_title` — writes Collins' manual name slot (beats generated and
   CLI titles).
 - `open_in_editor` — resolves a path against the tab's live cwd and editor
-  root (`ToolClient.resolve_file`), opens it at a line (`window.open_in_tab_editor`,
-  which honours the pop-out rule).
+  root (`ToolClient.resolve_file`; a `~` path is the service's `fs.stat`,
+  which expands it with the service's home, PR-3.0 item 4), opens it at a
+  line (`window.open_in_tab_editor`, which honours the pop-out rule).
 - `show_diff` — opens the git page quietly on the working tree / index /
   branch / a commit (`open_git_page(focus=False)`), waits for the read to
   settle (`toolclient._ShowDiff` polls `page.settled()` up to
@@ -233,6 +234,14 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   not-a-repo card ends the poll only while `page.opening` is False — a
   page that stood on the card when the tree turned up shows it until its
   open lands. Decisions in `gitloads.show_diff_load` / `diff_file_path`.
+  **The `file` is resolved on the service** before any client sees the
+  call (`service.diffs.resolve_tool_files` in the dispatcher, the headless
+  half too; show_diff's `file` and the `file` of every annotate_diff /
+  highlight_diff entry, PR-3.0 item 5, D54 (6)): a `~` expanded with the
+  service's home, and a relative path that is only there against the
+  agent's cwd (an agent that `cd`ed into `sub/`) made absolute;
+  `diff_file_path` then takes the rest against the repository root and
+  asks no disk.
   `side` (`old`/`new`) and `hunk` (1-based, exclusive with `line`; past
   the file's count → `mcptools.hunk_refusal`, never a silent hunk 1)
   joined the schema in PR 5; `line`, `hunk` and `side` all need `file`.
@@ -312,7 +321,11 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
 - `attach_pr` — puts a PR the transcript never mentioned (one a subagent
   opened) on the session via `pr_store.attach`; a `/pull/` URL attaches bare
   when `gh` can't answer.
-- `start_session` — spawns a sibling session into a **background tab**
+- `start_session` — its `cwd` is the service's `fs.stat` (a `~` expanded
+  there, a relative one taken against the caller's agent cwd; PR-3.0 item
+  4: the client neither expands nor stats it), and a missing CLI is
+  `remotecli.missing()`, the service's word (the service assembles the
+  sibling's command); spawns a sibling session into a **background tab**
   (`MainWindow.start_background_session`: no selection, focus or view change;
   terminal sized like the visible one else 120x40), from the caller's
   **project root** (`worktree_project_root(cwd) or cwd` — launching inside the
@@ -533,10 +546,23 @@ until it has. The cached copy is
 `<sha1 of the url><suffix>`, 0600, never executable; the suffix is the
 only part taken from the service's path and `blobcache.file_suffix`
 replaces a missing, odd or runnable one (`.desktop`, `.sh`, `.AppImage`,
-`.py`, `.exe`, …) with `.bin`, and then `copy_opens_by_default` (asked
-of the copy that landed, so the choice cannot disagree with the name it
-was written under) is False and the row's activation shows the app
-chooser (`set_always_ask`) instead of a default app. The
+`.py`, `.exe`, …) with `.bin`. **What goes to an app is an allow-list**
+(PR-3.0 item 6, D54 (4)): `blobcache.DOCUMENT_SUFFIXES` — the picture
+suffixes the service already serves (`editorfiles.IMAGE_SUFFIXES`: png,
+jpg, jpeg, gif, webp, svg, bmp, ico, tiff, tif, avif) plus pdf, txt, md,
+csv, json and log — checked by `blobcache.hands_to_an_app` on the key
+before a fetch and on the copy that landed. Why these: they are what an
+agent hands a user to *look at*, a viewer opens each without running
+anything, and the list is the one rule that can be stated truthfully (a
+deny-list of what a desktop might run, like `_RUNNABLE_SUFFIXES`, is
+never complete). A row whose file is anything else has **no Open With…
+row** (hidden, not disabled: `attachpanel._copy_may_open`), is not
+fetched, and activating it says why (`_not_a_document`); the lightbox
+offers its cached copy only under the same rule. A `.bin` copy is never
+handed to an app any more; a web image's copy is named by its content
+type and checked when it lands (an `.img` goes nowhere). A local
+client's own file (the service's, on this machine) is a local extra the
+list does not touch. The
 "new images" handle badge needs both an announced-set and a moving timestamp
 baseline; a lightbox showing suppresses its own echo by key
 (`_attachments_beheld`). The panel docks itself once per tab when a column is

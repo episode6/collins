@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-18. Full change history: git log for this file.
+fork. Last modified: 2026-10-29. Full change history: git log for this file.
 -->
 
 # Features
@@ -154,13 +154,14 @@ Enter opens, Esc closes.
   the lightbox and the attachments panel, and a click on a file in that
   panel, are there either way: on the service's machine the app is handed
   the file itself, elsewhere the window's own cached copy of it. Only
-  what the session was sent or showed is fetched that way. As a
-  precaution, best effort and not a guarantee, a copy whose file suffix
-  is missing or is on Collins' list of ones a desktop commonly runs
-  (`.desktop`, `.sh`, `.py`, `.jar`, `.exe`, `.AppImage` and the like) is
-  renamed `.bin` and offered through the app chooser instead of opened
-  in a default app; any other suffix is kept and opens as that file type
-  would from your own disk.) A window that is **not** on the
+  what the session was sent or showed is fetched that way, and a copy
+  goes to an app only when it is a picture or a plain document: `.pdf`,
+  `.txt`, `.md`, `.csv`, `.json`, `.log` and the picture types the
+  lightbox shows. Anything else has no **Open With…** row there, and
+  clicking its file row says why.) Native chat and a Ctrl+click on a
+  link that is not `http`, `https` or `mailto` (`ssh:`, an editor's
+  `vscode:` link, a desktop's own handlers) are local extras too. A
+  window that is **not** on the
   service's machine has none of them: the items are left out, not greyed
   out, because the app they would start is on one computer and the file
   on another. Everything else is the same there: the editor, the git
