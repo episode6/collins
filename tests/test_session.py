@@ -1205,6 +1205,25 @@ def test_a_missing_directory_falls_back_home_and_says_so(launch, tmp_path):
     assert session.cwd == str(session_mod.Path.home())
 
 
+def test_a_gone_resume_directory_falls_back_to_where_the_session_started(launch, tmp_path):
+    """The Fable review of PR 622, N2: a resume directory gone since the
+    scan (a folder the agent `cd`ed into, no worktree) falls back to the
+    directory the store's row says the session started in, not home."""
+    session, _term, host, _clock = launch(session_id="abc")
+    started = tmp_path / "project"
+    started.mkdir()
+    host.recorded_cwd = lambda: str(started)
+    gone = str(tmp_path / "project" / "sub-gone")
+    session.spawn(gone, "abc")
+    assert host.spawns[0][0] == str(started) and session.cwd == str(started)
+    assert any("no longer exists" in line and str(started) in line for line in host.painted())
+    # A row whose own directory is gone too: home, as before.
+    session2, _t, host2, _c = launch(session_id="abc")
+    host2.recorded_cwd = lambda: str(tmp_path / "also-gone")
+    session2.spawn(gone, "abc")
+    assert session2.cwd == str(session_mod.Path.home())
+
+
 def test_a_resume_types_the_resume(launch, tmp_path):
     session, term, host, _clock = launch(session_id="abc", cwd=str(tmp_path))
     session.spawn(str(tmp_path), "abc")

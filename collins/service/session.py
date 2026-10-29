@@ -430,6 +430,12 @@ class SessionHost(Protocol):
         follows."""
         ...
 
+    def recorded_cwd(self) -> str | None:
+        """The directory the session's transcript says it started in (the
+        store's row), None when there is no row: a fallback for a launch
+        whose directory is gone. Optional: a host without it has none."""
+        ...
+
     def mark_stale_shells(self) -> None:
         """A sandbox restart is typing its resume: say so in every sandboxed
         panel shell still running in the box the session had before."""
@@ -2066,7 +2072,16 @@ class Session:
                 # repository: start there rather than in HOME, which is where
                 # the CLI relocates the session anyway.
                 root = worktree_project_root(cwd)
-                fallback = root if root and Path(root).is_dir() else str(Path.home())
+                # Else where the session started (the store's row): the
+                # resume directory a client sends is the scan's, and a
+                # folder the agent `cd`ed into may have gone since (the
+                # Fable review of PR 622, N2). Home last.
+                recorded = getattr(self.host, "recorded_cwd", None)
+                started = recorded() if callable(recorded) else None
+                fallback = next(
+                    (d for d in (root, started) if d and d != cwd and Path(d).is_dir()),
+                    str(Path.home()),
+                )
                 self.host.paint(
                     _("warning: project dir {cwd} no longer exists, starting in {fallback}").format(
                         cwd=cwd, fallback=fallback

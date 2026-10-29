@@ -428,6 +428,7 @@ def test_expand_home_is_this_machines_home_for_a_leading_tilde(monkeypatch):
     monkeypatch.setenv("HOME", "/srv/u")
     assert expand_home("~") == "/srv/u"
     assert expand_home("~/notes/a.md") == "/srv/u/notes/a.md"
+    assert expand_home("~/../x") == "/srv/x"  # one spelling (the Fable review of PR 622, N6)
     assert expand_home("/abs/~/x") == "/abs/~/x"
     assert expand_home("~other/x") == "~other/x"  # another user's home is no path a client names
 

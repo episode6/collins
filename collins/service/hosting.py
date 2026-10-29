@@ -540,6 +540,17 @@ class SessionRecord:
     def alive(self) -> bool:
         return not self.exited
 
+    def recorded_cwd(self) -> str | None:
+        """The store row's starting directory for the session, None with no
+        store or no row (a fresh spawn)."""
+        store = getattr(self.core, "store", None)
+        session_id = self.session.session_id
+        if store is None or not session_id:
+            return None
+        row = store.get_session(session_id)
+        cwd = getattr(row, "cwd", None) if row is not None else None
+        return cwd if isinstance(cwd, str) and cwd else None
+
     def paint(self, text: str) -> None:
         line = paint_line(text)
         pty = self.pty()

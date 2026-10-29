@@ -103,10 +103,10 @@ class Session:
     mtime: float  # last activity (file mtime)
     created: float = 0.0  # session start (first transcript timestamp; mtime fallback)
     size: int = 0  # transcript size in bytes
-    state: str = ""  # "" or "interrupted" (see _scan_tail)
+    state: str = ""  # "" or "interrupted" (see _scan_tail_facts)
     provider: str = "claude"  # provider id (see providers.py)
     # The agent CLI's own name for the session — the last title record in the
-    # transcript's tail, "" when the tail holds none (see _scan_tail).
+    # transcript's tail, "" when the tail holds none (see _scan_tail_facts).
     cli_title: str = ""
     # Where a resume starts (`resume_cwd`'s rule), worked out by the
     # service's scan, or the `item` event's `resume_cwd` on a client (PR-3.0
@@ -760,9 +760,9 @@ _TITLE_KEYS = {"ai-title": "aiTitle", "custom-title": "customTitle", "agent-name
 _MAX_CLI_TITLE_CHARS = 200
 
 
-def _scan_tail(path: Path) -> tuple[str, str]:
-    """Cheaply read the transcript's tail: (state, cli_title)
-    (`_scan_tail_facts` without the cwd).
+def _scan_tail_facts(path: Path) -> tuple[str, str, str | None]:
+    """Cheaply read the transcript's tail: (state, cli_title, cwd), from one
+    read and one parse.
 
     state:
     - "interrupted": the last event was the user stopping Claude mid-task.
@@ -776,18 +776,15 @@ def _scan_tail(path: Path) -> tuple[str, str]:
     it holds none — which does not mean the session has no title: a busy
     session can push its title records past the window between re-emissions,
     so callers keep the last non-empty answer (see AppState.cli_titles).
+
+    cwd is the last cwd the tail records, None when it records none:
+    `resume_cwd`'s input (`_tail_cwd`'s answer, read in the same loop).
     """
-    state, title, _cwd = _scan_tail_facts(path)
-    return state, title
-
-
-def _scan_tail_facts(path: Path) -> tuple[str, str, str | None]:
-    """`_scan_tail`'s (state, cli_title) and the last cwd the same tail
-    records (`resume_cwd`'s input), from one read."""
     blob = _read_tail(path)
 
     latest: str | None = None  # "other" or "interrupted"
     title = ""
+    cwd: str | None = None
     for line in blob.splitlines():
         try:
             entry = json.loads(line)
@@ -795,6 +792,8 @@ def _scan_tail_facts(path: Path) -> tuple[str, str, str | None]:
             continue  # likely a partial first line from the tail window
         if not isinstance(entry, dict):
             continue
+        if isinstance(entry.get("cwd"), str):
+            cwd = entry["cwd"]
         key = _TITLE_KEYS.get(entry.get("type"))
         if key is not None:
             value = entry.get(key)
@@ -811,7 +810,7 @@ def _scan_tail_facts(path: Path) -> tuple[str, str, str | None]:
         elif entry.get("type") == "user" and not text.startswith("<"):
             latest = "other"  # a real user reply, not a tool result / command
 
-    return ("interrupted" if latest == "interrupted" else "", title, _tail_cwd(blob))
+    return ("interrupted" if latest == "interrupted" else "", title, cwd)
 
 
 def discover_sessions() -> list[Session]:

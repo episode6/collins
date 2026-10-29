@@ -565,7 +565,7 @@ def expand_home(path: str) -> str:
     and `cwd.settle` take one, and a client never expands it with its own
     home, which on another machine is another folder."""
     if path == "~" or path.startswith("~/"):
-        return os.path.expanduser(path)
+        return os.path.normpath(os.path.expanduser(path))
     return path
 
 

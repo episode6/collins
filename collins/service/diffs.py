@@ -257,7 +257,6 @@ class DiffNotes:
         return self._read(session, answer)
 
 
-
 # -- the tools' file arguments, resolved here (PR-3.0 item 5, D54 (6)) ------------------
 
 # The diff tools whose arguments name a file: show_diff's `file`, and the
