@@ -94,6 +94,9 @@ CHECK_SECONDS = {
     "check_detach_reopen.py": 46.0,
     "check_composer_paste.py": 6.0,
     "check_drop_upload.py": 6.0,  # PR-2.7; estimated until the next refresh
+    # PR-3.5; not yet timed on CI: about 12 s on a dev box under the
+    # headless shell (one app, a second link, the size passed four times).
+    "check_two_clients.py": 12.0,
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,
     "check_auto_delete.py": 5.2,

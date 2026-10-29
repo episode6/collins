@@ -825,8 +825,8 @@ resume). `save_panel_history` is the `panel.history` request.
   since GTK4 has no size-allocate signal) glued to a pty of the service by
   `ptyclient.ClientTerminal` (`tab._view`): output frames are `feed()`,
   every `commit` goes back as an input frame, the grid goes as a `resize`
-  event on every allocation change, `notify::has-focus` as a `focus`
-  event, `pty-exited` is what `child-exited` was (`tab._on_pty_exited` →
+  event on every allocation change while this client owns the size (below),
+  `notify::has-focus` as a `focus` event, `pty-exited` is what `child-exited` was (`tab._on_pty_exited` →
   `Session.shell_exited`; a status the service does not know is -1). The
   ports are `hosting.RecordPtyPort` and `RecordScreenPort` on the service over its
   pty and `termscreen.Screen` (the dim judgement with the
@@ -872,6 +872,38 @@ resume). `save_panel_history` is the `panel.history` request.
   one before is dropped, the rest coalesced to the latest per 30 ms on a
   timer in `ClientTerminal`; presses, releases, wheel and drags go at once
   and flush what was pending ahead of them.
+- **Two clients on one pty** (§3.24, PR-3.5). The service decides who
+  owns the size (the active client, below in the pty server); the client
+  shows. `sizerole.SizeRole` (GTK-free, `tests/test_sizerole.py`) reads the
+  `attach` reply and every `pty` event (`active`, `cols`, `rows`,
+  `sized_for`) into `PINNED` / `MOVED` / `RELEASED`, and
+  `ClientTerminal._apply_role` acts: while not active, `send_grid` and the
+  allocation's send are suppressed (`grids_withheld` counts them), the VTE
+  is `set_size` to the pty's grid (before the redraw is fed, since the
+  reply is applied in `attach`), and the tab's and each panel shell's
+  scrolled window is a `ptyclient.TerminalFrame`: an `Adw.Banner` "Sized
+  for <device>" (`sizerole.banner_title`: the device is foreign, bounded
+  and stripped of control and format characters, shown with
+  `use_markup` off) with *Use this size*, over a `PinBox` that allocates
+  the scrolled window exactly the terminal's natural size (its grid) plus
+  the chrome it learned unpinned, top left and clipped. `halign START`
+  alone is not enough (F2 holds only while the pane is larger: a
+  `Gtk.ScrolledWindow` allocates a scrollable child its viewport, so a
+  smaller pane regrids the VTE; measured). *Use this size* is
+  `take_size()`: a `focus {focused: true}` event and `grab_focus`; a click
+  (a capture-phase `GestureClick` on the terminal, `view.click`, never
+  claimed) does the same while pinned, and a key is input, which the
+  service counts as taking the role. On `RELEASED` the box lets go,
+  `_last_grid` is cleared and the VTE re-allocated, so the grid it lands
+  on is sent even when it equals the one sent before the pin.
+  `ClientTerminal.active` is the role's, read-only. With no active client
+  at all (the active one detached) every remaining client reads
+  `active: False` and stays pinned at the last grid until one of them
+  types, clicks or focuses: the service's word, shown as is.
+  `scripts/check_two_clients.py` is the e2e (the app's tab and a bare
+  `SocketLink` on another device: attach, pinned, take the size, the tab
+  pinned through window resizes and a grid larger than its pane, the
+  banner's button, a key, a click).
 - **`feed_message` is `paint`** (rule 2 of §3.1) once the pty is attached:
   the line goes into the stream on the service, so the model and every
   client show it; before the spawn or after the exit it is fed to the

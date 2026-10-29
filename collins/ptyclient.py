@@ -41,12 +41,22 @@ them.
 
 Sizing
 ------
-The service's pty is sized by its active client (§3.3): the active client's
-(the most recent to focus or resize). VTE's grid changes with the widget's allocation, so the terminal
-is subclassed to notice its own allocation and send the grid; `set_size`
+The service's pty is sized by its active client (§3.3): the last one to
+type into it or report focus on it, the first to attach when none.
+VTE's grid changes with the widget's allocation, so the terminal is
+subclassed to notice its own allocation and send the grid; `set_size`
 before the first allocation (a never-shown tab) reaches the service the
-same way. A `pty` event saying the pty is sized for someone else pins the
-VTE to that grid (`set_size`), the "Sized for <device>" bar being PR-3.5's.
+same way. **Two clients** (§3.24, PR-3.5): `sizerole.SizeRole` reads the
+`attach` reply and every `pty` event, and while this client is not the
+active one it sends no ``resize`` (`send_grid` returns), pins the VTE to
+the pty's grid (`set_size`) and, inside a `TerminalFrame`, holds it in a
+`PinBox` that allocates the terminal exactly that grid whatever room it
+has (F2: an allocation would regrid a VTE that fills it), with an
+`Adw.Banner` "Sized for <device>" above it. *Use this size* sends
+``focus {focused: true}`` (`take_size`), as a click into the terminal does;
+a key typed is input, which the service counts the same. When the service
+says this client is active again the box lets go, and the next allocation
+sends the grid it lands on.
 """
 
 from __future__ import annotations
@@ -55,11 +65,14 @@ import logging
 import socket
 from collections.abc import Callable
 
-from gi.repository import GLib, Vte
+from gi.repository import Adw, GLib, Gtk, Vte
 
+from . import sizerole
 from .api import protocol
+from .i18n import _
 from .mouserate import MOTION_COALESCE_MS, MotionCoalescer
 from .redrawguard import RedrawGuard
+from .sizerole import SizeRole
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +86,8 @@ def device_name() -> str:
         return socket.gethostname()[: protocol.HOST_MAX]
     except OSError:
         return ""
+
+
 class ClientVte(Vte.Terminal):
     """A VTE that reports its own allocation: GTK4 has no size-allocate
     signal, and the grid is what the service's pty has to follow."""
@@ -85,6 +100,104 @@ class ClientVte(Vte.Terminal):
         Vte.Terminal.do_size_allocate(self, width, height, baseline)
         if self.on_allocated is not None:
             self.on_allocated()
+
+
+class PinBox(Gtk.Widget):
+    """The fixed-size box (§3.24 "Two clients", F2): holds the terminal's
+    scrolled window and, while *pinned*, allocates it exactly the room the
+    terminal's grid takes (the terminal's natural size, which `set_size`
+    made the pty's grid, plus what the scrolled window wraps around it),
+    at the top left, clipped: a pane smaller than the grid cuts the view
+    off, a larger one leaves the rest empty, and neither regrids the VTE.
+    Unpinned it is a plain bin. Its own size request is always the
+    child's, so pinning never moves the layout around it."""
+
+    __gtype_name__ = "CollinsPinBox"
+
+    def __init__(self, child: Gtk.Widget, terminal: Vte.Terminal) -> None:
+        super().__init__()
+        self._child = child
+        self._terminal = terminal
+        self._pinned = False
+        # What the scrolled window takes around the terminal (borders, a
+        # scrollbar that is not an overlay, the terminal's own margins),
+        # learned from the last unpinned allocation.
+        self._chrome = (0, 0)
+        self.set_overflow(Gtk.Overflow.HIDDEN)
+        child.set_parent(self)
+
+    @property
+    def pinned(self) -> bool:
+        return self._pinned
+
+    def set_pinned(self, pinned: bool) -> None:
+        """Pin (or let go); also re-asks the allocation for a pin whose
+        grid moved."""
+        self._pinned = bool(pinned)
+        self.queue_resize()
+
+    def do_get_request_mode(self) -> Gtk.SizeRequestMode:
+        return self._child.get_request_mode()
+
+    def do_measure(self, orientation: Gtk.Orientation, for_size: int) -> tuple:
+        minimum, natural, min_baseline, nat_baseline = self._child.measure(orientation, for_size)
+        return (minimum, natural, min_baseline, nat_baseline)
+
+    def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
+        if not self._pinned:
+            self._child.allocate(width, height, baseline, None)
+            self._chrome = (
+                max(0, self._child.get_width() - self._terminal.get_width()),
+                max(0, self._child.get_height() - self._terminal.get_height()),
+            )
+            return
+        # The terminal's natural size is its grid in cells plus its
+        # padding (and its margins, which the chrome counts again: a few
+        # pixels over, never under, and short of a cell either way).
+        _min_w, natural_w, _b, _c = self._terminal.measure(Gtk.Orientation.HORIZONTAL, -1)
+        _min_h, natural_h, _d, _e = self._terminal.measure(Gtk.Orientation.VERTICAL, natural_w)
+        chrome_w, chrome_h = self._chrome
+        self._child.allocate(natural_w + chrome_w, natural_h + chrome_h, -1, None)
+
+    def do_dispose(self) -> None:
+        if self._child is not None and self._child.get_parent() is self:
+            self._child.unparent()
+        Gtk.Widget.do_dispose(self)
+
+
+class TerminalFrame(Gtk.Box):
+    """A `ClientTerminal`'s terminal as the tab shows it: a scrolled window
+    around the VTE inside a `PinBox`, under an `Adw.Banner` that says whom
+    the pty is sized for while this client is not the active one, with
+    *Use this size* (§3.24, PR-3.5). Built in place of the bare scrolled
+    window; the view drives it (`ClientTerminal.frame`)."""
+
+    def __init__(self, view: ClientTerminal) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
+        self.view = view
+        self.scrolled = Gtk.ScrolledWindow(child=view.terminal, vexpand=True)
+        self.scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.pinbox = PinBox(self.scrolled, view.terminal)
+        # Expands as the bare scrolled window did (its own expand flags are
+        # computed from its child's otherwise).
+        self.pinbox.set_vexpand(True)
+        self.banner = Adw.Banner(title="", button_label=_("Use this size"), revealed=False)
+        # The device is another machine's name (rule 5): shown as text.
+        self.banner.set_use_markup(False)
+        self.banner.connect("button-clicked", lambda *_a: view.take_size())
+        self.append(self.banner)
+        self.append(self.pinbox)
+        view.frame = self
+        self.show_role(view.role)
+
+    def show_role(self, role: SizeRole) -> None:
+        """Pin and say so, or let go and say nothing."""
+        pinned = role.pinned is not None
+        if not role.active:
+            self.banner.set_title(sizerole.banner_title(role.sized_for))
+        self.banner.set_revealed(not role.active)
+        if pinned != self.pinbox.pinned or pinned:
+            self.pinbox.set_pinned(pinned)
 
 
 class ClientTerminal:
@@ -117,12 +230,28 @@ class ClientTerminal:
         self._motion = MotionCoalescer()
         self._motion_source = 0
         self._last_grid: tuple[int, int] | None = None
-        self.active = True
+        # Who owns the pty's size, as the service last said (PR-3.5), and
+        # the frame that shows it (a `TerminalFrame`, once built).
+        self.role = SizeRole()
+        self.frame: TerminalFrame | None = None
+        self.grids_withheld = 0  # allocations not sent while pinned, for the checks
         self.dropped_commits = 0  # what the guard swallowed, for the checks
         terminal.connect("commit", self._on_commit)
         terminal.connect("notify::has-focus", self._on_focus_changed)
+        # A click into a pinned terminal takes the size (§3.3): capture
+        # phase and never claimed, so the click still lands in VTE.
+        click = Gtk.GestureClick(button=0)
+        click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        click.connect("pressed", self._on_pressed)
+        terminal.add_controller(click)
+        self.click = click
         if isinstance(terminal, ClientVte):
             terminal.on_allocated = self._on_allocated
+
+    @property
+    def active(self) -> bool:
+        """Whether this client owns the pty's size (the service's word)."""
+        return self.role.active
 
     # -- the service's way in
 
@@ -150,13 +279,42 @@ class ClientTerminal:
             self._cancel_motion()
             self._on_exited(event.get("status"))
         elif kind == "pty":
-            self.active = bool(event.get("active", True))
-            if not self.active and event.get("cols") and event.get("rows"):
-                # Sized for someone else: show the pty's grid, not ours
-                # (§3.3; the "Sized for" bar is PR-3.5's).
-                self.terminal.set_size(int(event["cols"]), int(event["rows"]))
+            self._apply_role(event)
             if self._on_pty_event is not None:
                 self._on_pty_event(event)
+
+    # -- the size's owner (PR-3.5)
+
+    def _apply_role(self, message: dict) -> None:
+        change = self.role.apply(message)
+        if change in (sizerole.PINNED, sizerole.MOVED):
+            grid = self.role.pinned
+            if grid is not None:
+                # Sized for someone else: show the pty's grid, not ours.
+                self.terminal.set_size(*grid)
+        elif change == sizerole.RELEASED:
+            # Ours again: the next allocation sends whatever grid it lands
+            # on, even one equal to the grid sent before the pin.
+            self._last_grid = None
+            self.terminal.queue_allocate()
+        if change != sizerole.UNCHANGED and self.frame is not None:
+            self.frame.show_role(self.role)
+
+    def take_size(self) -> None:
+        """*Use this size*: tell the service this client wants the role
+        (a ``focus {focused: true}`` event; §3.3, the service decides), and
+        put the keyboard in the terminal."""
+        if self.pty is None or self._exited:
+            return
+        try:
+            self.client.send_event({"t": "focus", "pty": self.pty, "focused": True})
+        except Exception:
+            log.debug("focus event for pty %s failed", self.pty, exc_info=True)
+        self.terminal.grab_focus()
+
+    def _on_pressed(self, *_args) -> None:
+        if not self.role.active:
+            self.take_size()
 
     # -- attach
 
@@ -167,6 +325,9 @@ class ClientTerminal:
         self._exited = False
         self._focus_reporting = False
         self._motion = MotionCoalescer()
+        self.role.reset()
+        if self.frame is not None:
+            self.frame.show_role(self.role)
         self.guard.raise_for_attach()
         self.terminal.reset(True, True)
         cols, rows = self.grid()
@@ -177,6 +338,9 @@ class ClientTerminal:
             raise
         self._focus_reporting = FOCUS_REPORTING_ON in (reply.get("modes") or ())
         self._last_grid = (cols, rows)
+        # Pinned before the redraw is fed (it lands after this returns), so
+        # a client that is not the active one paints it at the pty's grid.
+        self._apply_role(reply)
         self.send_theme()
         return reply
 
@@ -251,12 +415,17 @@ class ClientTerminal:
         grid = self.grid()
         if grid == self._last_grid:
             return
+        if not self.role.sends_grid:
+            self.grids_withheld += 1
+            return
         self._last_grid = grid
         self.send_grid()
 
     def send_grid(self) -> None:
-        """Tell the service this VTE's grid now (a `resize` event)."""
-        if self.pty is None or self._exited:
+        """Tell the service this VTE's grid now (a `resize` event). Not
+        while another client owns the size (§3.24): the pinned grid is the
+        pty's own, and the service would only file it away."""
+        if self.pty is None or self._exited or not self.role.sends_grid:
             return
         cols, rows = self.grid()
         self._last_grid = (cols, rows)
