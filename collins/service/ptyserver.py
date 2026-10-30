@@ -71,7 +71,13 @@ Attach, the redraw and the active client
 with the mode tracker's preamble, in frames of at most
 `protocol.MAX_PAYLOAD`, every one flagged `FLAG_REDRAW` and the last
 `FLAG_REDRAW_END`, then live output. The active client owns the size (D1):
-the last sink to send input or report focus, the first to attach when none
+the last sink to type (an input frame that is not only focus or mouse
+reports: `takes_role`, PR-3.5) or report focus, the first to attach when none.
+When the active sink detaches while others are attached the role passes at
+once to the remaining sink that most recently typed or reported focus, else
+the most recently attached, with its remembered size applied (`_detach`,
+§3.3 as ruled on the review of PR 627): a pty with a sink attached always has
+an active one
 (a newcomer takes the role when no sink holds it, even with other sinks
 attached: whoever last cared has gone, and the one arriving is the one
 looking). A resize from the active sink is applied (``TIOCSWINSZ``, the
@@ -198,6 +204,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import signal
 import struct
 import termios
@@ -219,6 +226,23 @@ log = logging.getLogger(__name__)
 # whole until the queue has drained, never blocked on. The filter's replies
 # are not counted.
 INPUT_QUEUE_BYTES = 4 * 1024 * 1024
+
+# What a client's VTE commits on its own rather than a person typing: focus
+# reports (``ESC [ I`` / ``ESC [ O``, with ?1004h on) and mouse reports (SGR
+# ``ESC [ < b;x;y M|m`` and X10 ``ESC [ M bxy``: motion, wheel, the press
+# and release of a click). A frame made of nothing else takes no role
+# (§3.3, the Fable review of PR 627, M1): a pinned client re-attaching (its
+# focus state is sent when the redraw guard drops), losing focus, hovering
+# or wheeling must not take the size from the device that is using it. A
+# click takes it through the client's own `focus {focused: true}` event,
+# and focus does through that event too; a wheel does not.
+_PASSIVE_INPUT = re.compile(rb"(?:\x1b\[(?:[IO]|<\d+;\d+;\d+[Mm]|M[\x20-\xff]{3}))*")
+
+
+def takes_role(data: bytes) -> bool:
+    """Whether an input frame is a person typing, which makes its sink the
+    active client: anything but focus and mouse reports (and nothing)."""
+    return bool(data) and _PASSIVE_INPUT.fullmatch(data) is None
 # A redraw is bounded at attach time: the oldest scrollback rows are left
 # out until the snapshot fits (§3.2's "the screen as it is now").
 REDRAW_MAX = QUEUE_BYTES // 2
@@ -306,7 +330,7 @@ _STAGE_SETUP, _STAGE_CHDIR, _STAGE_EXEC = 0, 1, 2
 class _Attachment:
     """One sink's view of one pty."""
 
-    __slots__ = ("sink", "cols", "rows", "queued", "ever_drained", "fallback_logged")
+    __slots__ = ("sink", "cols", "rows", "queued", "ever_drained", "fallback_logged", "acted", "attached")
 
     def __init__(self, sink, cols: int, rows: int):
         self.sink = sink
@@ -314,6 +338,11 @@ class _Attachment:
         self.queued = 0  # live bytes handed to the sink and not yet drained
         self.ever_drained = False
         self.fallback_logged = False
+        # When the sink last typed into the pty or reported focus on it, and
+        # when it (last) attached: the server's own sequence, 0 for never.
+        # Who takes the role when the active client detaches (§3.3).
+        self.acted = 0
+        self.attached = 0
 
 
 class Pty:
@@ -496,6 +525,7 @@ class PtyServer:
         self._next_id = max(1, next_id)
         self.vte_version = vte_version
         self.ptys: dict[int, Pty] = {}
+        self._seq = 0  # orders the sinks' acts and attaches (`_detach`'s heir)
         self._term: dict = {}  # the last term any client sent: the fallback (see pty_term)
         self._in_flight: dict[int, threading.Thread] = {}  # pty id -> its save worker
 
@@ -726,9 +756,10 @@ class PtyServer:
 
     def write(self, pty_id: int, data: bytes, sink=None) -> None:
         """Bytes for the child, in arrival order; from a sink, that sink
-        becomes the active client."""
+        becomes the active client when the frame is typing (`takes_role`:
+        not only the focus and mouse reports a VTE commits on its own)."""
         pty = self.get(pty_id)
-        if sink is not None:
+        if sink is not None and takes_role(data):
             self._activate(pty, id(sink))
         self._enqueue_input(pty, bytes(data))
 
@@ -817,7 +848,9 @@ class PtyServer:
         attachment = pty.attachments.get(key)
         if attachment is None:
             attachment = pty.attachments[key] = _Attachment(sink, cols, rows)
+            attachment.attached = self._next_seq()
         else:
+            attachment.attached = self._next_seq()
             # A re-attach: the grid is the new one; `queued` stays as it is
             # so `_redraw` drops what the sink still holds of the old
             # stream (zeroing it here left the socket sink's pending frames
@@ -860,10 +893,18 @@ class PtyServer:
         key = id(attachment.sink)
         pty.attachments.pop(key, None)
         pty.pending_sizes.pop(key, None)
-        if pty.active == key:
-            pty.active = None  # the next sink to attach, type or focus takes it
+        if pty.active != key:
+            return
+        if not pty.attachments:
+            pty.active = None  # the next sink to attach takes it
             self.apply_pty_term(pty)
             self._announce(pty)
+            return
+        # The role passes at once (§3.3): to the sink that most recently
+        # typed or reported focus, else the most recently attached; its
+        # remembered size applies as if it had taken the role itself.
+        heir = max(pty.attachments.values(), key=lambda a: (a.acted, a.attached))
+        self._take_role(pty, id(heir.sink))
 
     def _redraw(self, pty: Pty, attachment: _Attachment) -> None:
         if attachment.queued:
@@ -929,11 +970,23 @@ class PtyServer:
                 log.exception("pty %d: a sink failed; detaching it", pty.id)
                 self._detach(pty, attachment)
 
+    def _next_seq(self) -> int:
+        self._seq += 1
+        return self._seq
+
     def _activate(self, pty: Pty, key: int) -> None:
         """A sink typed or took focus: it is the active client now, and the
         size it asked for while it was not is applied."""
-        if key not in pty.attachments:
+        attachment = pty.attachments.get(key)
+        if attachment is None:
             return
+        attachment.acted = self._next_seq()
+        self._take_role(pty, key)
+
+    def _take_role(self, pty: Pty, key: int) -> None:
+        """*key*'s sink is the active client: its colours answer, and the
+        size it asked for while it was not is applied (or the change is
+        announced)."""
         if pty.active != key:
             pty.active = key
             self.apply_pty_term(pty)
