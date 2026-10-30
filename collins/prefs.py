@@ -1061,16 +1061,9 @@ class PreferencesDialog(Adw.Dialog):
         terms = ("command", "script", "push", "pushover", "ntfy", "webhook", "phone", "away", "headless")
         self._notify_command_row = Adw.EntryRow(title=_("Notification command"))
         self._notify_command_row.set_text(state.get_setting("notify_command") or "")
-        self._notify_command_row.connect("changed", self._on_notify_command_changed)
-        self._notify_command_row.connect("entry-activated", self._on_notify_command_activated)
-        self._flush_git_word_on_focus_out(
-            self._notify_command_row, "notify_command", remotenotify.command_ok
-        )
-        self.connect("closed", lambda *_a: self._flush_notify_command())
         self._notify_test_button = Gtk.Button(label=_("Send test"), valign=Gtk.Align.CENTER)
         self._notify_test_button.connect("clicked", self._on_notify_test_clicked)
         self._notify_command_row.add_suffix(self._notify_test_button)
-        group.add(_searchable(self._notify_command_row, *terms), "notify_command")
         self._notify_command_help = _(
             "Run on the service's machine for a message or a finished run when no "
             "Collins window is attached. The notification is in COLLINS_NOTIFY_KIND, "
@@ -1078,11 +1071,21 @@ class PreferencesDialog(Adw.Dialog):
             "would split it but run without one; it gets 10 seconds"
         )
         self._notify_command_caption = Adw.ActionRow(activatable=False, selectable=False)
+        # The caption shows text the service sent (the OS's words): never markup.
+        self._notify_command_caption.set_use_markup(False)
         self._notify_command_caption.add_css_class("dim-label")
         self._notify_command_caption.set_subtitle(self._notify_command_help)
-        group.add(_searchable(self._notify_command_caption, *terms), "notify_command")
         self._notify_testing = False
         self._refresh_notify_test_button()
+        # Every widget the handlers touch exists before the first signal can fire.
+        self._notify_command_row.connect("changed", self._on_notify_command_changed)
+        self._notify_command_row.connect("entry-activated", self._on_notify_command_activated)
+        self._flush_git_word_on_focus_out(
+            self._notify_command_row, "notify_command", remotenotify.command_ok
+        )
+        self.connect("closed", lambda *_a: self._flush_notify_command())
+        group.add(_searchable(self._notify_command_row, *terms), "notify_command")
+        group.add(_searchable(self._notify_command_caption, *terms), "notify_command")
 
     def _refresh_notify_test_button(self) -> None:
         text = self._notify_command_row.get_text()

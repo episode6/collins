@@ -291,6 +291,10 @@ def step_test() -> bool:
     shown = send_test(button, caption, state["help"])
     check("a program that is missing shows the OS's words", shown == "No such file or directory", shown)
     check("in the error style", caption.has_css_class("error"))
+    # Text the service sent is never markup.
+    state["dialog"]._on_notify_test_result(None, "<b>&oops</b>")
+    check("the caption does not parse markup", not caption.get_use_markup())
+    check("and shows the text as sent", caption.get_subtitle() == "<b>&oops</b>", caption.get_subtitle())
     return later(step_exit_status, 100)
 
 

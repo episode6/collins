@@ -2639,10 +2639,14 @@ def test_the_first_sweep_waits_for_the_stores_first_scan(app_state, projects_dir
         assert not core._sweep_source
 
 
-def test_a_counted_finish_runs_the_notify_command_only_with_no_client(app_state, projects_dir, tmp_path):
+def test_a_counted_finish_runs_the_notify_command_only_with_no_client(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
     """PR-3.4: the finish the clients would be told of goes to the
     notify_command instead when none is subscribed (§3.13)."""
     _root, ids = projects_dir
+    monkeypatch.setenv("COLLINS_DEBUG_API", "1")
+    monkeypatch.setenv("NOTIFY_SOCKET", "/run/fake-notify")
     service_state = app_state.AppState(migrate=True, device=False)
     service_state.set_setting("notify_command", "notify-me --flag")
     core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
@@ -2672,6 +2676,9 @@ def test_a_counted_finish_runs_the_notify_command_only_with_no_client(app_state,
         assert env["COLLINS_NOTIFY_TITLE"] == item.display_name
         assert env["COLLINS_NOTIFY_PROJECT"] == item.session.project_name
         assert env["COLLINS_NOTIFY_BODY"] == "Finished a run"
+        # The spawn environment, as a shell gets it (D27): the probe's flag
+        # and the unit's notify socket are not handed on.
+        assert "COLLINS_DEBUG_API" not in env and "NOTIFY_SOCKET" not in env and "PATH" in env
     finally:
         srv.shutdown()
         pump(0.3)

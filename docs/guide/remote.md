@@ -141,9 +141,11 @@ a finished run is in the notification bell when the next window
 connects, and nothing more. For a box you leave running, set **Notification
 command** in Preferences → *Service* (`notify_command`): the service runs
 it, on the box, for each of those while no window is attached, with the
-notification in `COLLINS_NOTIFY_KIND`, `COLLINS_NOTIFY_TITLE`,
-`COLLINS_NOTIFY_BODY`, `COLLINS_NOTIFY_SESSION` and
-`COLLINS_NOTIFY_PROJECT`, an empty stdin and a 10 s limit. It is split
+notification in `COLLINS_NOTIFY_KIND` (`message`, `finished`, or `test`),
+`COLLINS_NOTIFY_TITLE`, `COLLINS_NOTIFY_BODY`, `COLLINS_NOTIFY_SESSION` and
+`COLLINS_NOTIFY_PROJECT` (the body and title are the agent's own words:
+quote them), the same environment your terminals on the box start with
+(your login shell's `PATH`), an empty stdin and a 10 s limit. It is split
 into words and run directly, never through a shell, so the usual shape
 is a small script on the box that hands the title and body to your push
 service (`tpush`, ntfy, a webhook). *Send test* runs it once, attached

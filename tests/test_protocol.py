@@ -186,6 +186,7 @@ PHASE_ONE_TYPES = [
     "notify.clear",
     "notify.green",
     "notify.rekey",
+    # PR-3.4 (Phase 3, like fs.dirs below: the list is the whole table).
     "notify.test",
     "seen",
     "job.start",

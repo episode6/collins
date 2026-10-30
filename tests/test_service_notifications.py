@@ -5,6 +5,7 @@ every subscriber; a client's `RemoteNotifications` is a NotificationCenter
 over that, its rows' text translated from msgid and args, its reads told
 back as `seen`, which every other client hears."""
 
+import os
 import time
 
 import pytest
@@ -400,7 +401,7 @@ def test_notify_test_runs_the_box_text_with_a_subscriber_attached(script, monkey
 def test_notify_test_replies_with_the_error_for_a_command_that_wont_start(tmp_path):
     answer = ask_test(sink_service(""), str(tmp_path / "nowhere"))
     assert answer.ok and answer.fields == {"error": "No such file or directory"}
-    assert len(answer.fields["error"]) <= protocol.SHORT_MAX
+    assert len(answer.fields["error"]) <= protocol.ARG_TEXT_MAX
 
 
 def test_notify_test_replies_with_the_error_on_the_timeout(tmp_path, monkeypatch):
@@ -485,3 +486,89 @@ def test_send_test_hears_the_error_a_refusal_and_no_link(monkeypatch):
         (None, "notify.test: not served here"),
         (None, "Not connected to the service"),
     ]
+
+
+# -- the review of PR 626: the spawn environment, and a wait on the program ------------------------
+
+
+def test_the_command_spawns_from_the_services_environment_not_the_processs(tmp_path, monkeypatch):
+    """M1: the sink and the test use the environment the service's shells
+    do (`environment`, the core's `_spawn_env`), the five variables on top."""
+    dump = tmp_path / "dump.sh"
+    dump.write_text('#!/bin/sh\nenv > "$OUT"\n')
+    dump.chmod(0o755)
+    out = tmp_path / "env.txt"
+    monkeypatch.setenv("ONLY_IN_THE_PROCESS", "1")
+    base = {"PATH": "/usr/bin:/bin", "FROM_LOGIN_SHELL": "yes", "OUT": str(out)}
+    svc = ServiceNotifications(
+        State(),
+        get_setting={"notify_command": str(dump)}.get,
+        run_async=lambda fn: fn(),
+        dispatch=lambda fn: fn(),
+        environment=lambda: dict(base),
+    )
+    assert svc.sink("message", "s1", "T", "p", "B")
+    seen = dict(line.split("=", 1) for line in out.read_text().splitlines() if "=" in line)
+    assert seen["FROM_LOGIN_SHELL"] == "yes" and "ONLY_IN_THE_PROCESS" not in seen
+    assert seen["COLLINS_NOTIFY_KIND"] == "message" and seen["COLLINS_NOTIFY_TITLE"] == "T"
+    out.unlink()
+    answer = ask_test(svc, str(dump))
+    assert answer.ok and answer.fields == {"status": 0}
+    seen = dict(line.split("=", 1) for line in out.read_text().splitlines() if "=" in line)
+    assert seen["FROM_LOGIN_SHELL"] == "yes" and seen["COLLINS_NOTIFY_KIND"] == "test"
+    assert "ONLY_IN_THE_PROCESS" not in seen
+
+
+def _script(tmp_path, body):
+    path = tmp_path / "s.sh"
+    path.write_text("#!/bin/sh\n" + body + "\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_a_background_job_is_not_a_timeout(tmp_path):
+    """M2: the runner waits on the program, not on its stderr pipe."""
+    started = time.monotonic()
+    result = noti.run_command(_script(tmp_path, "sleep 3 &\nexit 0"), dict(os.environ), timeout=1)
+    assert result == (0, "") and time.monotonic() - started < 1
+
+
+def test_a_daemonized_child_does_not_hold_the_runner(tmp_path):
+    started = time.monotonic()
+    status, error = noti.run_command(
+        _script(tmp_path, "setsid sleep 3 &\nsleep 30"), dict(os.environ), timeout=0.3
+    )
+    assert status is None and error == "Timed out after 0.3 s"
+    assert time.monotonic() - started < 1.5
+
+
+def test_output_is_not_held_in_memory(tmp_path):
+    import resource
+
+    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    status, error = noti.run_command(
+        _script(tmp_path, "head -c 52428800 /dev/zero >&2\nexit 1"), dict(os.environ), timeout=10
+    )
+    grown_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
+    assert (status, error) == (1, "") and grown_kb < 20 * 1024
+    started = time.monotonic()
+    chatty = _script(tmp_path, "while :; do echo fail >&2; done")
+    result = noti.run_command(chatty, dict(os.environ), timeout=0.3)
+    assert result == (None, "Timed out after 0.3 s") and time.monotonic() - started < 1.5
+
+
+def test_notify_test_error_is_not_cut_at_a_short_bound(tmp_path):
+    """S1: the OS's words run past 32 characters (ELOOP's strerror is 33)."""
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    answer = ask_test(sink_service(""), str(loop))
+    assert answer.ok and answer.fields == {"error": os.strerror(40)} and len(os.strerror(40)) > 32
+    # And whatever a runner raises is bounded at the table's, not unbounded.
+    svc = ServiceNotifications(
+        State(),
+        run_async=lambda fn: fn(),
+        dispatch=lambda fn: fn(),
+        run=lambda *_a: (None, "x" * (protocol.ARG_TEXT_MAX + 50)),
+    )
+    answer = ask_test(svc, "true")
+    assert answer.ok and len(answer.fields["error"]) == protocol.ARG_TEXT_MAX

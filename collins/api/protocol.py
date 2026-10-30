@@ -2008,7 +2008,7 @@ _TABLE: tuple[MessageType, ...] = (
                 "status": _i(-255, 255),
                 # Why it did not run or did not finish, in the service's
                 # English: the OS's words, or the 10 s timeout.
-                "error": _s(SHORT_MAX),
+                "error": _s(ARG_TEXT_MAX),
             },
         ),
     ),

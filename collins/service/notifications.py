@@ -77,7 +77,6 @@ COMMAND_TIMEOUT_S = 10.0
 # message is foreign text): the kind and the session id are short, the
 # title and project are names, the body is the message.
 _ENV_MAX = {"KIND": 32, "TITLE": 1024, "BODY": 8192, "SESSION": 256, "PROJECT": 1024}
-_STDERR_KEEP = 200
 
 
 def command_env(kind: str, title: str, body: str, session: str, project: str) -> dict[str, str]:
@@ -100,12 +99,14 @@ def run_command(
     template: str, env: dict[str, str], timeout: float = COMMAND_TIMEOUT_S
 ) -> tuple[int | None, str]:
     """Run *template* (an argv template, `shlex.split`, never a shell) with
-    *env* added to the service's own, `stdin=DEVNULL`, for at most *timeout*
-    seconds. Returns ``(exit status, "")`` once it ended (negative: the
-    signal that ended it) or ``(None, why)`` when it did not run or did not
+    *env* as the child's whole environment (the caller's: the service's
+    spawn environment with the five variables on top), `stdin=DEVNULL`,
+    stdout and stderr to /dev/null, for at most *timeout* seconds.
+    Returns ``(exit status, "")`` once the program itself ended (negative:
+    the signal that ended it; what it left running in the background is
+    its own business) or ``(None, why)`` when it did not run or did not
     finish, in English and short (it crosses the wire as `notify.test`'s
-    `error`, at most SHORT_MAX characters). Blocking: call it off the main
-    loop. Never raises."""
+    `error`). Blocking: call it off the main loop. Never raises."""
     try:
         argv = split_command(template)
     except ValueError:
@@ -117,30 +118,32 @@ def run_command(
             argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            env={**os.environ, **env},
+            stderr=subprocess.DEVNULL,
+            env=env,
             start_new_session=True,
         )
     except (OSError, ValueError) as error:
         log.warning("notify_command: couldn't run %s: %s", argv[0], error)
         return None, str(getattr(error, "strerror", None) or error)
+    # Waited on the program, not on a pipe: no output is held in memory, and
+    # a child that outlives it (a backgrounded job, a daemon that left its
+    # group) neither reads as a timeout nor holds this thread.
     try:
-        _out, err = proc.communicate(timeout=timeout)
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         # The whole group, so a script's children go with it.
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except OSError:
             proc.kill()
-        proc.communicate()
+        proc.wait()
         log.warning("notify_command: %s didn't finish in %g s", argv[0], timeout)
         return None, f"Timed out after {timeout:g} s"
     except Exception as error:  # fail soft: never into the service's loop
         log.exception("notify_command: waiting on %s failed", argv[0])
-        return None, str(error)
+        return None, str(error)[: protocol.ARG_TEXT_MAX]
     if proc.returncode:
-        tail = (err or b"").decode("utf-8", "replace").strip()[-_STDERR_KEEP:]
-        log.warning("notify_command: %s exited %s%s", argv[0], proc.returncode, f": {tail}" if tail else "")
+        log.warning("notify_command: %s exited %s", argv[0], proc.returncode)
     return proc.returncode, ""
 
 
@@ -191,19 +194,24 @@ class ServiceNotifications:
         run_async: Callable[[Callable[[], None]], None] | None = None,
         run: Callable[..., tuple[int | None, str]] | None = None,
         dispatch: Callable[[Callable[[], object]], None] | None = None,
+        environment: Callable[[], dict[str, str]] | None = None,
     ) -> None:
         """*get_setting* reads the service's settings (the core's),
         *has_clients* says whether a client is subscribed (the core's
         `_subscribers`; by default this class's own subscribers),
         *run_async* starts the sink's blocking work off the loop, *run* is
-        `run_command` and *dispatch* lands a thread's answer on the main
-        loop: a test's own."""
+        `run_command`, *dispatch* lands a thread's answer on the main
+        loop, and *environment* is the environment the command spawns from
+        (the core's `_spawn_env`: the login-shell overlay with what every
+        shell is denied stripped; by default the process's own): a test's
+        own."""
         self.state = state
         self._get_setting = get_setting or (lambda key: None)
         self._has_clients = has_clients or (lambda: bool(self._subscribers))
         self._run_async = run_async or _thread
         self._run = run or run_command
         self._dispatch = dispatch or _dispatch
+        self._environment = environment or (lambda: dict(os.environ))
         self.center = NotificationCenter(records=state.get_notifications())
         self._subscribers: list[tuple[object, Callable[[dict], None]]] = []
         self._published: dict[str, dict] = {row.id: event_for(row) for row in self.center.rows()}
@@ -294,7 +302,7 @@ class ServiceNotifications:
             template = self.command()
             if not template or self._has_clients():
                 return False
-            env = command_env(kind, title, body, session_id, project)
+            env = {**self._environment(), **command_env(kind, title, body, session_id, project)}
             run = self._run
 
             def work() -> None:
@@ -328,7 +336,7 @@ class ServiceNotifications:
                 message.id, protocol.ERROR_INVALID, "That is not a command Collins can run", {}
             )
         deferred = protocol.Deferred()
-        env = command_env(TEST_KIND, TEST_TITLE, TEST_BODY, "", "")
+        env = {**self._environment(), **command_env(TEST_KIND, TEST_TITLE, TEST_BODY, "", "")}
         run = self._run
 
         def work() -> None:
@@ -336,11 +344,11 @@ class ServiceNotifications:
                 status, error = run(template, env)
             except Exception as exc:
                 log.exception("notify_command: the test failed")
-                status, error = None, str(exc)
+                status, error = None, str(exc)[: protocol.ARG_TEXT_MAX]
             if status is not None:
                 fields: dict = {"status": max(-255, min(255, int(status)))}
             else:
-                fields = {"error": (error or "Didn't run")[: protocol.SHORT_MAX]}
+                fields = {"error": (error or "Didn't run")[: protocol.ARG_TEXT_MAX]}
             self._dispatch(lambda: deferred.settle(protocol.reply(message.id, **fields)))
 
         self._run_async(work)

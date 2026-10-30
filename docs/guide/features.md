@@ -978,10 +978,14 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   a script around `tpush`, a `curl` to ntfy, anything. It is a command line split
   like a shell would split it, but never run by one: no `$VAR`, no pipes, no
   `~`. The notification is in its environment instead, as
-  `COLLINS_NOTIFY_KIND` (`message` or `finished`), `COLLINS_NOTIFY_TITLE`
-  (the session's name), `COLLINS_NOTIFY_BODY`, `COLLINS_NOTIFY_SESSION` and
-  `COLLINS_NOTIFY_PROJECT`, so a two-line script does the rest
-  (`exec tpush "$COLLINS_NOTIFY_TITLE: $COLLINS_NOTIFY_BODY"`). It gets an
+  `COLLINS_NOTIFY_KIND` (`message`, `finished`, or `test` for *Send test*),
+  `COLLINS_NOTIFY_TITLE` (the session's name), `COLLINS_NOTIFY_BODY`,
+  `COLLINS_NOTIFY_SESSION` and `COLLINS_NOTIFY_PROJECT`, so a two-line
+  script does the rest (`exec tpush "$COLLINS_NOTIFY_TITLE:
+  $COLLINS_NOTIFY_BODY"`). Quote them: the body and the title are the
+  agent's own words, never to be `eval`ed. It runs with the environment
+  the service starts your terminals with (your login shell's `PATH`
+  included). It gets an
   empty stdin and 10 s before it is killed; a program that is missing or
   fails is logged and skipped, and the notification is in the history
   either way. *Send test* runs it once with a test notification, whether or

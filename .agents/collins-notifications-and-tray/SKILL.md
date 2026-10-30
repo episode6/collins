@@ -61,7 +61,12 @@ subscribers). Two producers call it: `SessionTools._headless_notify_user`
 run (`run_command`) is `shlex.split` and a `Popen` argv, **never a
 shell and never expanded** (the values are in the environment only:
 `COLLINS_NOTIFY_KIND/_TITLE/_BODY/_SESSION/_PROJECT`, bounded and
-NUL-free by `command_env`), `stdin=DEVNULL`, its own session so a
+NUL-free by `command_env`) on top of the service's spawn environment
+(`ServiceNotifications(environment=core._spawn_env)`: the login-shell
+overlay less `SPAWN_ENV_STRIPPED`, never `os.environ`), `stdin=DEVNULL`,
+stdout and stderr to /dev/null, waited on the program (`proc.wait`, never a
+pipe: a backgrounded or daemonized child neither reads as a timeout nor holds
+the thread), its own session so a
 timeout (10 s, `COMMAND_TIMEOUT_S`) kills the group. It runs on a
 daemon thread (`run_async`), never the loop, and fails soft: an empty
 or unsplittable template, a missing program, a timeout, a non-zero
@@ -69,7 +74,7 @@ exit are logged and skipped. `notify.test {command}` (the Preferences *Send test
 **text it carries** (the box's, not the saved setting, so a refused save
 cannot test the old command) regardless of clients, on a worker thread: an
 empty or unsplittable command is `invalid`, a run replies `{status}`, one
-that won't start or times out replies `{error}` (short: SHORT_MAX), never
+that won't start or times out replies `{error}` (one line, at most ARG_TEXT_MAX), never
 both. Its variables are the test values (`KIND=test`, TITLE "Collins test
 notification", BODY "Sent from Preferences", SESSION and PROJECT empty). A test injects `get_setting`, `has_clients`,
 `run_async`, `run` and `dispatch` into the constructor.

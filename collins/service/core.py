@@ -394,6 +394,7 @@ class ServiceCore:
             self.state,
             get_setting=self._get_setting,
             has_clients=lambda: bool(self._subscribers),
+            environment=self._spawn_env,
         )
         # The PR hub is the store's own; its events go to the same
         # subscribers (PR-1.11).
