@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-29. Full change history: git log for this file.
+fork. Last modified: 2026-10-30. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -105,7 +105,10 @@ downloads of each version, see the
   good, stop the keeper (`systemctl --user stop collins-keeper.service`).
   The keeper has its own user unit beside the service's (`KillMode=process`
   too), installed by `collins --install-desktop`; the service starts it on
-  demand and spawns one itself where there is no systemd. A service that
+  demand and spawns one itself where there is no systemd, and only one
+  runs per app id. The pty table in `state.json` and the saved screens
+  are kept per app id, so a debug instance beside the real one never
+  takes over or drops the other's sessions. A service that
   died in the middle of copying a folder in the editor's file tree now
   removes exactly the unfinished copy at its next start (the copies in
   flight are recorded in `state.json`).

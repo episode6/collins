@@ -245,19 +245,21 @@ scratch directory of the check's own (a Unix socket path is bounded at
 107 bytes; the user's `/run/user/<uid>/collins/` never sees a check's
 id), removed at exit; the service is spawned with `PR_SET_PDEATHSIG` so
 a check dying on its deadline takes it along.
-Since PR-3.6 that service finds or starts a **keeper** for the check's
-app id (every pty is forked by it), and its SIGTERM leaves the ptys to the
-keeper rather than ending them: `e2e_service`'s `atexit` stops the keeper
-too (`_stop_keepers`, by the pid file beside its socket), so a check's
-shims never outlive the check; `stop_service(proc)` followed by
-`start_service()` on the same app id is a service restart under the
-check's sessions (`check_service_restart.py`), and `keeper_pid()` says
-who holds them. A check that wants the keeperless stop sets
-`COLLINS_KEEPER=none` before `start_service()`. A check that dies on its
-deadline through `os._exit` skips the `atexit`, and with a keeper that
-leaves the keeper and the check's shims running, not just a `cr-*`
-directory: call `e2e_service._stop_all()` in the watchdog first, as
-`check_service_restart.py` does.
+Since PR-3.6 every pty is forked by a **keeper**, which the harness starts
+itself before the service (`e2e_service.start_keeper`, as the check's own
+child with `PR_SET_PDEATHSIG`, so a check killed on its deadline, a
+segfault or a SIGKILL takes the keeper and the check's shims with it; the
+service finds it on its socket rather than spawning one detached, and
+`LiveService(keeper=True)` does the same). A service's SIGTERM leaves its
+ptys to the keeper rather than ending them: `e2e_service`'s `atexit` stops
+the keeper too (`_stop_keepers`, by the pid file beside its socket, a
+SIGKILL after a bounded wait), so a check's shims never outlive the
+check; `stop_service(proc)` followed by `start_service()` on the same app
+id is a service restart under the check's sessions
+(`check_service_restart.py`), and `keeper_pid()` says who holds them. A
+check that wants the keeperless stop sets `COLLINS_KEEPER=none` before
+`start_service()`. A watchdog that leaves through `os._exit` still calls
+`e2e_service._stop_all()` first, as `check_service_restart.py` does.
 
 **A patch over a service-side module does not reach the service.** What a
 check used to monkeypatch in its own process (`claudemodels.*`,

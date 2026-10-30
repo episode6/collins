@@ -196,8 +196,20 @@ every session for good, stop the keeper as well:
 
 ```bash
 systemctl --user stop collins-keeper.service   # ends every session it holds
-kill $(cat "$XDG_RUNTIME_DIR"/collins/com.episode6.Collins/keeper.pid)
+# a keeper the service spawned itself (no unit): its pid file names it
+pid=$(cat "$XDG_RUNTIME_DIR"/collins/com.episode6.Collins/keeper.pid)
+grep -q collins-keeper /proc/"$pid"/cmdline && kill "$pid"
 ```
+
+The pid file is removed when the keeper exits by itself; one left by a
+keeper that was killed can name any process by now, which is what the
+`cmdline` check is for. Only one keeper runs per app id: a second one
+started on the same socket (by hand, by a stall, by an upgrade) exits 0
+on the first one's lock and changes nothing. A keeper that speaks an
+older protocol than the service and still holds sessions is left alone:
+the service runs without a keeper, says so in the *Restart service*
+dialog ("held by an older keeper"), and stopping that keeper is the way
+on.
 
 The keeper ends each child it holds (SIGHUP, then SIGKILL) and exits. A
 service stopped with no keeper ends every foreground session the way
@@ -224,8 +236,8 @@ systemd, or no unit, the service spawns `collins-keeper` itself, detached.
 | --- | --- |
 | The API socket | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` (0600, directory 0700) |
 | Single-instance lock | `service.lock` beside it, held for the service's life |
-| The keeper's socket and pid | `keeper.sock` and `keeper.pid` beside it |
-| Each terminal's saved screen | `~/.local/state/collins/pty/<pty id>.model`, written every few seconds and at a stop, read by the next service, removed when the terminal ends |
+| The keeper's socket, pid and lock | `keeper.sock`, `keeper.pid` and `keeper.lock` beside it |
+| Each terminal's saved screen | `~/.local/state/collins/pty/<app id>/<pty id>.model`, written every few seconds and at a stop, read by the next service, removed when the terminal ends |
 | The local proof | `local-proof` beside it: 32 random bytes, 0600, minted at each start |
 | With no `$XDG_RUNTIME_DIR` | `~/.local/state/collins/<app id>/` for the three above; a path too long for a Unix socket falls back to a 0700 directory under the temp directory |
 | The session tools' socket | `mcp.sock` beside `api.sock` when `$XDG_RUNTIME_DIR` is set; under the temp directory (`/tmp/collins/<app id>/`) otherwise |

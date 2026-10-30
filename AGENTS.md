@@ -109,9 +109,17 @@ master and hands masters over its socket (`keeper.sock` beside
 `api.sock`) with `SCM_RIGHTS`; six messages (`spawn`, `list`, `resize`,
 `signal`, `reap`, `adopt`), versioned apart from the API. It reads and
 writes no pty. A kept child's exit is learnt from its master's EOF and the
-keeper's `reap` (and a poll of its `list`); a keeper that dies is started
-again and handed every kept master (`adopt`), their statuses unknown from
-then on. Stopping the keeper (`systemctl --user stop
+keeper's `reap` (and a poll of its `list`, off the main loop); a keeper
+that dies is started again (off the main loop) and handed every live
+master (`adopt`), the kept ones' statuses unknown from then on and the
+ptys forked meanwhile kept from then on. Every fd received is
+close-on-exec; the keeper's `list` pages (`LIST_PAGE`); its clients are
+non-blocking. The rulings of the review of PR 629: a list that cannot be
+read adopts nothing and touches no row or model (`keeper_unread`); a
+keeper of another protocol holding ptys is left alone, the service
+running without one and `service.status` carrying `keeper_mismatch`; a
+kept pty with no row is adopted as an anonymous shell and never
+signalled. Stopping the keeper (`systemctl --user stop
 collins-keeper.service`) is what ends every session for good;
 `COLLINS_KEEPER=none` runs a service without one (the unit suite's live
 services). `service/core.py` is `ServiceCore`, the request
@@ -441,7 +449,7 @@ local with `debug.local` (`e2e_service.drop_local`, D60).
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
 | The API socket and the local proof (`local-proof`: 32 random bytes, 0600, minted at each service start; the client reads it from its *own* filesystem at a path it computes itself, and sends no proof if it is not a regular 0600 file of its uid) | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` and `local-proof` (0700 directory; with no runtime dir, `~/.local/state/collins/<app id>/`) |
 | The sessions a stopping service ended, resumable when a client reopens its `open_tabs` (empty when a keeper kept them running) | `state.json` (`resume_on_start`, the service's alone) |
-| The keeper's socket and the pid file it writes beside it | `<runtime dir>/collins/<app id>/keeper.sock` and `keeper.pid` |
+| The keeper's socket, the pid file it writes beside it and the `flock` it holds for its life (a second keeper for the path exits 0 on it) | `<runtime dir>/collins/<app id>/keeper.sock`, `keeper.pid` and `keeper.lock` |
 | The keeper's systemd user unit (never enabled by a package; started on demand by the service, which spawns `collins-keeper` itself where there is none) | `data/collins-keeper.service`, installed beside the service's by `collins --install-desktop` (the packages: PR-3.7) |
 | The tree copies `fs.paste` has in flight (destination directory and temporary name each), written around every top temporary directory and read at the next start to remove exactly those trees | `state.json` (`inflight_copies`, the service's alone) |
 | The service's single-instance lock (an `flock`, taken as its first step and held for its life; a second service for the id exits 0 on it) | `<runtime dir>/collins/<app id>/service.lock` |
@@ -449,8 +457,8 @@ local with `debug.local` (`e2e_service.drop_local`, D60).
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
 | Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
-| The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer`: an agent's pty and a panel shell's) |
-| A live pty's saved screen model (`termscreen.Screen.dump()` as JSON plus the mode tracker's `modes`, what a restarted service adopts the pty with and repaints from); removed with the pty's row, kept at a suspend, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
+| The pty table, by app id (a row per live pty: kind, session, cwd, pid, size, box, plan, options; a shell's history key and ordinal) and the next pty id per app id: `state.json` is shared by every app id and each has a keeper of its own, so a service reads, adopts, drops and prunes only its own app id's rows (PR-3.6's ruling on the review of PR 629) | `state.json` (`ptys: {<app id>: {<pty id>: row}}`, `pty_next_id: {<app id>: n}`; `AppState.set_pty(app_id, …)` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer`: an agent's pty and a panel shell's) |
+| A live pty's saved screen model (`termscreen.Screen.dump()` as JSON plus the mode tracker's `modes`, what a restarted service adopts the pty with and repaints from), by app id; removed with the pty's row, kept at a suspend, pruned at service start (a file right under `pty/`, the pre-3.6 layout, with them) | `~/.local/state/collins/pty/<app id>/<pty id>.model` |
 | Model catalog, update-check stamp | `~/.cache/collins/` |
 | Images the service fetched for `show_image` and PR bodies (`kind=remote`, a day; `service.blobs.RemoteBlobs`) | `~/.cache/collins/remote-images/<sha1 of the url><suffix>` (the service's machine) |
 | Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`; built in PR-2.1, the diff's images in PR-2.2, every picture and project icon in PR-2.7); the only image files the client decodes (`blobcache.read` refuses the rest) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
