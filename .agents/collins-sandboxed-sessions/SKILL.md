@@ -238,7 +238,22 @@ sibling's.
 The service owns one (`ServiceCore.start_sandbox_host`, `core.sandbox_host`;
 the live grants beside it as `core.sandbox_grants`): the boxes, grants,
 sweeps and probe are the service's, and so are the lease pid, the bindfs
-fsname and `PR_SET_PDEATHSIG`. The window
+fsname and `PR_SET_PDEATHSIG`. **A service restart is a process death
+for all three** (§3.9), and since PR-3.6 the sessions outlive it (the
+keeper holds their ptys), so the start-up order is **adopt, re-hold,
+re-mount, then sweep**: `ServiceCore.adopt_ptys` first (each adopted
+session's box and plan from its pty row, `Session.adopt`), then in
+`start_sandbox_host` every adopted box is `hold`en again (its lease
+rewritten under the new pid), `sweep_plans(app_id, keep=…)` spares the
+adopted plan files, each adopted plan is `register`ed with `GrantMounts`
+(its live grants mounted again: a stale mount of the dead pid at the
+point is unmounted first in `_mount`; a process inside that held a file
+open across the gap reads `ENOTCONN`, as after a revoke), and only when
+the last registration has landed (`done`) do `sweep_mounts` and
+`sweep_boxes` run on their thread. A suspend (`ServiceCore.suspend`)
+releases no lease and unlinks no plan: it unmounts the live grants
+cleanly (`GrantMounts.shutdown`; the bindfs servers die with the process
+anyway) and leaves the rest for the next service. The window
 reaches it only through requests (`sandbox.forget` for a forgotten
 transcript's box, `sandbox.derive` / `sandbox.drop` for a sibling's plan).
 Rule 5 holds on both: `sandbox.drop` releases only a plan file this

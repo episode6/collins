@@ -487,11 +487,17 @@ touches the disk.
   a service that ends mid-copy (a restart or an upgrade during a long
   paste, D41 and D52's `KillMode=process`): the half-built tree stays
   under its hidden temporary name, hidden files off never shows it, git
-  sees it as untracked, and **nothing sweeps it** (the service does not
-  record in-flight copies, so it could not know where to look; ruled
-  2026-10-18: documented, no sweep; an `inflight_copies` row in
-  `state.json` is a §8 note for PR-3.6's keeper). It is a copy that did
-  not finish and is safe to delete. **It does not spread:** the walk
+  sees it as untracked — until the next service starts: since PR-3.6 the
+  top temporary directory of every tree copy is recorded as it is made
+  (`paste_entries`'s *inflight* recorder, `ServiceCore.inflight_copies`
+  over `state.json`'s `inflight_copies` row, landed on the main loop
+  before the walk writes a byte) and cleared when the tree lands or its
+  undo removes it, and `ServiceCore.remove_inflight_copies` at start
+  removes exactly those trees (`projectfiles.remove_inflight`: a
+  `.collins-<hex>` directory, never a link, through its descriptor as the
+  undo would) and nothing else; a sweep by name was rejected (§8). A
+  leftover is a copy that did not finish and is safe to delete. **It does
+  not spread:** the walk
   leaves every `.collins-<24 hex>` name of a source out of a copy
   (`_TEMP_NAME_RE`; S2 of the same review), so another paste's tree
   still being built in the folder, or a killed service's leftover, is

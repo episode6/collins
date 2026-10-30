@@ -147,7 +147,12 @@ snapshot, an `item` moving one property and its signal, every mutation,
 archived paging, the service refusing a device setting. Where the socket
 itself is the subject (`test_api_client.py`, `test_service_main.py`),
 `tests/liveservice.py` starts a real `collins-service` subprocess on scratch
-directories. `tests/test_api_server.py` runs a real `Soup.Server` on a
+directories (with `COLLINS_KEEPER=none` unless built with `keeper=True`:
+a keeper outlives the service by design, so a live service with one needs
+`LiveService.close()`, which stops the keeper too by the pid file beside
+its socket; `tests/test_keeper.py` is the spike's cases as tests, the pty
+server adopting through a keeper, and a real service restarted under a
+running shell). `tests/test_api_server.py` runs a real `Soup.Server` on a
 scratch socket; `test_connection.py` drives the connection manager's state
 machine with fakes, its remote path included (a `FakeTransport` whose
 forward the test kills: the start's word, the lost road, a hello failing
@@ -240,6 +245,15 @@ scratch directory of the check's own (a Unix socket path is bounded at
 107 bytes; the user's `/run/user/<uid>/collins/` never sees a check's
 id), removed at exit; the service is spawned with `PR_SET_PDEATHSIG` so
 a check dying on its deadline takes it along.
+Since PR-3.6 that service finds or starts a **keeper** for the check's
+app id (every pty is forked by it), and its SIGTERM leaves the ptys to the
+keeper rather than ending them: `e2e_service`'s `atexit` stops the keeper
+too (`_stop_keepers`, by the pid file beside its socket), so a check's
+shims never outlive the check; `stop_service(proc)` followed by
+`start_service()` on the same app id is a service restart under the
+check's sessions (`check_service_restart.py`), and `keeper_pid()` says
+who holds them. A check that wants the keeperless stop sets
+`COLLINS_KEEPER=none` before `start_service()`.
 
 **A patch over a service-side module does not reach the service.** What a
 check used to monkeypatch in its own process (`claudemodels.*`,

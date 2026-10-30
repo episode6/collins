@@ -397,11 +397,14 @@ a session the store has not scanned yet waits for its first refresh. With
 `open_tabs` empty the launch falls back to `restore_last_session`.
 
 **Restart service** (`win.restart-service`, the main menu):
-`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`),
-the mirror's agent ptys and the rows whose `background` is set for the
-blast radius (`quitrules.restart_body`: the foreground sessions end, the
-`/bg` agents survive — the CLI's daemon is not the service's, D52's
-`KillMode=process`), then `App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
+`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`,
+`keeper`), the mirror's agent ptys and the rows whose `background` is set
+for the dialog's body (`quitrules.restart_body`: with `keeper` the
+sessions keep running through the restart and *Restart Now* is not
+destructive, PR-3.6; without one the foreground sessions end and each tab
+resumes its own; the `/bg` agents survive either way — the CLI's daemon is
+not the service's, D52's `KillMode=process`), then
+`App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
 `open_tabs` and tells the connection manager to wait for that pid to be
 gone (`ConnectionManager.expect_restart`) before it starts another
 service. *Idle* is `ServiceCore.restart_when_idle` (polls
@@ -1151,10 +1154,28 @@ The `Session` is the service's (spec §3.19). The pieces:
   that ignored it; `shutdown()` closes every pty, waits a bounded time
   for the saves in flight, then finishes each on the spot (status
   unknown: the reap no longer lands on a stopping service), its row
-  recorded gone and its model file removed with it (stopping the
-  service ends every foreground agent, and so does a crash of it; the
-  CLI's `/bg` daemon and its agents hold no pty of the service's and run
-  on, D52's `KillMode=process`). A `Pty` implements the `PtyPort` (`write`,
+  recorded gone and its model file removed with it; that is the stop of
+  a service with no keeper (`COLLINS_KEEPER=none`), which ends every
+  foreground agent. **With the keeper** (PR-3.6, `service/keeper.py`, the
+  module docstring's last section) the server forks nothing itself:
+  `spawn` asks the keeper, which stays the child's parent and hands the
+  master back over `SCM_RIGHTS` (`Pty.kept`); the stop is `suspend()`
+  (every model saved with the tracker's `modes`, the masters closed, no
+  signal to any child, the rows and model files left), and the next
+  service's `ServiceCore.adopt_ptys` takes each pty the keeper lists
+  whose row the state kept (`PtyServer.adopt`: the saved model loaded,
+  else a fresh one; `repaint`: a resize of one row and back,
+  `REPAINT_STEP_MS` apart), builds a `SessionRecord` over an agent's
+  (`adopt_session`, `Session.adopt`: nothing typed, the transcript found
+  by the id, running when the CLI owns the terminal) and drops the rows
+  the keeper has no pty for. A kept child's exit is the master's EOF plus
+  the keeper's `reap` (`_reap_kept`, a timer while it lives on) and the
+  kept poll of its `list` (`KEPT_POLL_MS`) for a child that died with its
+  slave held; a keeper that goes is restarted (`_keeper_lost`, the
+  `keeper_restart` callable) and handed every kept master with `adopt`,
+  the statuses unknown from then on (`pty-exited` with `status: null`).
+  The CLI's `/bg` daemon and its agents hold no pty of the service's and
+  run on through all of it (D52's `KillMode=process`). A `Pty` implements the `PtyPort` (`write`,
   `resize`, `child_pid`, `foreground_pgrp`) for its `Session`,
   and for a panel shell `shell_pid` (a sandboxed one's shell inside the
   box), `has_running_command` and `process_cwd`; `clear(pty)` swaps in a
@@ -1236,12 +1257,18 @@ The `Session` is the service's (spec §3.19). The pieces:
   reused: the next id is persisted (`AppState.pty_next_id`, through the
   `record_next_id` callable), so no two ptys share a model file. **A
   model file lives exactly as long as its pty's row**: removed when the
-  pty exits (`_finish`) and at shutdown (which finishes every pty on the
-  spot, status unknown, since the reap no longer lands on a stopping
-  service), and every `*.model` whose id is not in the table is pruned at
-  service start (`prune_models`, from `ServiceCore`). The panel history
-  and the transcript carry what a person needs after the exit; the file
-  exists for a live pty's re-adoption by a restarted service (not built yet).
+  pty exits (`_finish`) and at a keeperless shutdown (which finishes every
+  pty on the spot, status unknown, since the reap no longer lands on a
+  stopping service), kept at a `suspend` (the keeper holds the pty: a
+  save that lands after it must not remove it, `Pty.suspended`), and every
+  `*.model` whose id is not in the table is pruned at service start
+  (`prune_models`, from `ServiceCore.adopt_ptys`, after the adoption). The
+  file carries the mode tracker's `dump()` under `modes` beside the
+  screen (`ModeTracker.restore` on adoption, so the next attach
+  re-asserts the program's modes); `read_model_file` reads the dict,
+  `Screen.load` judges the screen. The panel history and the transcript
+  carry what a person needs after the exit; the file is what a restarted
+  service adopts a live pty with (PR-3.6).
 - **The `ptys` table.** The server's `record(pty_id, row | None)` callable
   (`AppState.set_pty`) keeps a row per live pty in
   `state.json` (§3.8): kind, session, cwd, pid, cols, rows, box, plan,

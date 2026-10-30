@@ -87,15 +87,34 @@ fail-soft, `--check`'s `shell:` line says which answered) and
 **overlays** it on the service's own (the user's variables and `PATH` order
 win; `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and the systemd
 variables are protected, and the service's own leading `PATH` entries stay
-first), builds `ServiceCore`, starts
-the store, tracker, background agents, sandbox host, session tools and MCP
+first), builds `ServiceCore`, finds or starts **the keeper** and adopts
+the ptys it held across the last stop, then starts
+the store, tracker, sandbox host (which re-holds every adopted box and
+registers its live grants before it sweeps), background agents, session
+tools and MCP
 socket, listens, then `sd_notify`s ready. `SIGTERM` / `SIGINT` / a client's
-`service.restart` run the stop sequence: clients disconnected first, every
+`service.restart` run the stop sequence: clients disconnected first, then
+with the keeper present `ServiceCore.suspend` (every model saved, the
+masters closed, every session left running for the next service,
+`resume_on_start` emptied), without one every
 session ended as *Stop Sessions and Quit* does with its id recorded as
-`resume_on_start`, exit 0 (so a unit's `Restart=on-failure` leaves it
-down). `collins-service --check` and `--print-socket` are the headless
-box's helpers. `data/collins-service.service` is its systemd user unit, never
-enabled by a package. `service/core.py` is `ServiceCore`, the request
+`resume_on_start`; exit 0 either way (so a unit's `Restart=on-failure`
+leaves it down). `collins-service --check` and `--print-socket` are the
+headless box's helpers. `data/collins-service.service` is its systemd
+user unit, never enabled by a package. **The keeper**
+(`service/keeper.py`, stdlib only, `collins-keeper`, its unit
+`data/collins-keeper.service`, `KillMode=process`) forks every pty child
+on the service's request, stays their parent, holds a duplicate of every
+master and hands masters over its socket (`keeper.sock` beside
+`api.sock`) with `SCM_RIGHTS`; six messages (`spawn`, `list`, `resize`,
+`signal`, `reap`, `adopt`), versioned apart from the API. It reads and
+writes no pty. A kept child's exit is learnt from its master's EOF and the
+keeper's `reap` (and a poll of its `list`); a keeper that dies is started
+again and handed every kept master (`adopt`), their statuses unknown from
+then on. Stopping the keeper (`systemctl --user stop
+collins-keeper.service`) is what ends every session for good;
+`COLLINS_KEEPER=none` runs a service without one (the unit suite's live
+services). `service/core.py` is `ServiceCore`, the request
 router, with one module per concern it routes to: the pty half owns the
 `PtyServer` (`service/ptyserver.py`: spawns each child on a pty it holds the
 master of, runs output through the stream filter into the screen model,
@@ -421,14 +440,17 @@ local with `debug.local` (`e2e_service.drop_local`, D60).
 | MCP config file | `~/.local/share/collins/<app id>/` |
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
 | The API socket and the local proof (`local-proof`: 32 random bytes, 0600, minted at each service start; the client reads it from its *own* filesystem at a path it computes itself, and sends no proof if it is not a regular 0600 file of its uid) | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` and `local-proof` (0700 directory; with no runtime dir, `~/.local/state/collins/<app id>/`) |
-| The sessions a stopping service ended, resumable when a client reopens its `open_tabs` | `state.json` (`resume_on_start`, the service's alone) |
+| The sessions a stopping service ended, resumable when a client reopens its `open_tabs` (empty when a keeper kept them running) | `state.json` (`resume_on_start`, the service's alone) |
+| The keeper's socket and the pid file it writes beside it | `<runtime dir>/collins/<app id>/keeper.sock` and `keeper.pid` |
+| The keeper's systemd user unit (never enabled by a package; started on demand by the service, which spawns `collins-keeper` itself where there is none) | `data/collins-keeper.service`, installed beside the service's by `collins --install-desktop` (the packages: PR-3.7) |
+| The tree copies `fs.paste` has in flight (destination directory and temporary name each), written around every top temporary directory and read at the next start to remove exactly those trees | `state.json` (`inflight_copies`, the service's alone) |
 | The service's single-instance lock (an `flock`, taken as its first step and held for its life; a second service for the id exits 0 on it) | `<runtime dir>/collins/<app id>/service.lock` |
 | The service's systemd user unit (never enabled by a package; started on demand by the client) | `data/collins-service.service`, installed to `/usr/lib/systemd/user/` by the packages and `~/.local/share/systemd/user/` by `collins --install-desktop` |
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
 | Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
 | The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer`: an agent's pty and a panel shell's) |
-| A live pty's saved screen model (`termscreen.Screen.dump()` as JSON, for a restarted service's re-adoption, a later phase's keeper); removed with the pty's row, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
+| A live pty's saved screen model (`termscreen.Screen.dump()` as JSON plus the mode tracker's `modes`, what a restarted service adopts the pty with and repaints from); removed with the pty's row, kept at a suspend, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
 | Model catalog, update-check stamp | `~/.cache/collins/` |
 | Images the service fetched for `show_image` and PR bodies (`kind=remote`, a day; `service.blobs.RemoteBlobs`) | `~/.cache/collins/remote-images/<sha1 of the url><suffix>` (the service's machine) |
 | Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`; built in PR-2.1, the diff's images in PR-2.2, every picture and project icon in PR-2.7); the only image files the client decodes (`blobcache.read` refuses the rest) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
@@ -553,7 +575,7 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store and its mirror, sidebar, state.json and its mirror, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `remotestore` `models` `state` `remotestate` `sidebar` `titles` `bgstatus` `bgblock` `service/bgagents` `activity` `trust` `chats` `projecticons` `remoteicons` `uploads` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links (the click resolved on the service, the transcript's tail read there, the root's names), the "is this a git checkout" question, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `service/transcripttail` `checkouts` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): `collins-service`'s process (lock, login-shell capture, stop sequence, `--check`); the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router; a session on the service (`Session`, its hosted record and pushed facts, the busy and finish tracker, background agents); the socket (server, client with its sync channel, the connection manager and its reconnect); the client's mirror of a session, the childless VTE and its ports; the API's message table, validation, framing, binary header, protocol version; the debug API | `service/main` `service/core` `service/termstream` `service/termscreen` `service/ptyserver` `service/storefeed` `service/jobs` `service/diffs` `service/gitfeed` `service/files` `service/session` `service/hosting` `service/ports` `service/tracking` `service/finish` `service/bgagents` `api/protocol` `api/server` `api/client` `apilink` `connection` `clientsession` `ptyclient` `jobclient` `remotediffs` `remotegit` `blobcache` `remotestore` `remotestate` `sandboxstatus` `bgblock` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side, detach and reopen), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors, running rows, background agents), `collins-sandboxed-sessions` (the sandbox host on the service), `collins-testing` (the per-check service, the debug API) |
+| Service (the split): `collins-service`'s process (lock, login-shell capture, stop sequence, `--check`); the keeper (every pty child's parent, the masters handed over its socket, the adoption and the repaint at the next start); the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router; a session on the service (`Session`, its hosted record and pushed facts, the busy and finish tracker, background agents); the socket (server, client with its sync channel, the connection manager and its reconnect); the client's mirror of a session, the childless VTE and its ports; the API's message table, validation, framing, binary header, protocol version; the debug API | `service/main` `service/keeper` `service/core` `service/termstream` `service/termscreen` `service/ptyserver` `service/storefeed` `service/jobs` `service/diffs` `service/gitfeed` `service/files` `service/session` `service/hosting` `service/ports` `service/tracking` `service/finish` `service/bgagents` `api/protocol` `api/server` `api/client` `apilink` `connection` `clientsession` `ptyclient` `jobclient` `remotediffs` `remotegit` `blobcache` `remotestore` `remotestate` `sandboxstatus` `bgblock` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side, detach and reopen), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors, running rows, background agents), `collins-sandboxed-sessions` (the sandbox host on the service), `collins-testing` (the per-check service, the debug API) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` `sandboxstatus` `service/sandbox` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes, the folder choosers and the path picker | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` `remoteuploads` `choosers` `pathpicker` `pathpickermodel` | `collins-composer-and-new-chat` |
