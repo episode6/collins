@@ -73,7 +73,7 @@ downloads of each version, see the
   box](/guide/remote#picking-a-folder-on-the-box).
 - **A command for notifications nobody is there to see.** With no
   window attached, a `notify_user` call or a finished run now runs the
-  program set as **Notify command** in Preferences → *Service*
+  program set as **Notification command** in Preferences → *Service*
   (`notify_command`, empty by default) on the service's machine, with
   `COLLINS_NOTIFY_KIND`, `_TITLE`, `_BODY`, `_SESSION` and `_PROJECT` in
   its environment, an empty stdin and a 10 s limit. It is split into

@@ -74,6 +74,16 @@ both. Its variables are the test values (`KIND=test`, TITLE "Collins test
 notification", BODY "Sent from Preferences", SESSION and PROJECT empty). A test injects `get_setting`, `has_clients`,
 `run_async`, `run` and `dispatch` into the constructor.
 
+The row is the Notifications group's Service half (the group is `mixed`,
+`prefs._build_notify_command_rows`): an `Adw.EntryRow` "Notification
+command" saved by the parent-branch entry's helpers (`_save_git_word` and
+friends, validator `remotenotify.command_ok`: `shlex.split` does not raise),
+a *Send test* suffix button and a caption row. *Send test* commits the box,
+then `remotenotify.run_test(text, on_result)` sends `notify.test {command}`
+with `link.send`; the caption shows `Exit status N` or the service's `error`
+(error style for non-zero or an error) until the box changes.
+`scripts/check_notify_command.py` drives it against a real service.
+
 ## The center (`notifycenter.py`, GTK-free)
 
 `NotificationCenter` owns every notification Collins has raised, the number

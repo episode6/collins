@@ -25,14 +25,22 @@ link); the service's echo carries the same flags. Listeners hear one
 `changed` per write, however many rows its events moved, as they heard one
 from the center. With no link (a refused request), nothing changes.
 
+**The notify command's test** (`run_test`, PR-3.4, D62): the Service page's
+*Send test* sends `notify.test {command}` — the text in the box — on the
+primary and hears `(status, error)` back; `command_ok` and `command_runnable`
+are the box's two verdicts (what may be saved, what may be sent).
+
 GTK-free.
 """
 
 from __future__ import annotations
 
 import logging
+import shlex
 import time
+from collections.abc import Callable
 
+from . import apilink
 from .api.protocol import RequestRefused
 from .i18n import translate
 from .notifycenter import (
@@ -45,6 +53,51 @@ from .notifycenter import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def command_ok(text: str) -> bool:
+    """Whether *text* can be kept as the notify_command: empty (off), or a
+    template `shlex.split` accepts (the service splits it the same way)."""
+    try:
+        shlex.split(text)
+    except ValueError:
+        return False
+    return True
+
+
+def command_runnable(text: str) -> bool:
+    """Whether *text* can be sent to `notify.test`: a command that splits
+    into at least one word."""
+    try:
+        return bool(shlex.split(text))
+    except ValueError:
+        return False
+
+
+def run_test(command: str, on_result: Callable[[int | None, str], None]) -> None:
+    """Ask the service to run *command* once (`notify.test`) and call
+    *on_result*(status, error) on the main loop with exactly one of them
+    set: the exit status of a run that ended, or why it did not (the
+    service's words for one that would not start or timed out; ours for a
+    refusal or no link). Never blocks: it rides the primary like
+    `remotecli.check`."""
+    link = apilink.current()
+    if link is None:
+        on_result(None, translate("Not connected to the service"))
+        return
+
+    def replied(fields: dict) -> None:
+        status = fields.get("status")
+        if status is not None:
+            on_result(int(status), "")
+        else:
+            on_result(None, str(fields.get("error") or translate("The command did not run")))
+
+    def refused(refusal: RequestRefused) -> None:
+        log.info("remotenotify: notify.test refused: %s", refusal.msgid)
+        on_result(None, translate(refusal.msgid, refusal.details) or refusal.error)
+
+    link.send({"t": "notify.test", "command": command}, replied, refused)
 
 _FIELDS = ("session_id", "title", "project", "kind", "body", "when", "read", "count", "url", "msgid", "args")
 

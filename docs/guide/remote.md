@@ -138,7 +138,7 @@ connect again.
 Cards, sounds and desktop notifications are the window's, and with no
 window attached there is nobody to show them to: a `notify_user` call or
 a finished run is in the notification bell when the next window
-connects, and nothing more. For a box you leave running, set **Notify
+connects, and nothing more. For a box you leave running, set **Notification
 command** in Preferences → *Service* (`notify_command`): the service runs
 it, on the box, for each of those while no window is attached, with the
 notification in `COLLINS_NOTIFY_KIND`, `COLLINS_NOTIFY_TITLE`,

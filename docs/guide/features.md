@@ -973,7 +973,7 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
 - **A command for when nobody is looking.** When no window is attached to the
   service, a `notify_user` call or a finished run (a counted finish, the one
   that would have turned a row green) has no card or desktop notification to
-  go to. Set **Notify command** (`notify_command`) in Preferences → *Service*
+  go to. Set **Notification command** (`notify_command`) in Preferences → *Service*
   to have the service run a program instead, on the service's machine:
   a script around `tpush`, a `curl` to ntfy, anything. It is a command line split
   like a shell would split it, but never run by one: no `$VAR`, no pipes, no
@@ -1570,7 +1570,9 @@ app's **Dark / Light Mode** (system / light / dark), the **Notifications**
 group — the **In-app notifications** switch, the **Sound** picker (the
 desktop theme's sounds, five bundled chimes, or a file of your own), the
 card's **Card theme** pin (follow app / light / dark), **Bells from other
-sessions**, and **Announce finished runs** — the
+sessions**, and **Announce finished runs**, with the service's **Notification
+command** and its *Send test* button on the *Service* page (the group has a
+half on each page) — the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
 **Show folder paths in sidebar** and **Show Claude usage** toggles and its
 **Project icon size**, a **Tab drag handles** switch (on; off, panel tabs

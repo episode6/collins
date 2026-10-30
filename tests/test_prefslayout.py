@@ -54,7 +54,8 @@ def test_the_two_pages_cover_the_groups_and_share_the_mixed_ones():
         "pull_requests", "git", "caffeine", "editor",
     )
     assert prefslayout.page_groups("service") == (
-        "cli", "general", "token_use", "mcp_tools", "sessions", "sandbox", "pull_requests", "git",
+        "cli", "general", "token_use", "mcp_tools", "sessions", "sandbox", "notifications",
+        "pull_requests", "git",
     )
 
 
@@ -154,6 +155,7 @@ def test_every_notification_setting_has_a_default():
         "notification_sound",
         "bell_notifications",
         "announce_finished_runs",
+        "notify_command",
     ):
         assert key in DEFAULT_SETTINGS, key
 

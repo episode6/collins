@@ -430,3 +430,58 @@ def test_notify_test_refuses_an_empty_or_unsplittable_command():
     for command in ("", "   ", "echo 'unterminated"):
         answer = ask_test(sink_service("true"), command)
         assert not answer.ok and answer.error == protocol.ERROR_INVALID
+
+
+# -- the client's end of Send test (remotenotify, PR-3.4, D62) -----------------------------------
+
+
+class SendLink:
+    """A link whose `send` answers with what the test says."""
+
+    def __init__(self, reply=None, refusal=None):
+        self.reply, self.refusal, self.sent = reply, refusal, []
+
+    def send(self, message, on_reply=None, on_refused=None):
+        self.sent.append(message)
+        if self.refusal is not None:
+            on_refused(self.refusal)
+        else:
+            on_reply(self.reply)
+
+
+def test_the_box_has_two_verdicts():
+    from collins import remotenotify
+
+    assert remotenotify.command_ok("") and remotenotify.command_ok("  ")
+    assert remotenotify.command_ok("tpush 'a b'") and not remotenotify.command_ok("tpush 'a")
+    assert not remotenotify.command_runnable("") and not remotenotify.command_runnable("   ")
+    assert remotenotify.command_runnable("tpush x") and not remotenotify.command_runnable("tpush 'x")
+
+
+def test_send_test_sends_the_boxs_text_and_hears_the_status(monkeypatch):
+    from collins import apilink, remotenotify
+
+    link = SendLink(reply={"status": 2})
+    monkeypatch.setattr(apilink, "current", lambda: link)
+    got = []
+    remotenotify.run_test("tpush hi", lambda status, error: got.append((status, error)))
+    assert link.sent == [{"t": "notify.test", "command": "tpush hi"}]
+    assert got == [(2, "")]
+
+
+def test_send_test_hears_the_error_a_refusal_and_no_link(monkeypatch):
+    from collins import apilink, remotenotify
+
+    got = []
+    monkeypatch.setattr(apilink, "current", lambda: SendLink(reply={"error": "Timed out after 10 s"}))
+    remotenotify.run_test("x", lambda status, error: got.append((status, error)))
+    refusal = RequestRefused(protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": "notify.test"})
+    monkeypatch.setattr(apilink, "current", lambda: SendLink(refusal=refusal))
+    remotenotify.run_test("x", lambda status, error: got.append((status, error)))
+    monkeypatch.setattr(apilink, "current", lambda: None)
+    remotenotify.run_test("x", lambda status, error: got.append((status, error)))
+    assert got == [
+        (None, "Timed out after 10 s"),
+        (None, "notify.test: not served here"),
+        (None, "Not connected to the service"),
+    ]

@@ -32,6 +32,7 @@ from . import (  # noqa: E402
     prefslayout,
     prefssearch,
     remotecli,
+    remotenotify,
     sandboxgrants,
     sandboxplan,
     sandboxstatus,
@@ -207,7 +208,7 @@ class _SearchableGroup(Adw.PreferencesGroup):
 
 
 class _SplitGroup:
-    """One of the four mixed groups (`prefslayout.GROUP_SIDES`) while it is
+    """One of the mixed groups (`prefslayout.GROUP_SIDES`) while it is
     built: two `_SearchableGroup`s of one title, `.device` for This device's
     page and `.service` for the Service page. `add(row, *settings)` puts a
     row on the half of its first setting's side, so the builders keep adding
@@ -939,7 +940,7 @@ class PreferencesDialog(Adw.Dialog):
         self._state.set_setting(key, row.get_active())
         self._on_change()
 
-    def _build_notifications_group(self, state: AppState) -> _SearchableGroup:
+    def _build_notifications_group(self, state: AppState) -> _SplitGroup:
         """The spec's Notifications group: the in-app card and its own
         light/dark, the sound it plays, bells from other sessions, and
         finished runs.
@@ -953,7 +954,7 @@ class PreferencesDialog(Adw.Dialog):
         beep is what a card gets then, whatever the row says.
         """
         group = _searchable(
-            _SearchableGroup(title=_("Notifications")),
+            _SplitGroup(title=_("Notifications")),
             *prefslayout.NOTIFICATION_SEARCH_TERMS,
         )
         self._inapp_row = Adw.SwitchRow(
@@ -1044,7 +1045,91 @@ class PreferencesDialog(Adw.Dialog):
             _searchable(self._announce_row, "finished", "done", "complete", "green"),
             "announce_finished_runs",
         )
+        self._build_notify_command_rows(state, group)
         return group
+
+    def _build_notify_command_rows(self, state: AppState, group: _SplitGroup) -> None:
+        """The Service half of the Notifications group (PR-3.4, D62): the
+        command the service runs for a notification no window is attached
+        to, with a *Send test* button and a caption under it. The box saves
+        by the Git group's entry rows' rules (the settle timer, Enter,
+        leaving the row, closing the dialog; a text `shlex` cannot split
+        wears the error style and leaves the setting alone; empty saves
+        "", off). *Send test* commits the box through that same path and
+        sends the box's text, not the saved setting, so a save the service
+        refuses cannot test an older command without a word."""
+        terms = ("command", "script", "push", "pushover", "ntfy", "webhook", "phone", "away", "headless")
+        self._notify_command_row = Adw.EntryRow(title=_("Notification command"))
+        self._notify_command_row.set_text(state.get_setting("notify_command") or "")
+        self._notify_command_row.connect("changed", self._on_notify_command_changed)
+        self._notify_command_row.connect("entry-activated", self._on_notify_command_activated)
+        self._flush_git_word_on_focus_out(
+            self._notify_command_row, "notify_command", remotenotify.command_ok
+        )
+        self.connect("closed", lambda *_a: self._flush_notify_command())
+        self._notify_test_button = Gtk.Button(label=_("Send test"), valign=Gtk.Align.CENTER)
+        self._notify_test_button.connect("clicked", self._on_notify_test_clicked)
+        self._notify_command_row.add_suffix(self._notify_test_button)
+        group.add(_searchable(self._notify_command_row, *terms), "notify_command")
+        self._notify_command_help = _(
+            "Run on the service's machine for a message or a finished run when no "
+            "Collins window is attached. The notification is in COLLINS_NOTIFY_KIND, "
+            "_TITLE, _BODY, _SESSION and _PROJECT. The command is split like a shell "
+            "would split it but run without one; it gets 10 seconds"
+        )
+        self._notify_command_caption = Adw.ActionRow(activatable=False, selectable=False)
+        self._notify_command_caption.add_css_class("dim-label")
+        self._notify_command_caption.set_subtitle(self._notify_command_help)
+        group.add(_searchable(self._notify_command_caption, *terms), "notify_command")
+        self._notify_testing = False
+        self._refresh_notify_test_button()
+
+    def _refresh_notify_test_button(self) -> None:
+        text = self._notify_command_row.get_text()
+        self._notify_test_button.set_sensitive(
+            not self._notify_testing and remotenotify.command_runnable(text)
+        )
+
+    def _on_notify_command_changed(self, row: Adw.EntryRow) -> None:
+        # The caption shows the help again the next time the box changes.
+        self._notify_command_caption.set_subtitle(self._notify_command_help)
+        self._notify_command_caption.remove_css_class("error")
+        self._notify_command_caption.add_css_class("dim-label")
+        self._refresh_notify_test_button()
+        self._save_git_word(row, "notify_command", remotenotify.command_ok)
+
+    def _on_notify_command_activated(self, row: Adw.EntryRow) -> None:
+        self._flush_git_word(row, "notify_command", remotenotify.command_ok)
+
+    def _flush_notify_command(self) -> None:
+        self._flush_git_word(self._notify_command_row, "notify_command", remotenotify.command_ok)
+
+    def _on_notify_test_clicked(self, _button) -> None:
+        row = self._notify_command_row
+        self._flush_git_word(row, "notify_command", remotenotify.command_ok)
+        self._commit_git_word(row, "notify_command", remotenotify.command_ok)
+        text = row.get_text().strip()
+        if not remotenotify.command_runnable(text):
+            return
+        self._notify_testing = True
+        self._refresh_notify_test_button()
+        remotenotify.run_test(text, self._on_notify_test_result)
+
+    def _on_notify_test_result(self, status: int | None, error: str) -> None:
+        self._notify_testing = False
+        self._refresh_notify_test_button()
+        caption = self._notify_command_caption
+        failed = status is None or status != 0
+        if status is not None:
+            caption.set_subtitle(_("Exit status {status}").format(status=status))
+        else:
+            caption.set_subtitle(error)
+        if failed:
+            caption.add_css_class("error")
+            caption.remove_css_class("dim-label")
+        else:
+            caption.remove_css_class("error")
+            caption.add_css_class("dim-label")
 
     def _sound_index(self, value: str) -> int:
         """Which of the combo's rows the setting's value is: a named

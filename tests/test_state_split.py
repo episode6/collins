@@ -165,7 +165,7 @@ def test_the_prefslayout_sides_agree_with_the_split():
         "mcp_tools": "service",
         "sessions": "mixed",
         "sandbox": "service",
-        "notifications": "device",
+        "notifications": "mixed",
         "composer": "device",
         "terminal": "device",
         "footer_apps": "device",
