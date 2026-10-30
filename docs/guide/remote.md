@@ -7,6 +7,15 @@ window connects to it the way you would — `ssh` — and nothing else is
 opened: no port, no token, no listener on the network. Collins forwards
 the service's socket over ssh and talks to it as if it were local.
 
+**What remote means.** The service owns the sessions, their terminals,
+`~/.claude`, `git`, `gh` and the sandboxes; the window owns what you see and
+type. Connected to a box, the sidebar lists the box's sessions, a tab is a
+terminal of the box's, the editor edits the box's files and the git page
+diffs the box's checkouts. Closing the window, losing the network or
+sleeping the laptop ends nothing: the sessions run where they were. One
+window shows one service at a time (*This computer* or a box); switching
+detaches every tab and reconnects.
+
 ::: tip What you need on the box
 `collins-service` [installed](#install-the-service) and on the login shell's `PATH`, `claude`
 logged in there, and an ssh login that works without a prompt (a key in
@@ -15,10 +24,22 @@ your agent). `collins-service --check` on the box says what is missing.
 
 ## Connecting
 
-**Connect to…** in the app menu lists the services this computer knows:
-*This computer* first, then every ssh connection you have added. **Add
-ssh connection** takes a name and the host as `user@host` or
-`user@host:port`; **Test** runs
+**Connect to…** in the app menu opens the *Connections* dialog. Its list
+holds the services this computer knows: *This computer* first, then every
+ssh connection you have added, with a check on the one the window shows
+and a trash button to remove the others. **Connect**, in the dialog's
+header, switches the window to the selected one: every open tab detaches
+with no question (its session keeps running where it is), the sidebar
+refills from the other machine's sessions, and the tabs you last had open
+there come back. The banner says *Reconnecting to \<name\>* while the
+forward is being set up. Switching back is the same gesture with *This
+computer* selected.
+
+![The Connections dialog: This computer, a saved ssh connection, and the Add ssh connection form](/img/connect-dialog.png)
+
+**Add ssh connection** takes a name and the host as `user@host`,
+`user@host:port` or a bare host (a name or an IPv4 address; an IPv6
+literal is not taken). **Test** runs
 
 ```
 ssh -o BatchMode=yes user@host collins-service --print-socket
@@ -26,17 +47,14 @@ ssh -o BatchMode=yes user@host collins-service --print-socket
 
 and shows the socket's path it printed (which also starts the service on
 the box when none is running), or ssh's own last line when it could not
-connect. **Connect** switches the window to that service: every open tab
-detaches with no question (its session keeps running where it is), the
-sidebar refills from the other machine's sessions, and the tabs you last
-had open there come back. The banner says *Reconnecting to \<name\>*
-while the forward is being set up. Switching back is the same gesture
-with *This computer* selected.
+connect. **Add** saves the connection in this computer's `ui-state.json`;
+nothing is stored on the box.
 
 From a terminal, `collins --connect NAME` opens the window on a saved
 connection (`local` names this computer); if a window is already running,
 it switches. The connection you used last is the one the next launch
-connects to.
+connects to; when that box cannot be reached at launch, the window asks
+whether to connect to this computer instead or quit.
 
 ## What ssh does for you
 
@@ -195,6 +213,26 @@ it never offers *Restart service* for a box, since a window cannot stop a
 process on another machine. Upgrade Collins on the side it names and
 connect again.
 
+## Restarting the service on the box
+
+A small companion program, `collins-keeper`, forks every agent and panel
+shell on the service's behalf and keeps their terminals, so the service
+can stop without taking the sessions with it. **Restart service** in the
+main menu (the package restarts nothing on an upgrade, so this is how a
+box runs new code) and `systemctl --user restart collins-service` end no
+session: the next service takes the terminals
+over, loads the screen it saved for each and makes every program repaint,
+and the window reconnects through the forward and shows each open tab where
+it was, mid-turn included. A crash of the service ends nothing either. To
+end every session on the box for good, stop the keeper too
+(`systemctl --user stop collins-keeper.service`). Where the keeper could
+not be started (or `COLLINS_KEEPER=none` is set in the service's
+environment), a restart ends every foreground session gracefully and each
+tab resumes its own; the restart dialog says which one it is. The CLI's
+`/bg` daemon and its agents run through any of it. Both units are
+`KillMode=process`, never enabled by a package. The details are in [Restarting and
+stopping](./service#restarting-and-stopping).
+
 ## Notifications while you are away
 
 Cards, sounds and desktop notifications are the window's, and with no
@@ -251,6 +289,8 @@ would:
 - **Open** (or Enter) picks the folder the entry names, once the box says
   a folder is there.
 
+![The path picker on the box's ~/dev: home and the project folders as shortcuts, the folder's subfolders, and the Up, Show hidden and New folder buttons](/img/path-picker.png)
+
 On this computer the desktop's own chooser opens as before. Three
 choosers stay your desktop's either way: **Attach file** in the composer
 picks a file of *yours*, and when the service is elsewhere it is uploaded
@@ -284,6 +324,8 @@ a pinned terminal, scrolling it or switching away from it takes nothing.
 When the window that has the size lets go of the session (it detaches,
 quits or loses its connection), the other one takes the size at once.
 Within one window none of this shows: a session has one tab there.
+
+![A session tab pinned to another computer's size, under the Sized for banner with its Use this size button](/img/sized-for.png)
 
 A picture or file you drop into a composer before its session has started
 (the new-chat screen) is uploaded to the box and shown back only to the

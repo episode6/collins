@@ -7,7 +7,15 @@ Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
 editor-picker, attachments-panel, notifications, notification-card,
 preferences-notifications, preferences-notify-command, welcome, welcome-cli,
-git-page, git-page-notes.
+git-page, git-page-notes, connect-dialog, sized-for, path-picker.
+
+connect-dialog opens the app menu's Connect to... dialog over a staged
+ssh connection (written to ui-state.json before the app starts; nothing
+connects or tests anywhere) with the add form filled in. sized-for opens
+a session's tab and attaches a second client on another device to its pty,
+which takes the size (the check_two_clients.py recipe), so the tab is
+pinned under its "Sized for <device>" banner. path-picker opens the
+service-side folder picker on ~/dev. All three are the remote guide's.
 
 git-page opens a session's git page on its working tree (stage-docs-data.sh
 leaves alpha-widgets with an unstaged edit, a staged one and an untracked
@@ -81,7 +89,7 @@ SCENES = (
     "notification-card", "preferences-notifications", "preferences-service",
     "preferences-search", "preferences-notify-command", "welcome", "welcome-cli",
     "git-page", "git-page-notes", "git-page-commit", "git-page-commit-folded",
-    "git-page-gap-note",
+    "git-page-gap-note", "connect-dialog", "sized-for", "path-picker",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -129,6 +137,35 @@ def edit_settings() -> None:
 
 
 edit_settings()
+
+
+def stage_ui_state() -> None:
+    """The remote guide's scenes: this device's own file, written before
+    the app starts. The window's size lives here (a device setting, read
+    from this file whatever state.json says) and, for connect-dialog, one
+    saved ssh connection the app only reads: the dialog's Test and Connect
+    are never pressed."""
+    path = os.path.join(os.environ["XDG_CONFIG_HOME"], "collins", "ui-state.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        data = {}
+    if args.size:
+        w, h = args.size.lower().split("x")
+        device = data.setdefault("device", {}).setdefault("settings", {})
+        device["window_width"], device["window_height"] = int(w), int(h)
+    if args.scene == "connect-dialog":
+        data["connections"] = [{
+            "id": uuid.uuid4().hex, "name": "build box", "kind": "ssh",
+            "target": "collins@build.example.net:2222", "remote_app_id": "",
+        }]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+
+
+if args.scene in ("connect-dialog", "sized-for", "path-picker"):
+    stage_ui_state()
 
 sys.path.insert(0, args.repo_root)
 
@@ -460,6 +497,51 @@ def stage(win) -> list[tuple[int, callable]]:
             tab.git_page.reveal(path, hunk=0, focus=False)
 
         return [(1500, lambda: tab.open_git_page("branch", focus=False)), (3000, expand), (1500, note)]
+    elif scene == "connect-dialog":
+        win.activate_action("win.connect-to")
+
+        def fill_form() -> None:
+            dialog = win.get_visible_dialog()
+            dialog.name_row.set_text("workstation")
+            dialog.target_row.set_text("ghackett@workstation.lan")
+
+        return [(800, fill_form)]
+    elif scene == "path-picker":
+        from collins import pathpicker
+
+        picker = pathpicker.pick_folder(win, "~/dev", lambda _path: None)
+
+        def tilde_path() -> None:
+            # The service answers with the scratch HOME's absolute path;
+            # the entry takes the typed form, as it does for a person.
+            picker.entry.set_text("~/dev/")
+            picker.entry.set_position(-1)
+
+        return [(1500, tilde_path)]
+    elif scene == "sized-for":
+        # The check_two_clients.py recipe: a bare second link on another
+        # device attaches to the tab's pty and takes the size with a focus
+        # event, so the tab is pinned to its grid under the banner.
+        from collins.api import server as api_server
+        from collins.api.client import SocketLink
+
+        tab = open_tab(win, U1)
+        keep: list = []
+
+        def attach_second() -> None:
+            view = tab._view
+            app_id = os.environ["COLLINS_APP_ID"]
+            link = SocketLink(api_server.socket_path(app_id), app_id=app_id, device="workstation")
+            link.connect()
+            client = link.pty_client(lambda p, d, f: None, lambda e: None, device="workstation")
+            # Narrower than the tab's own grid and as tall: the pinned tab
+            # shows empty space to the right of the terminal.
+            cols, rows = view._last_grid
+            client.request({"t": "attach", "pty": view.pty, "cols": cols - 14, "rows": rows})
+            client.send_event({"t": "focus", "pty": view.pty, "focused": True})
+            keep.extend([link, client])
+
+        return [(3000, attach_second)]
     elif scene == "notifications":
         open_tab(win, U1)
         return [(1500, stage_notifications), (300, lambda: win.notify_bell.button.set_active(True))]

@@ -96,6 +96,11 @@ run_scene() {
                       --set page_panel_size_right=1020 --settle-ms 6000 ;;
     git-page-notes) HEADLESS_SIZE=2560x1440 shoot git-page-notes "$IMG/git-page-notes.png" --size 2000x1100 \
                       --set page_panel_size_right=1020 --settle-ms 6000 ;;
+    # The remote guide's three: the connect dialog over a staged ssh
+    # connection, a tab pinned under "Sized for <device>", the path picker.
+    connect-dialog) shoot connect-dialog "$IMG/connect-dialog.png" --size 1280x860 ;;
+    sized-for)      shoot sized-for "$IMG/sized-for.png" --size 1280x860 --settle-ms 4000 ;;
+    path-picker)    shoot path-picker "$IMG/path-picker.png" --size 1280x860 ;;
     welcome)        shoot welcome "$IMG/welcome.png" --size 1280x860 --set welcome_seen=false ;;
     welcome-cli)    shoot welcome-cli "$IMG/welcome-cli.png" --size 1280x860 --set welcome_seen=false ;;
   esac
@@ -109,7 +114,7 @@ run_scene() {
 SCENES=("$@")
 for s in main-window hero quick-switcher session-details mcp-servers preferences \
          terminal-panel composer pr-page editor-panel attachments-panel git-page \
-         git-page-notes notifications notification-card welcome welcome-cli new-chat; do
+         git-page-notes notifications notification-card connect-dialog sized-for path-picker welcome welcome-cli new-chat; do
   run_scene "$s"
 done
 echo "staged data left in $E2E"

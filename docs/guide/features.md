@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-29. Full change history: git log for this file.
+fork. Last modified: 2026-10-30. Full change history: git log for this file.
 -->
 
 # Features
@@ -163,6 +163,12 @@ Enter opens, Esc closes.
   folder*, a link to a folder marked and followed like any folder. On the
   service's machine the desktop's chooser opens as before. See [Picking a
   folder on the box](/guide/remote#picking-a-folder-on-the-box).
+- **Two windows on one session.** A terminal has one size, and it belongs
+  to the window that last typed, clicked or focused into it. The other
+  window keeps the terminal pinned at that size, at the pane's top left,
+  under a *Sized for \<device\>* banner; **Use this size** (or a key, or a
+  click) takes it over. See [Two windows on one
+  session](/guide/remote#two-windows-on-one-session).
 - **Local extras.** Every path Collins shows is a path on the service's
   machine. A window running on that same machine proves it when it
   connects, and keeps the things that hand such a path to something on

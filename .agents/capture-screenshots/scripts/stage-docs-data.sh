@@ -381,7 +381,7 @@ PYEOF
 # what Collins reads as "the agent is at its input box".
 cat > "$E2E/bin/claude" <<'EOF'
 #!/bin/bash
-printf '\033[H\033[2J'
+printf '\033[H\033[2J\033[3J'
 printf '\n'
 printf ' \033[38;5;173m✻\033[0m \033[1mClaude Code\033[0m — resuming session\n'
 printf '\n'
