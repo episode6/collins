@@ -224,9 +224,13 @@ bwrap:        /usr/bin/bwrap
 
 `shell:` names the shell the capture used and what it read: *login profile
 and interactive rc read*; *login profile read; the interactive rc handed the
-shell on* (with the fix, `~/.profile` or `~/.zprofile`); *interactive rc
-read; the login profile did not answer*; or *no answer within 5 s* (the
-service then runs on its own environment). It never makes `--check` exit 1.
+shell on* (with the fix, `~/.profile` or `~/.zprofile`, and "or did not
+answer within 5 s" when the interactive shell was cut off at the limit);
+*interactive rc read; the login profile did not answer*; or, when neither
+answered, one of *no answer within 5 s*, *`shell` could not be run* (with
+the reason: the shell is not installed) and *no PATH read from either
+round*. In those three the service runs on its own environment. It never
+makes `--check` exit 1.
 
 It exits 1 when `$XDG_RUNTIME_DIR` is unset or `claude` is not on the
 login shell's `PATH`.

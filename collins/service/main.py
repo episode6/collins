@@ -87,12 +87,18 @@ class LoginCapture:
     (the login round's parse overlaid by the interactive round's) and which
     rounds counted, a round counting only when its output held a ``PATH``.
     *shell* is the shell the rounds ran, worked out once, so ``--check``
-    names the one the capture used."""
+    names the one the capture used. *timed_out*: a round was killed at the
+    deadline; *started*: at least one round's ``Popen`` succeeded; *error*:
+    the first ``Popen`` failure's text; the three give ``--check`` its
+    wording per cause."""
 
     environment: dict[str, str] = field(default_factory=dict)
     login: bool = False
     interactive: bool = False
     shell: str = ""
+    timed_out: bool = False
+    started: bool = False
+    error: str = ""
 
 
 def _parse_env0(stdout: bytes) -> dict[str, str]:
@@ -135,6 +141,7 @@ def capture_login_shell(
     shell = shell or os.environ.get("SHELL") or "/bin/sh"
     deadline = time.monotonic() + timeout
     rounds: list[tuple[str, subprocess.Popen | None]] = []
+    error = ""
     for flags in ("-lc", "-lic"):
         try:
             proc = subprocess.Popen(
@@ -147,9 +154,11 @@ def capture_login_shell(
             )
         except (OSError, ValueError) as exc:
             log.info("login-shell capture (%s) failed: %s", flags, exc)
+            error = error or getattr(exc, "strerror", None) or str(exc)
             proc = None
         rounds.append((flags, proc))
     parsed: dict[str, dict[str, str]] = {}
+    killed: list[str] = []
 
     def settle(flags: str, proc: subprocess.Popen) -> None:
         try:
@@ -167,6 +176,7 @@ def capture_login_shell(
             if proc.stdout is not None:
                 proc.stdout.close()
             proc.wait()
+            killed.append(flags)
             log.info("login-shell capture (%s) timed out after %.0f s", flags, timeout)
             return
         except Exception as exc:  # never raises: a round that breaks yields nothing
@@ -193,6 +203,9 @@ def capture_login_shell(
         login=login is not None,
         interactive=interactive is not None,
         shell=shell,
+        timed_out=bool(killed),
+        started=any(proc is not None for _, proc in rounds),
+        error=error,
     )
 
 
@@ -304,17 +317,23 @@ def check(app_id: str, out=sys.stdout) -> int:
     print(f"socket:       {path} ({api_server.probe_socket(path)})", file=out)
     capture = capture_login_shell()
     shell = capture.shell
+    window = f"{CAPTURE_TIMEOUT_S:.0f} s"
     if capture.login and capture.interactive:
         verdict = "login profile and interactive rc read"
     elif capture.login:
+        also = f", or did not answer within {window}" if capture.timed_out else ""
         verdict = (
-            "login profile read; the interactive rc handed the shell on — exec zsh, tmux? — so a PATH "
-            "set only there is not seen: put it in ~/.profile or ~/.zprofile"
+            f"login profile read; the interactive rc handed the shell on — exec zsh, tmux?{also} — so a "
+            "PATH set only there is not seen: put it in ~/.profile or ~/.zprofile"
         )
     elif capture.interactive:
         verdict = "interactive rc read; the login profile did not answer"
+    elif capture.timed_out:
+        verdict = f"no answer within {window}: the service runs on its own environment"
+    elif not capture.started:
+        verdict = f"{shell} could not be run: {capture.error}; the service runs on its own environment"
     else:
-        verdict = f"no answer within {CAPTURE_TIMEOUT_S:.0f} s: the service runs on its own environment"
+        verdict = "no PATH read from either round; the service runs on its own environment"
     print(f"shell:        {shell} ({verdict})", file=out)
     env = merge_environment(dict(os.environ), capture.environment)
     claude = shutil.which("claude", path=env.get("PATH"))

@@ -575,25 +575,49 @@ def test_check_names_what_the_shell_rounds_found(runtime, monkeypatch):
     monkeypatch.setattr(
         service_main.shutil, "which", lambda name, path=None: f"/usr/bin/{name}" if name == "claude" else None
     )
-    monkeypatch.setenv("SHELL", "/usr/bin/zsh")
-    words = {
-        (True, True): "(login profile and interactive rc read)",
-        (True, False): "(login profile read; the interactive rc handed the shell on \u2014 exec zsh, tmux? "
-        "\u2014 so a PATH set only there is not seen: put it in ~/.profile or ~/.zprofile)",
-        (False, True): "(interactive rc read; the login profile did not answer)",
-        (False, False): "(no answer within 5 s: the service runs on its own environment)",
-    }
-    for (login, interactive), wording in words.items():
+    own = "the service runs on its own environment"
+    handed = "login profile read; the interactive rc handed the shell on \u2014 exec zsh, tmux?"
+    seen = "so a PATH set only there is not seen: put it in ~/.profile or ~/.zprofile"
+    cases = [
+        (dict(login=True, interactive=True, started=True), "login profile and interactive rc read"),
+        (dict(login=True, started=True), f"{handed} \u2014 {seen}"),
+        (
+            dict(login=True, started=True, timed_out=True),
+            f"{handed}, or did not answer within 5 s \u2014 {seen}",
+        ),
+        (dict(interactive=True, started=True), "interactive rc read; the login profile did not answer"),
+        (dict(started=True, timed_out=True), f"no answer within 5 s: {own}"),
+        (dict(timed_out=True), f"no answer within 5 s: {own}"),
+        (
+            dict(error="No such file or directory"),
+            f"/usr/bin/zsh could not be run: No such file or directory; {own}",
+        ),
+        (dict(started=True), f"no PATH read from either round; {own}"),
+    ]
+    for flags, wording in cases:
         monkeypatch.setattr(
             service_main,
             "capture_login_shell",
-            lambda login=login, interactive=interactive: service_main.LoginCapture(
-                {}, login, interactive, "/usr/bin/zsh"
-            ),
+            lambda flags=flags: service_main.LoginCapture(shell="/usr/bin/zsh", **flags),
         )
         out = io.StringIO()
         assert service_main.check("com.example.Check", out=out) == 0  # not counted in `missing`
         lines = out.getvalue().splitlines()
         assert lines[lines.index(next(x for x in lines if x.startswith("socket:"))) + 1] == (
-            f"shell:        /usr/bin/zsh {wording}"
+            f"shell:        /usr/bin/zsh ({wording})"
         )
+
+
+def test_the_capture_says_why_nothing_answered(tmp_path):
+    missing = service_main.capture_login_shell(str(tmp_path / "no-such-shell"))
+    assert not missing.started and not missing.timed_out
+    assert missing.error == "No such file or directory" and missing.shell == str(tmp_path / "no-such-shell")
+    greeter = _fake_shell(tmp_path, "greeter4", "printf 'hello\\n'\n")
+    quiet = service_main.capture_login_shell(greeter)
+    assert quiet.started and not quiet.timed_out and quiet.error == ""
+    slow = _fake_shell(tmp_path, "slow3", "exec sleep 10\n")
+    late = service_main.capture_login_shell(slow, timeout=0.5)
+    assert late.started and late.timed_out
+    body = 'case "$1" in -lic) exec sleep 10;; *) printf "PATH=/l\\0";; esac\n'
+    fast = _fake_shell(tmp_path, "fast3", body)
+    assert service_main.capture_login_shell(fast, timeout=0.5).timed_out
