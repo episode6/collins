@@ -77,7 +77,7 @@ empty or unsplittable command is `invalid`, a run replies `{status}`, one
 that won't start or times out replies `{error}` (one line, at most ARG_TEXT_MAX), never
 both. Its variables are the test values (`KIND=test`, TITLE "Collins test
 notification", BODY "Sent from Preferences", SESSION and PROJECT empty). A test injects `get_setting`, `has_clients`,
-`run_async`, `run` and `dispatch` into the constructor.
+`run_async`, `run`, `dispatch` and `environment` into the constructor.
 
 The row is the Notifications group's Service half (the group is `mixed`,
 `prefs._build_notify_command_rows`): an `Adw.EntryRow` "Notification

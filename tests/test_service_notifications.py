@@ -542,15 +542,36 @@ def test_a_daemonized_child_does_not_hold_the_runner(tmp_path):
     assert time.monotonic() - started < 1.5
 
 
-def test_output_is_not_held_in_memory(tmp_path):
-    import resource
+def _vm_rss_kb() -> int:
+    """This process's resident set now (not a high-water mark, which an
+    earlier test may have raised past anything this one reaches)."""
+    with open("/proc/self/status", encoding="ascii") as fh:
+        return next(int(line.split()[1]) for line in fh if line.startswith("VmRSS:"))
 
-    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    status, error = noti.run_command(
-        _script(tmp_path, "head -c 52428800 /dev/zero >&2\nexit 1"), dict(os.environ), timeout=10
-    )
-    grown_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
-    assert (status, error) == (1, "") and grown_kb < 20 * 1024
+
+def test_output_is_not_held_in_memory(tmp_path):
+    import threading
+
+    peak = [0]
+    stop = threading.Event()
+    before = _vm_rss_kb()
+
+    def watch() -> None:
+        while not stop.is_set():
+            peak[0] = max(peak[0], _vm_rss_kb() - before)
+            stop.wait(0.005)
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        status, error = noti.run_command(
+            _script(tmp_path, "head -c 52428800 /dev/zero >&2\nexit 1"), dict(os.environ), timeout=10
+        )
+    finally:
+        stop.set()
+        watcher.join()
+    # 50 MB of stderr: held (communicate) it would peak past 50 MB; not held, a few.
+    assert (status, error) == (1, "") and peak[0] < 20 * 1024, peak
     started = time.monotonic()
     chatty = _script(tmp_path, "while :; do echo fail >&2; done")
     result = noti.run_command(chatty, dict(os.environ), timeout=0.3)
