@@ -70,9 +70,10 @@ class Core:
 
 
 class Client:
-    def __init__(self, local=False, device="laptop"):
+    def __init__(self, local=False, device="laptop", client_id=""):
         self.local = local
         self.device = device
+        self.client_id = client_id
 
 
 def _inline(cls, core, **kwargs):
@@ -222,6 +223,16 @@ def test_a_pending_upload_is_served_to_the_device_that_sent_it_only(tmp_path, mo
     local = Client(local=True, device="phone")
     assert _get(feed, f"path={picture}", local)[0] == 200
     assert _get(feed, f"path={forgotten}", local)[0] == 200
+    # A client whose hello named no device is held to its client id
+    # (the Fable review of PR 627, N2): it reads back its own drops, and
+    # another nameless client does not.
+    nameless_a, nameless_b = Client(device="", client_id="c-a"), Client(device="", client_id="c-b")
+    own = core.pending("own.png", b"\x89PNG own", device=blobs.pending_owner(nameless_a))
+    assert _get(feed, f"path={own}", nameless_a)[0] == 200
+    assert _get(feed, f"path={own}", nameless_b)[0] == 403
+    assert _get(feed, f"path={own}", laptop)[0] == 403
+    assert blobs.pending_owner(None) == "" and blobs.pending_owner(Client(device="", client_id="")) == ""
+    assert blobs.pending_owner(laptop) == "laptop"
     # A request that names no client (no header: `client` None) is no device.
     got = []
     feed.blob(None, f"path={picture}", None, lambda *answer: got.append(answer))

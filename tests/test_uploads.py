@@ -259,8 +259,9 @@ class Core:
 
 
 class Client:
-    def __init__(self, device=""):
+    def __init__(self, device="", client_id=""):
         self.device = device
+        self.client_id = client_id
 
 
 def _put(feed, query, body, client=None):
@@ -302,6 +303,9 @@ def test_the_put_holds_a_pending_upload_to_the_uploading_device(uploads_root):
     anonymous = json.loads(_put(feed, "name=drop.png", b"png")[2])["path"]
     assert anonymous != pending and not core.pending_owners.serves(anonymous, "")
     assert len(core.pending_owners) == 2
+    # A client that named no device is held to its client id (N2).
+    nameless = json.loads(_put(feed, "name=drop.png", b"png", Client("", "c-9"))[2])["path"]
+    assert core.pending_owners.owner(nameless) == "\x00client:c-9"
 
 
 def test_the_put_refuses_an_unknown_session_a_bad_name_and_a_body_past_the_cap(uploads_root, monkeypatch):

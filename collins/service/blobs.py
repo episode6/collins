@@ -292,6 +292,21 @@ def known_session(core, session_id: str) -> bool:
         return False
 
 
+def pending_owner(client) -> str:
+    """Who a pending upload is held to for *client* (PR-3.5): its hello's
+    ``device``, or, when it named none (``gethostname`` failed), its
+    ``client_id`` under a prefix no hello device carries, so such a client
+    still reads back its own drops (the Fable review of PR 627, N2); ""
+    for a request that names no client, which nobody is served."""
+    if client is None:
+        return ""
+    device = getattr(client, "device", "") or ""
+    if isinstance(device, str) and device:
+        return device
+    client_id = getattr(client, "client_id", "") or ""
+    return "\x00client:" + client_id if isinstance(client_id, str) and client_id else ""
+
+
 def read_icon(root: str) -> tuple[bytes, str] | None:
     """The project icon at *root* as served: (its bytes, its tag), or None
     when there is none, it is implausibly large, or the gate refuses it.
@@ -403,10 +418,14 @@ class FileBlobs(_Feed):
     only the one the drop is for (the pending folder is not per session).
     **Either is served only to the device that uploaded it** (PR-3.5:
     `uploads.PendingOwners`, the core's `pending_owners`, keyed by the
-    file's resolved path and the uploading client's hello ``device``), so
-    a second device on the service never reads the first one's drops; a
-    pending upload whose device is not known (none sent, or the service
-    restarted since) is served to no client that is not `local`.
+    file's resolved path and `pending_owner(client)`: the uploading
+    client's hello ``device``, or its ``client_id`` when it named none).
+    That scopes the shared pending folder by the name a client gives; it
+    is not a boundary: the hello's device is self-declared, and a client
+    that says another's name is served that device's drops (one user per
+    service, whose every client is trusted with a shell: §3.16; the Fable
+    review of PR 627, N1). A pending upload whose owner is not known (the
+    service restarted since) is served to no client that is not `local`.
     The same handle rule holds the show_image registry: a path admitted
     under a session's id and handle is served by the handle only while
     the session has no id. A `local` client is never served one (it
@@ -456,7 +475,7 @@ class FileBlobs(_Feed):
         # Whose drops the pending folder may hand this client: its own
         # device's only (PR-3.5).
         owners = getattr(self.core, "pending_owners", None)
-        device = getattr(client, "device", "") or ""
+        device = pending_owner(client)
 
         def work() -> tuple[int, dict, bytes]:
             real = os.path.realpath(path)
@@ -629,8 +648,8 @@ class UploadBlobs(_Feed):
             return
 
         # The device a pending upload is held to (PR-3.5), read here on the
-        # main loop: the hello's, "" for a request that names no client.
-        device = getattr(client, "device", "") or ""
+        # main loop: `pending_owner`'s, "" for a request that names no client.
+        device = pending_owner(client)
         owners = getattr(self.core, "pending_owners", None)
 
         def work() -> tuple[int, dict, bytes]:
