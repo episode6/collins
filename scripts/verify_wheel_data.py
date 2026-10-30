@@ -16,11 +16,16 @@ on the source tree. The sdist matters as much as the wheel: `python -m build`
 builds the sdist first and the wheel out of it, so anything missing there is
 missing from what PyPI serves.
 
+The wheel's console scripts are checked too: `collins`, `collins-service`
+and `collins-keeper`, the three commands the systemd user units and the
+system packages name.
+
 Usage: python3 scripts/verify_wheel_data.py [dist-dir]   (default: dist/)
 """
 
 from __future__ import annotations
 
+import configparser
 import sys
 import tarfile
 import zipfile
@@ -41,8 +46,11 @@ def expected() -> set[str]:
         f"collins/{APP_ID}.desktop",
         f"collins/{APP_ID}.metainfo.xml",
         "collins/THIRD_PARTY_LICENSES.md",
-        # The systemd user unit `collins --install-desktop` writes out.
+        # The systemd user units `collins --install-desktop` writes out: the
+        # service's and the keeper's (PR-3.6), which every system package
+        # also installs to /usr/lib/systemd/user/.
         "collins/collins-service.service",
+        "collins/collins-keeper.service",
     }
     actions = sorted((icons / "hicolor" / "scalable" / "actions").glob("*.svg"))
     if not actions:
@@ -73,6 +81,31 @@ def check(label: str, names: set[str], wanted: set[str]) -> list[str]:
     return problems
 
 
+# The commands a wheel install puts on PATH, and what each unit's ExecStart
+# names: the window, the service and the keeper (PR-3.6). Every system
+# package writes or installs the same three.
+SCRIPTS = {
+    "collins": "collins.app:main",
+    "collins-service": "collins.service.main:main",
+    "collins-keeper": "collins.service.keeper:main",
+}
+
+
+def check_scripts(label: str, archive: zipfile.ZipFile, names: set[str]) -> list[str]:
+    """The wheel's console scripts: every command in SCRIPTS, at its entry point."""
+    entry_points = [n for n in names if n.endswith(".dist-info/entry_points.txt")]
+    if not entry_points:
+        return [f"{label}: no entry_points.txt"]
+    parser = configparser.ConfigParser()
+    parser.read_string(archive.read(entry_points[0]).decode())
+    scripts = dict(parser["console_scripts"]) if parser.has_section("console_scripts") else {}
+    return [
+        f"{label}: console script {name} is {scripts.get(name)!r}, not {target!r}"
+        for name, target in SCRIPTS.items()
+        if scripts.get(name) != target
+    ]
+
+
 def main(argv: list[str]) -> int:
     dist = Path(argv[1]) if len(argv) > 1 else ROOT / "dist"
     wheels = sorted(dist.glob("*.whl"))
@@ -83,7 +116,10 @@ def main(argv: list[str]) -> int:
     wanted = expected()
     problems: list[str] = []
     for wheel in wheels:
-        problems += check(wheel.name, set(zipfile.ZipFile(wheel).namelist()), wanted)
+        with zipfile.ZipFile(wheel) as archive:
+            names = set(archive.namelist())
+            problems += check(wheel.name, names, wanted)
+            problems += check_scripts(wheel.name, archive, names)
     for sdist in sdists:
         with tarfile.open(sdist) as tar:
             # Entries are prefixed with the sdist's own <name>-<version>/ dir.

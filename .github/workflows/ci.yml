@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 
 name: CI
 
@@ -117,18 +117,25 @@ jobs:
       - run: twine check --strict dist/*
       - run: python3 scripts/verify_wheel_data.py
       - run: ./scripts/build_deb.sh
-      # The .deb ships the whole package: extract it and import the app from
-      # the extracted tree, so a subpackage build_deb.sh forgot (service/,
-      # api/) fails here, not at a user's first launch after a release.
-      - name: The .deb's package imports
+      # Two .debs (PR-3.7): every file in exactly one, each in its half.
+      - run: python3 scripts/verify_package_split.py deb dist/collins-service_*_all.deb dist/collins_*_all.deb
+      # collins-service ships the whole package: extract both and import the
+      # app and the service from the extracted tree, so a subpackage
+      # build_deb.sh forgot (service/, api/) fails here, not at a user's first
+      # launch after a release.
+      - name: The .debs' package imports
         run: |
           rm -rf /tmp/deb-root
+          dpkg -x dist/collins-service_*_all.deb /tmp/deb-root
           dpkg -x dist/collins_*_all.deb /tmp/deb-root
+          dpkg-deb -f dist/collins_*_all.deb Depends | grep -q 'collins-service (= '
           cd /tmp
-          PYTHONPATH=/tmp/deb-root/usr/lib/python3/dist-packages python3 -c "import collins.app; print(collins.app.__file__)"
-          # The session service's command and its (never enabled) user unit.
+          PYTHONPATH=/tmp/deb-root/usr/lib/python3/dist-packages python3 -c "import collins.app, collins.service.main, collins.service.keeper; print(collins.app.__file__)"
+          # The service's and the keeper's commands and their (never enabled) user units.
           test -x /tmp/deb-root/usr/bin/collins-service
+          test -x /tmp/deb-root/usr/bin/collins-keeper
           test -f /tmp/deb-root/usr/lib/systemd/user/collins-service.service
+          test -f /tmp/deb-root/usr/lib/systemd/user/collins-keeper.service
 
   # Everything release.yml's ppa job does short of signing and uploading, in
   # the same images -- so a build-dep an image lacks fails a PR here, not the
@@ -156,6 +163,21 @@ jobs:
           test -f collins_*~${{ matrix.series }}1_source.changes
           test -f collins_*~${{ matrix.series }}1.dsc
           test -f collins_*~${{ matrix.series }}1.tar.xz
+      # What Launchpad's builders do next with the upload: the binary
+      # packages from debian/rules, in the same image (the source build
+      # already installed the Build-Depends). The source upload alone never
+      # runs debian/rules binary, so the collins / collins-service split
+      # (debian/*.install, dh_missing) is proven here, not on Launchpad.
+      - name: The binary packages build, and split
+        run: |
+          rm -rf /tmp/collins-ppa-binary
+          mkdir -p /tmp/collins-ppa-binary
+          dpkg-source -x "/tmp/collins-ppa/${{ matrix.series }}"/collins_*.dsc /tmp/collins-ppa-binary/src
+          (cd /tmp/collins-ppa-binary/src && dpkg-buildpackage -b -us -uc)
+          ls -l /tmp/collins-ppa-binary/*.deb
+          dpkg-deb -f /tmp/collins-ppa-binary/collins_*_all.deb Depends
+          dpkg-deb -f /tmp/collins-ppa-binary/collins-service_*_all.deb Depends Recommends
+          python3 scripts/verify_package_split.py deb /tmp/collins-ppa-binary/collins-service_*_all.deb /tmp/collins-ppa-binary/collins_*_all.deb
 
   # Everything release.yml's copr job does short of uploading, plus what
   # COPR's builders would do next: the SRPM from packaging/fedora/collins.spec
@@ -170,19 +192,28 @@ jobs:
       image: ${{ needs.image.outputs.image_fedora_pkg }}
     steps:
       - uses: actions/checkout@v7
-      - name: Build the SRPM, then the binary package from it
+      - name: Build the SRPM, then the binary packages from it
         run: packaging/fedora/build-copr-srpm.sh --rebuild
-      - name: The package installs, and ships what the app looks for
+      # Two RPMs (PR-3.7): every file in exactly one, each in its half.
+      - run: python3 scripts/verify_package_split.py rpm /tmp/collins-copr/collins-service-*.noarch.rpm /tmp/collins-copr/collins-[0-9]*.noarch.rpm
+      - name: Both packages install, and ship what the app looks for
         run: |
-          dnf install -y /tmp/collins-copr/collins-*.noarch.rpm
+          dnf install -y /tmp/collins-copr/collins-service-*.noarch.rpm /tmp/collins-copr/collins-[0-9]*.noarch.rpm
+          rpm -q collins collins-service
           rpm -q --requires collins
+          rpm -q --requires collins-service
           test -f /usr/share/applications/com.episode6.Collins.desktop
           test -f /usr/share/metainfo/com.episode6.Collins.metainfo.xml
           test -f /usr/share/icons/hicolor/scalable/apps/com.episode6.Collins.svg
           test -x /usr/bin/collins
-          # The session service: its command and its (never enabled) user unit.
+          # The service and the keeper: their commands and their (never
+          # enabled) user units, all collins-service's.
           test -x /usr/bin/collins-service
+          test -x /usr/bin/collins-keeper
           test -f /usr/lib/systemd/user/collins-service.service
+          test -f /usr/lib/systemd/user/collins-keeper.service
+          test "$(rpm -qf --qf '%{NAME}' /usr/lib/systemd/user/collins-keeper.service)" = collins-service
+          test "$(rpm -qf --qf '%{NAME}' /usr/bin/collins)" = collins
           # The action icons ride inside the wheel (app.py's _PACKAGE_ICONS);
           # from / so the import resolves to the installed copy, not the checkout.
           cd /

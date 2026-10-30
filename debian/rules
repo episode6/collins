@@ -1,23 +1,37 @@
 #!/usr/bin/make -f
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 export PYBUILD_NAME=collins
+# Two binary packages from the one wheel (debian/control): pybuild installs
+# the wheel into debian/tmp (with PYBUILD_NAME set it would pick
+# debian/python3-collins, a package that does not exist), and
+# debian/collins-service.install and debian/collins.install divide it -- the
+# Python package and the collins-service and collins-keeper commands to
+# collins-service, the collins launcher to collins. dh_missing
+# (--fail-missing at compat 13) fails the build on a file neither claims.
+export PYBUILD_DESTDIR=debian/tmp
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
 
-# The wheel ships the package + the collins command. The desktop
-# entry, icons, and metainfo are not in the wheel, so install them here.
-# The service's user unit is installed and never enabled or started by the
-# package (split-service spec §3.10): the window starts it on demand.
+# Both user units are installed and never enabled or started by the package
+# (split-service spec §3.10): the window starts the service on demand, and
+# the service the keeper.
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start
 
 override_dh_installsystemduser:
 	dh_installsystemduser --no-enable
 
+# The wheel ships the package + the commands. The desktop entry, icons and
+# metainfo are not in the wheel's install paths, so install them here, into
+# the window's package; the units go into the service's.
 execute_after_dh_install:
+	install -Dm644 data/collins-service.service \
+	  debian/collins-service/usr/lib/systemd/user/collins-service.service
+	install -Dm644 data/collins-keeper.service \
+	  debian/collins-service/usr/lib/systemd/user/collins-keeper.service
 	install -Dm644 data/com.episode6.Collins.metainfo.xml \
 	  debian/collins/usr/share/metainfo/com.episode6.Collins.metainfo.xml
 	install -Dm644 data/icons/com.episode6.Collins.svg \
@@ -34,8 +48,6 @@ execute_after_dh_install:
 	  data/icons/com.episode6.Collins-panel-working.svg \
 	  data/icons/com.episode6.Collins-panel-empty.svg \
 	  debian/collins/usr/share/collins/icons/
-	install -Dm644 data/collins-service.service \
-	  debian/collins/usr/lib/systemd/user/collins-service.service
 	install -d debian/collins/usr/share/applications
 	sed -e 's|^Exec=.*|Exec=collins|' -e '/^Path=/d' \
 	  data/com.episode6.Collins.desktop \

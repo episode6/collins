@@ -1,0 +1,4 @@
+usr/bin/collins-keeper
+usr/bin/collins-service
+usr/lib/python3*/dist-packages/collins
+usr/lib/python3*/dist-packages/collins-*.dist-info

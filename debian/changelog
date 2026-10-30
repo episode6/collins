@@ -1,5 +1,10 @@
 collins (0.1.5) UNRELEASED; urgency=medium
 
+  * New binary package collins-service: the session service, the pty
+    keeper (collins-keeper) and both systemd user units, never enabled or
+    started by the package. It depends on python3-gi, gir1.2-glib-2.0 and
+    gir1.2-soup-3.0 alone and installs on its own on a headless box;
+    collins depends on it. bubblewrap, bindfs and fuse3 are its Recommends.
   * New dependency gir1.2-soup-3.0 (libsoup 3): the socket between the
     window and its session service.
   * The service is its own process: collins-service runs every session,
