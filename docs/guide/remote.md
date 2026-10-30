@@ -52,11 +52,18 @@ ssh -o ExitOnForwardFailure=yes <the same options> [-p PORT] -N \
 
 The first runs `collins-service --print-socket` through your **login
 shell** on the box: a small POSIX `sh -c` wrapper (which every login
-shell hands on literally, tcsh and nushell included) runs `$SHELL -lic`
-for bash, zsh, dash, sh, ksh, mksh and fish, and `sh -lc` for any other
-shell, so a `pipx install collins` in `~/.local/bin` is found the way
-your shell finds it — the same login-shell capture the service itself
-uses. The path it prints is taken only when it is a plain absolute path
+shell hands on literally, tcsh and nushell included) runs `$SHELL -lc`
+for bash, zsh, dash, sh, ksh, mksh and fish — your login profile
+(`.profile`, `.bash_profile`, `.zprofile`, `config.fish`) sets the
+PATH — and, only when that finds no `collins-service` (exit 127),
+`$SHELL -lic`, which reads the interactive rc as well (`pipx ensurepath`
+writes `~/.bashrc`, which Debian guards against non-interactive
+shells); any other login shell gets `sh -lc`. The interactive round is
+never first: a `~/.bashrc` that hands the shell on (`exec zsh`,
+`exec fish`, an auto-started tmux) would run instead of the command.
+When that happens anyway — the PATH only in such an rc — *Test* says
+so; put the PATH in `~/.profile` or `~/.zprofile` and it works at once.
+The path it prints is taken only when it is a plain absolute path
 (letters, digits, `.`, `_`, `-`, `/`, and the `@`, `+`, `,`, `=` of a
 directory-service home), since ssh expands `${VAR}` and `%`-tokens in a
 forward's path on *your* side. The second holds the forward. Both run as

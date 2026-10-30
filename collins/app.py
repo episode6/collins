@@ -2341,16 +2341,47 @@ class App(Adw.Application):
                 for i in range(window.tab_view.get_n_pages())
             ]
             tabs = [tab for tab in tabs if hasattr(tab, "editor_dirty_count")]
-            window._ask_save_editors(
-                tabs,
-                lambda: ask(index + 1),
-                lambda: (
-                    transport.stop() if transport is not None else None,
-                    log.info("the switch to %s was cancelled at the editor's ask", connection.name),
-                ),
-            )
+
+            def cancelled() -> None:
+                if transport is not None:
+                    transport.stop()
+                log.info("the switch to %s was cancelled at the editor's ask", connection.name)
+
+            if self._connection.state == "connected":  # connection.CONNECTED; the name is shadowed here
+                window._ask_save_editors(tabs, lambda: ask(index + 1), cancelled)
+            else:
+                # The old link is down (a mismatch's *Connect to This
+                # Computer*, a switch away from "Reconnecting to …"): a
+                # save cannot reach the files, so the ask is Discard or
+                # Cancel, and says why (the second verification of PR 623,
+                # V3).
+                self._ask_discard_editors(window, tabs, lambda: ask(index + 1), cancelled)
 
         ask(0)
+
+    def _ask_discard_editors(self, window, tabs, on_proceed, on_cancel) -> None:
+        names = [name for tab in tabs if tab.editor_dirty_count() for name in tab.editor_dirty_names()]
+        if not names:
+            on_proceed()
+            return
+        if len(names) == 1:
+            body = _(
+                "“{name}” contains unsaved changes, and the service they belong to is not "
+                "connected: they cannot be saved from here."
+            ).format(name=names[0])
+        else:
+            body = _(
+                "{n} files contain unsaved changes, and the service they belong to is not "
+                "connected: they cannot be saved from here."
+            ).format(n=len(names))
+        dialogs.answer_dialog(
+            window,
+            _("Discard unsaved changes?"),
+            body,
+            [("discard", _("Discard Changes"), "destructive")],
+            lambda response: on_proceed() if response == "discard" else on_cancel(),
+            default_response="cancel",
+        )
 
     def _switch_now(self, connection: connections.Connection, transport) -> None:
         """The switch itself, once every window's editors are settled."""

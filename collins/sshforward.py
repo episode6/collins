@@ -38,6 +38,7 @@ died is restarted.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -69,13 +70,21 @@ SHELL_EXIT_NOT_FOUND = 127  # the remote shell found no collins-service
 # puts collins-service, while the guide (rightly) says "the login shell's
 # PATH". sshd hands the string to the user's own shell, so the outer layer
 # is POSIX `sh -c '…'` with single quotes only (every shell family keeps
-# them literal: tcsh, nushell and xonsh included); inside, a POSIX-family
-# shell or fish runs the command as `$SHELL -lic` (what the service's own
-# login-shell capture uses, so ~/.zshrc and ~/.bashrc count too), any
-# other login shell gets `sh -lc`. One fixed string; the app id goes inside
-# the inner double quotes, validated to [A-Za-z0-9._-] by
-# `connections.valid_app_id` and checked again below, so no shell reads
-# anything of a person's. No `!` anywhere (csh history inside quotes).
+# them literal: tcsh, nushell and xonsh included). Inside, for a
+# POSIX-family shell or fish, the command runs as `$SHELL -lc` first — the
+# login profiles (.profile, .bash_profile, .zprofile, config.fish) set the
+# PATH for most — and only when that exits 127 (not found) as `$SHELL
+# -lic`, which reads the interactive rc too (pipx's `ensurepath` writes
+# ~/.bashrc, which Debian's default guards against non-interactive shells).
+# Never `-lic` first (the second verification of PR 623, V1): an
+# interactive rc may hand the shell on (`exec zsh`, `exec fish`, auto-tmux
+# where chsh is refused) before the command runs — exit 0, no path — and
+# `-lc` never reads it. A `-lic` that still prints no path is reported as
+# that hand-over (`MSG_HANDOVER`). Any other login shell gets `sh -lc`.
+# One fixed string; the app id goes inside the inner double quotes,
+# validated to [A-Za-z0-9._-] by `connections.valid_app_id` and checked
+# again below, so no shell reads anything of a person's. No `!` anywhere
+# (csh history inside quotes).
 REMOTE_COMMAND = "collins-service --print-socket"
 REMOTE_SHELLS = "bash|zsh|dash|sh|ksh|mksh|fish"
 
@@ -85,7 +94,9 @@ def remote_command(command: str) -> str:
     *command* (see `REMOTE_COMMAND`)."""
     return (
         "sh -c 'case \"${SHELL##*/}\" in "
-        f'{REMOTE_SHELLS}) exec "$SHELL" -lic "exec {command}";; '
+        f'{REMOTE_SHELLS}) "$SHELL" -lc "exec {command}"; rc=$?; '
+        f'if [ "$rc" -eq {SHELL_EXIT_NOT_FOUND} ]; then exec "$SHELL" -lic "exec {command}"; fi; '
+        'exit "$rc";; '
         f'*) exec sh -lc "exec {command}";; esac\''
     )
 # How much of the child's stderr is kept: the last line, this long.
@@ -119,6 +130,11 @@ MSG_REMOTE_FAILED = N_("collins-service failed on {target} (exit {code}): {detai
 MSG_TIMEOUT = N_("no answer from {target} within {seconds} s")
 MSG_BAD_PATH = N_("collins-service on {target} printed no socket path")
 MSG_NOT_ON_PATH = N_("collins-service is not on the login shell's PATH on {target}")
+MSG_HANDOVER = N_(
+    "the login shell on {target} ran its interactive startup files and the command never ran: "
+    "a ~/.bashrc that starts another shell (exec zsh, tmux)? Put the PATH in ~/.profile "
+    "or ~/.zprofile instead."
+)
 MSG_FORWARD_ENDED = N_("ssh to {target} ended: {detail}")
 MSG_FORWARD_CLOSED = N_("the ssh forward to {target} closed")
 MSG_FORWARD_EXIT = N_("the ssh forward to {target} ended (exit {code}): {detail}")
@@ -341,8 +357,12 @@ def print_socket(
         return PrintSocketResult(ok=False, code=code, detail=detail, text=text)
     path = last_line(completed.stdout)
     if not _valid_socket_path(path):
-        return PrintSocketResult(ok=False, code=code, detail=detail,
-                                 text=translate(MSG_BAD_PATH, {"target": target}))
+        text = translate(MSG_BAD_PATH, {"target": target})
+        if not path:
+            # Exit 0 and nothing printed: the wrapper's -lic round ran the
+            # interactive rc and the command never ran (V1).
+            text = f"{text}\n{translate(MSG_HANDOVER, {'target': target})}"
+        return PrintSocketResult(ok=False, code=code, detail=detail, text=text)
     return PrintSocketResult(ok=True, path=path, code=code, detail=detail)
 
 
@@ -425,19 +445,25 @@ def _signal_forward(pid: int, local_path: str, sig: int) -> bool:
     pidfd_open = getattr(os, "pidfd_open", None)
     send = getattr(signal, "pidfd_send_signal", None)
     if pidfd_open is not None and send is not None:
+        fd = None
         try:
             fd = pidfd_open(pid)
-        except OSError:
-            return False
-        try:
-            if not is_our_forward(pid, local_path):
+        except OSError as exc:
+            # A kernel or a seccomp profile without the syscall (ENOSYS,
+            # EPERM, EINVAL): the check-then-kill road below (the second
+            # verification of PR 623, V2). ESRCH, or anything else: gone.
+            if exc.errno not in (errno.ENOSYS, errno.EPERM, errno.EINVAL):
                 return False
-            send(fd, sig)
-            return True
-        except OSError:
-            return False
-        finally:
-            os.close(fd)
+        if fd is not None:
+            try:
+                if not is_our_forward(pid, local_path):
+                    return False
+                send(fd, sig)
+                return True
+            except OSError:
+                return False
+            finally:
+                os.close(fd)
     if not is_our_forward(pid, local_path):
         return False
     try:

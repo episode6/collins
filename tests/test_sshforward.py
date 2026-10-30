@@ -5,8 +5,10 @@ ssh's last line, the local socket unlinked first (and a non-socket
 refused), the child's death as the transport's `lost`, and the transport's
 find/start/connect_failed round."""
 
+import errno
 import json
 import os
+import signal
 import socket
 import subprocess
 import threading
@@ -35,7 +37,11 @@ def test_print_socket_argv_is_batch_mode_with_the_port():
     assert argv[-2] == "collins@localhost"
     assert argv[-1] == sshforward.remote_command("collins-service --print-socket")
     assert argv[-1].startswith("sh -c 'case \"${SHELL##*/}\" in bash|zsh|dash|sh|ksh|mksh|fish) ")
-    assert 'exec "$SHELL" -lic "exec collins-service --print-socket";; ' in argv[-1]
+    # -lc first; -lic only on 127 (the second verification of PR 623, V1).
+    assert '"$SHELL" -lc "exec collins-service --print-socket"; rc=$?; ' in argv[-1]
+    fallback = 'if [ "$rc" -eq 127 ]; then exec "$SHELL" -lic "exec collins-service --print-socket"; fi; '
+    assert fallback in argv[-1]
+    assert 'exit "$rc";; ' in argv[-1]
     assert argv[-1].endswith('*) exec sh -lc "exec collins-service --print-socket";; esac\'')
     assert argv[-1].count("'") == 2 and "!" not in argv[-1]  # the outer quotes only; no csh history
     assert "-o" in argv and "BatchMode=yes" in argv
@@ -521,7 +527,7 @@ def test_the_pid_file_is_written_and_a_stale_forward_ended(tmp_path):
     # looks for (bash's `exec -a` names it ssh; a sh without it leaves the
     # name, and the sweep must then touch nothing).
     child = subprocess.Popen(
-        ["bash", "-c", f'exec -a ssh bash -c "sleep 300" x -N -L {local}:/remote/api.sock'],
+        ["bash", "-c", f'exec -a ssh bash -c "sleep 300; true" x -N -L {local}:/remote/api.sock'],
         stdin=subprocess.DEVNULL,
     )
     try:
@@ -628,7 +634,7 @@ def test_two_app_ids_never_share_a_forward_and_a_living_client_is_left_alone(tmp
     # (this test's parent process).
     local = str(tmp_path / "a.sock")
     child = subprocess.Popen(
-        ["bash", "-c", f'exec -a ssh bash -c "sleep 300" x -N -L {local}:/remote/api.sock'],
+        ["bash", "-c", f'exec -a ssh bash -c "sleep 300; true" x -N -L {local}:/remote/api.sock'],
         stdin=subprocess.DEVNULL,
     )
     try:
@@ -666,3 +672,110 @@ def test_the_sweep_ignores_a_record_naming_a_socket_elsewhere(tmp_path):
     assert sshforward.sweep_orphans(str(directory)) == []
     assert os.path.exists(target_pid)  # untouched
     assert os.path.exists(directory / "aaaa.pid")  # ignored, not removed
+
+
+# ---- the second verification of PR 623: the login shell's two startup shapes -------------
+
+
+def _login_shell_home(tmp_path, *, path_only_interactive: bool, handover: bool):
+    """A scratch HOME for a real bash: a fake collins-service in a bin dir,
+    a .bash_profile that sets the login PATH (with or without that dir) and
+    sources .bashrc, and a .bashrc guarded the Debian way (returns for a
+    non-interactive shell) that then adds the dir (when the PATH is
+    interactive-only) and/or hands the shell on with `exec sh`."""
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "collins-service"
+    fake.write_text("#!/bin/sh\necho /home/u/.local/state/collins/com.episode6.Collins/api.sock\n")
+    fake.chmod(0o755)
+    login_path = "/usr/bin:/bin" if path_only_interactive else f"{bin_dir}:/usr/bin:/bin"
+    (home / ".bash_profile").write_text(
+        f'export PATH="{login_path}"\n[ -f ~/.bashrc ] && . ~/.bashrc\n'
+    )
+    rc = ["case $- in *i*) ;; *) return;; esac"]
+    if path_only_interactive:
+        rc.append(f'export PATH="{bin_dir}:$PATH"')
+    if handover:
+        rc.append("exec sh")  # stands for `exec zsh` / `exec fish` / auto-tmux
+    (home / ".bashrc").write_text("\n".join(rc) + "\n")
+    return home
+
+
+def _run_wrapper(home, command="collins-service --print-socket"):
+    env = {"HOME": str(home), "SHELL": "/usr/bin/bash", "PATH": "/usr/bin:/bin", "LANG": "C"}
+    # The outer layer as sshd would run it: the user's shell with -c.
+    return subprocess.run(
+        ["/usr/bin/bash", "-c", sshforward.remote_command(command)],
+        env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=20, check=False,
+    )
+
+
+@pytest.mark.skipif(not os.path.exists("/usr/bin/bash"), reason="needs bash")
+def test_a_path_set_only_in_the_interactive_rc_is_found_by_the_lic_round(tmp_path):
+    """pipx's ensurepath writes ~/.bashrc, behind Debian's guard: -lc exits
+    127, and the wrapper's -lic round finds it."""
+    home = _login_shell_home(tmp_path, path_only_interactive=True, handover=False)
+    completed = _run_wrapper(home)
+    assert completed.returncode == 0, completed.stderr
+    assert sshforward.last_line(completed.stdout) == (
+        "/home/u/.local/state/collins/com.episode6.Collins/api.sock"
+    )
+
+
+@pytest.mark.skipif(not os.path.exists("/usr/bin/bash"), reason="needs bash")
+def test_a_bashrc_that_hands_the_shell_on_does_not_swallow_the_command(tmp_path):
+    """V1: `exec zsh` at the end of ~/.bashrc. With the PATH in the login
+    profile the -lc round runs the command and never reads the rc."""
+    home = _login_shell_home(tmp_path, path_only_interactive=False, handover=True)
+    completed = _run_wrapper(home)
+    assert completed.returncode == 0, completed.stderr
+    assert sshforward.last_line(completed.stdout).endswith("/api.sock")
+
+
+@pytest.mark.skipif(not os.path.exists("/usr/bin/bash"), reason="needs bash")
+def test_both_shapes_at_once_are_reported_as_the_handover(tmp_path):
+    """The PATH only in the rc *and* the rc handing the shell on: -lc is
+    127, -lic runs the rc, `exec sh` takes over, the command never runs
+    (exit 0, nothing printed) — and print_socket names the hand-over."""
+    home = _login_shell_home(tmp_path, path_only_interactive=True, handover=True)
+    completed = _run_wrapper(home)
+    assert completed.returncode == 0 and sshforward.last_line(completed.stdout) == ""
+    result = sshforward.print_socket(CONNECTION, run=FakeRun(returncode=0, stdout=b""))
+    assert not result.ok and "no socket path" in result.text and "interactive startup" in result.text
+    # A non-empty but bad path is not called a hand-over.
+    result = sshforward.print_socket(CONNECTION, run=FakeRun(returncode=0, stdout=b"relative\n"))
+    assert "interactive startup" not in result.text
+
+
+def test_signal_forward_falls_back_when_pidfd_open_is_refused(tmp_path, monkeypatch):
+    """V2: ENOSYS / EPERM / EINVAL from pidfd_open take the check-then-kill
+    road; ESRCH is "gone"."""
+    local = str(tmp_path / "a.sock")
+    child = subprocess.Popen(
+        ["bash", "-c", f'exec -a ssh bash -c "sleep 300; true" x -N -L {local}:/remote/api.sock'],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.3)
+        if not sshforward.is_our_forward(child.pid, local):
+            pytest.skip("this bash could not rename its argv")
+
+        def refused(pid, flags=0):
+            raise OSError(errno.ENOSYS, "no pidfd_open here")
+
+        monkeypatch.setattr(os, "pidfd_open", refused, raising=False)
+        assert sshforward._signal_forward(child.pid, local, signal.SIGTERM) is True
+        child.wait(5)
+        assert child.poll() is not None
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+    def gone(pid, flags=0):
+        raise OSError(errno.ESRCH, "no such process")
+
+    monkeypatch.setattr(os, "pidfd_open", gone, raising=False)
+    assert sshforward._signal_forward(child.pid, local, signal.SIGTERM) is False

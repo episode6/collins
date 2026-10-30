@@ -766,8 +766,21 @@ reconnect; `end_stale_forward` leaves a record whose client lives
 `pidfd_open` + `pidfd_send_signal` after the cmdline check; the sweep
 ignores a record naming a socket that is not its own `<name>.sock`; the
 remote command is a POSIX `sh -c '…'` wrapper (single quotes only, so
-tcsh/nushell hand it on) choosing `$SHELL -lic` for the POSIX family and
-fish, `sh -lc` otherwise (`sshforward.remote_command`); `switch_connection`
+tcsh/nushell hand it on) running `$SHELL -lc` for the POSIX family and
+fish and, only on exit 127, `$SHELL -lic` (the interactive rc, where
+pipx's `ensurepath` writes bash's PATH behind Debian's guard) — never
+`-lic` first, since an rc that hands the shell on (`exec zsh`, auto-tmux)
+would run instead of the command (the second verification, V1; a `-lic`
+round that prints nothing is reported as that hand-over,
+`MSG_HANDOVER`); `sh -lc` for any other shell
+(`sshforward.remote_command`; the tests run the wrapper under a real
+bash with both rc shapes). The service's own capture (`$SHELL -lic 'env
+-0'`, `service/main.py`) has the same hand-over hazard and fails soft
+(an empty overlay); it is §3.10's and not this chunk's, reported rather
+than changed. `_signal_forward` falls through to check-then-`os.kill`
+when `pidfd_open` is refused (ENOSYS/EPERM/EINVAL; V2); a switch away
+from a dead link with dirty buffers asks Discard / Cancel and says why
+(`App._ask_discard_editors`, V3). `switch_connection`
 asks about unsaved editor buffers per window (`_ask_save_editors`; Cancel
 aborts the switch and stops the prepared transport) before `_switch_now`;
 a remote mismatch answered Cancel shows "{name} speaks another protocol;
