@@ -10,6 +10,7 @@ import os
 import socket
 import subprocess
 import threading
+import time
 
 import pytest
 
@@ -33,6 +34,125 @@ def test_the_capture_fails_soft(tmp_path):
     slow.write_text("#!/bin/sh\nsleep 5\n")
     slow.chmod(0o755)
     assert service_main.login_shell_environment(str(slow), timeout=0.2) == {}
+
+
+def _fake_shell(tmp_path, name, body):
+    shell = tmp_path / name
+    shell.write_text("#!/bin/sh\n" + body)
+    shell.chmod(0o755)
+    return str(shell)
+
+
+def test_a_round_with_no_path_counts_as_nothing(tmp_path):
+    greeting = _fake_shell(tmp_path, "greeter", "printf 'hello there\\0FOO=bar\\0'\n")
+    assert service_main.capture_login_shell(greeting) == service_main.LoginCapture({}, False, False)
+    # A round that exits 1 with no output (auto-tmux refusing) is the same.
+    refused = _fake_shell(tmp_path, "refuser", "exit 1\n")
+    assert service_main.capture_login_shell(refused) == service_main.LoginCapture({}, False, False)
+    # Only the interactive round answers: it counts, the login round does not.
+    mixed = _fake_shell(
+        tmp_path, "mixed", 'case "$1" in -lic) printf "PATH=/x/bin\\0A=1\\0";; *) echo hi;; esac\n'
+    )
+    assert service_main.capture_login_shell(mixed) == service_main.LoginCapture(
+        {"PATH": "/x/bin", "A": "1"}, False, True
+    )
+
+
+def test_the_interactive_round_overlays_the_login_round_path_included(tmp_path):
+    shell = _fake_shell(
+        tmp_path,
+        "twin",
+        'case "$1" in -lic) printf "PATH=/i/bin\\0B=i\\0";; *) printf "PATH=/l/bin\\0A=l\\0B=l\\0";; esac\n',
+    )
+    capture = service_main.capture_login_shell(shell)
+    assert capture == service_main.LoginCapture({"PATH": "/i/bin", "A": "l", "B": "i"}, True, True)
+
+
+def test_a_slow_round_beside_a_fast_one_returns_within_one_timeout(tmp_path):
+    fast_lc = _fake_shell(
+        tmp_path, "fast_lc", 'case "$1" in -lic) exec sleep 10;; *) printf "PATH=/l/bin\\0";; esac\n'
+    )
+    started = time.monotonic()
+    capture = service_main.capture_login_shell(fast_lc, timeout=1.0)
+    assert capture == service_main.LoginCapture({"PATH": "/l/bin"}, True, False)
+    assert time.monotonic() - started < 1.8
+    slow_lc = _fake_shell(
+        tmp_path, "slow_lc", 'case "$1" in -lc) exec sleep 10;; *) printf "PATH=/i/bin\\0";; esac\n'
+    )
+    started = time.monotonic()
+    capture = service_main.capture_login_shell(slow_lc, timeout=1.0)
+    assert capture == service_main.LoginCapture({"PATH": "/i/bin"}, False, True)
+    assert time.monotonic() - started < 1.8
+
+
+def test_two_slow_rounds_share_one_deadline(tmp_path):
+    slow = _fake_shell(tmp_path, "slow2", "exec sleep 10\n")
+    started = time.monotonic()
+    assert service_main.capture_login_shell(slow, timeout=1.0) == service_main.LoginCapture()
+    assert time.monotonic() - started < 1.8  # one timeout, not two
+
+
+def _login_shell_home(tmp_path, *, path_only_interactive: bool, handover: bool):
+    """A scratch HOME for a real bash: a bin dir, a .bash_profile that sets
+    the login PATH (with or without that dir) and sources .bashrc, and a
+    .bashrc guarded the Debian way (returns for a non-interactive shell)
+    that then adds the dir (when the PATH is interactive-only) and/or hands
+    the shell on with `exec sh` (standing for `exec zsh` / `exec fish` /
+    auto-tmux). Returns (home, env, bin_dir)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    login_path = "/usr/bin:/bin" if path_only_interactive else f"{bin_dir}:/usr/bin:/bin"
+    (home / ".bash_profile").write_text(f'export PATH="{login_path}"\n[ -f ~/.bashrc ] && . ~/.bashrc\n')
+    rc = ["case $- in *i*) ;; *) return;; esac"]
+    if path_only_interactive:
+        rc.append(f'export PATH="{bin_dir}:$PATH"')
+    if handover:
+        rc.append("exec sh")
+    (home / ".bashrc").write_text("\n".join(rc) + "\n")
+    env = {"HOME": str(home), "SHELL": "/usr/bin/bash", "PATH": "/usr/bin:/bin", "LANG": "C"}
+    return home, env, bin_dir
+
+
+needs_bash = pytest.mark.skipif(not os.path.exists("/usr/bin/bash"), reason="needs bash")
+
+
+@needs_bash
+def test_a_path_in_the_login_profile_is_found_by_both_rounds(tmp_path):
+    _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=False, handover=False)
+    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    assert capture.login and capture.interactive
+    assert capture.environment["PATH"].split(":")[0] == str(bin_dir)
+
+
+@needs_bash
+def test_a_path_only_in_the_guarded_rc_is_found_by_the_interactive_round(tmp_path):
+    _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=True, handover=False)
+    login_only = subprocess.run(
+        ["/usr/bin/bash", "-lc", "env -0"],
+        env=env, stdin=subprocess.DEVNULL, capture_output=True, check=False,
+    )
+    assert str(bin_dir) not in service_main._parse_env0(login_only.stdout)["PATH"]  # the login round lacks it
+    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    assert capture.login and capture.interactive
+    assert capture.environment["PATH"].split(":")[0] == str(bin_dir)  # the overlay holds it
+
+
+@needs_bash
+def test_an_rc_that_hands_the_shell_on_costs_only_the_interactive_round(tmp_path):
+    _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=False, handover=True)
+    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    assert capture.login and not capture.interactive
+    assert capture.environment["PATH"].split(":")[0] == str(bin_dir)  # the login PATH kept
+
+
+@needs_bash
+def test_a_path_only_in_a_rc_that_hands_the_shell_on_is_not_seen(tmp_path):
+    _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=True, handover=True)
+    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    assert capture.login and not capture.interactive
+    assert str(bin_dir) not in capture.environment["PATH"]
 
 
 def test_the_login_shell_overlays_the_service_but_not_what_is_protected():
@@ -226,7 +346,7 @@ def test_listen_respects_a_live_socket(runtime):
 
 def test_check_reports_and_exits_one_on_a_missing_requirement(runtime, monkeypatch):
     monkeypatch.setattr(service_main, "lingering", lambda: False)
-    monkeypatch.setattr(service_main, "login_shell_environment", lambda: {})
+    monkeypatch.setattr(service_main, "capture_login_shell", lambda: service_main.LoginCapture())
     monkeypatch.setattr(service_main.shutil, "which", lambda name, path=None: None)
     out = io.StringIO()
     assert service_main.check("com.example.Check", out=out) == 1
@@ -423,3 +543,30 @@ def test_the_short_runtime_dir_hashes_the_whole_directory_and_checks_its_parent(
             api_server.socket_path(app_id)
     finally:
         tempfile.tempdir = None
+
+
+def test_check_names_what_the_shell_rounds_found(runtime, monkeypatch):
+    monkeypatch.setattr(service_main, "lingering", lambda: True)
+    monkeypatch.setattr(
+        service_main.shutil, "which", lambda name, path=None: f"/usr/bin/{name}" if name == "claude" else None
+    )
+    monkeypatch.setenv("SHELL", "/usr/bin/zsh")
+    words = {
+        (True, True): "(login profile and interactive rc read)",
+        (True, False): "(login profile read; the interactive rc handed the shell on \u2014 exec zsh, tmux? "
+        "\u2014 so a PATH set only there is not seen: put it in ~/.profile or ~/.zprofile)",
+        (False, True): "(interactive rc read; the login profile did not answer)",
+        (False, False): "(no answer within 5 s: the service runs on its own environment)",
+    }
+    for (login, interactive), wording in words.items():
+        monkeypatch.setattr(
+            service_main,
+            "capture_login_shell",
+            lambda login=login, interactive=interactive: service_main.LoginCapture({}, login, interactive),
+        )
+        out = io.StringIO()
+        assert service_main.check("com.example.Check", out=out) == 0  # not counted in `missing`
+        lines = out.getvalue().splitlines()
+        assert lines[lines.index(next(x for x in lines if x.startswith("socket:"))) + 1] == (
+            f"shell:        /usr/bin/zsh {wording}"
+        )

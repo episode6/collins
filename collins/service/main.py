@@ -15,14 +15,20 @@ stays down and the client that wanted the restart brings it back.
     collins-service --print-socket     # start if needed, print the path
     collins-service --check            # what a headless box needs (F9)
 
-**The session environment** (§3.10): the process's environment overlaid
-once at start by a login-shell capture (``$SHELL -lic 'env -0'``,
-``stdin=DEVNULL``, 5 s, parsed by NUL, failing soft): what makes a
+**The session environment** (§3.10, D63): the process's environment overlaid
+once at start by a login-shell capture in two rounds started at once and
+waited to one 5 s deadline, ``$SHELL -lc 'env -0'`` (the login profile) and
+``$SHELL -lic 'env -0'`` (the interactive rc too; ``stdin=DEVNULL``, parsed
+by NUL, failing soft). A round counts only when its output holds a
+``PATH``, so an interactive rc that hands the shell on (``exec zsh``,
+auto-tmux), which empties the ``-lic`` round, costs only that round; the
+interactive round's variables overlay the login round's. What it makes: a
 headless box's shells find ``~/.local/bin/claude`` and the user's ``PATH``.
 The capture fills in what the service's environment lacks and appends the
 ``PATH`` entries it lacks; it never overrides a variable the service was
 started with (a check's ``COLLINS_*`` and ``XDG_*`` overrides, its shim
-directory at the front of ``PATH``).
+directory at the front of ``PATH``). ``--check`` prints a ``shell:`` line
+saying which rounds answered.
 
 A second ``collins-service`` for the same app id finds the live socket and
 exits 0 after printing its path. ``sd_notify`` is a datagram to
@@ -40,7 +46,9 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
+from dataclasses import dataclass, field
 
 from gi.repository import GLib
 
@@ -73,37 +81,21 @@ def take_lock(app_id: str) -> int:
     return fd
 
 
-def login_shell_environment(shell: str | None = None, timeout: float = CAPTURE_TIMEOUT_S) -> dict[str, str]:
-    """The environment a login, interactive shell ends up with, or {} when
-    the capture fails (no shell, a timeout, output that isn't NUL-separated
-    pairs). Never raises. The shell runs in a session of its own, so a
-    timeout reaps whatever it forked along with it."""
-    shell = shell or os.environ.get("SHELL") or "/bin/sh"
-    try:
-        proc = subprocess.Popen(
-            [shell, "-lic", "env -0"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,  # no controlling tty: a shell that asks gets EOF
-        )
-    except (OSError, ValueError) as exc:
-        log.info("login-shell capture failed: %s", exc)
-        return {}
-    try:
-        stdout, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        proc.communicate()
-        log.info("login-shell capture timed out after %.0f s", timeout)
-        return {}
-    if proc.returncode not in (0, None) and not stdout:
-        log.info("login-shell capture exited %s", proc.returncode)
-        return {}
-    captured: dict[str, str] = {}
+@dataclass
+class LoginCapture:
+    """What the login-shell capture found (§3.10, D63): the *environment*
+    (the login round's parse overlaid by the interactive round's) and which
+    rounds counted, a round counting only when its output held a ``PATH``."""
+
+    environment: dict[str, str] = field(default_factory=dict)
+    login: bool = False
+    interactive: bool = False
+
+
+def _parse_env0(stdout: bytes) -> dict[str, str]:
+    """``env -0``'s NUL-separated ``NAME=value`` pairs; what is not a pair
+    or not decodable is dropped."""
+    parsed: dict[str, str] = {}
     for entry in stdout.split(b"\0"):
         if b"=" not in entry:
             continue
@@ -114,8 +106,82 @@ def login_shell_environment(shell: str | None = None, timeout: float = CAPTURE_T
         except UnicodeDecodeError:
             continue
         if name and name.isidentifier():
-            captured[name] = text
-    return captured
+            parsed[name] = text
+    return parsed
+
+
+def capture_login_shell(
+    shell: str | None = None, timeout: float = CAPTURE_TIMEOUT_S, env: dict[str, str] | None = None
+) -> LoginCapture:
+    """The environment the user's shell hands a terminal, in two rounds
+    started at once and waited to one common deadline (D63): ``$SHELL -lc
+    'env -0'`` (the login profile) and ``$SHELL -lic 'env -0'`` (that and the
+    interactive rc: a ``PATH`` behind Debian's non-interactive guard). A round
+    counts only when its parse holds ``PATH``: an rc that hands the shell on
+    (``exec zsh``, auto-tmux) prints nothing, or exits 1, under ``-i``. The
+    interactive round's variables overlay the login round's, ``PATH``
+    included. Never raises; a round that fails, hands over or runs past the
+    deadline (``killpg``ed) yields nothing. Each shell runs in a session of
+    its own, so a kill reaps whatever it forked. *env* is what the shells
+    start with (the process's when None)."""
+    shell = shell or os.environ.get("SHELL") or "/bin/sh"
+    deadline = time.monotonic() + timeout
+    rounds: list[tuple[str, subprocess.Popen | None]] = []
+    for flags in ("-lc", "-lic"):
+        try:
+            proc = subprocess.Popen(
+                [shell, flags, "env -0"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,  # no controlling tty: a shell that asks gets EOF
+                env=env,
+            )
+        except (OSError, ValueError) as exc:
+            log.info("login-shell capture (%s) failed: %s", flags, exc)
+            proc = None
+        rounds.append((flags, proc))
+    parsed: dict[str, dict[str, str]] = {}
+
+    def settle(flags: str, proc: subprocess.Popen) -> None:
+        try:
+            stdout, _ = proc.communicate(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            proc.communicate()
+            log.info("login-shell capture (%s) timed out after %.0f s", flags, timeout)
+            return
+        found = _parse_env0(stdout)
+        if "PATH" not in found:
+            log.info("login-shell capture (%s) exited %s with no PATH", flags, proc.returncode)
+            return
+        parsed[flags] = found
+
+    # One thread a round, so a slow round never spends the other's time.
+    waiters = [
+        threading.Thread(target=settle, args=(flags, proc)) for flags, proc in rounds if proc is not None
+    ]
+    for waiter in waiters:
+        waiter.start()
+    for waiter in waiters:
+        waiter.join()
+    login = parsed.get("-lc")
+    interactive = parsed.get("-lic")
+    return LoginCapture(
+        environment={**(login or {}), **(interactive or {})},
+        login=login is not None,
+        interactive=interactive is not None,
+    )
+
+
+def login_shell_environment(
+    shell: str | None = None, timeout: float = CAPTURE_TIMEOUT_S, env: dict[str, str] | None = None
+) -> dict[str, str]:
+    """`capture_login_shell`'s environment: {} when nothing answered."""
+    return capture_login_shell(shell, timeout, env).environment
 
 
 # What the login-shell capture never overrides: the service's own
@@ -217,7 +283,21 @@ def check(app_id: str, out=sys.stdout) -> int:
         missing += 1
     path = api_server.socket_path(app_id)
     print(f"socket:       {path} ({api_server.probe_socket(path)})", file=out)
-    env = merge_environment(dict(os.environ), login_shell_environment())
+    capture = capture_login_shell()
+    shell = os.environ.get("SHELL") or "/bin/sh"
+    if capture.login and capture.interactive:
+        verdict = "login profile and interactive rc read"
+    elif capture.login:
+        verdict = (
+            "login profile read; the interactive rc handed the shell on — exec zsh, tmux? — so a PATH "
+            "set only there is not seen: put it in ~/.profile or ~/.zprofile"
+        )
+    elif capture.interactive:
+        verdict = "interactive rc read; the login profile did not answer"
+    else:
+        verdict = f"no answer within {CAPTURE_TIMEOUT_S:.0f} s: the service runs on its own environment"
+    print(f"shell:        {shell} ({verdict})", file=out)
+    env = merge_environment(dict(os.environ), capture.environment)
     claude = shutil.which("claude", path=env.get("PATH"))
     if claude:
         print(f"claude:       {claude}", file=out)
