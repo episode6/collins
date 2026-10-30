@@ -86,8 +86,10 @@ downloads of each version, see the
   belongs to the one that last typed, clicked or focused into it. The
   other keeps the terminal at that size instead of redrawing it to fit,
   under a *Sized for \<device\>* banner whose **Use this size** (or a key,
-  or a click) takes the size over. A picture or file dropped before its
-  session has started is shown back only to the computer that dropped it.
+  or a click) takes the size over; hovering or scrolling takes nothing,
+  and when the window with the size lets go, the other takes it at once.
+  A picture or file dropped before its session has started is shown back
+  only to the computer that dropped it.
   See [Two windows on one session](/guide/remote#two-windows-on-one-session).
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered

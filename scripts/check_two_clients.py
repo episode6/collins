@@ -58,8 +58,11 @@ os.makedirs(f"{E2E}/config/collins", exist_ok=True)
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
     fh.write('{"settings": {"welcome_seen": true, "gh_welcome_dismissed": true, "title_model": "none"}}')
 
-# The stub: the CLI's box (❯ + U+00A0, what takes_prompt keys on), then it
-# echoes what it is typed into the box, as a line editor would.
+# The stub: the modes the CLI turns on (focus reporting, mouse reports in
+# SGR form: what makes a VTE commit reports on its own), the CLI's box
+# (❯ + U+00A0, what takes_prompt keys on), then it echoes what it is typed
+# into the box, as a line editor would, skipping the escape sequences
+# (the focus and mouse reports) a terminal sends.
 _SHIM = r"""#!/usr/bin/env python3
 import os, sys, tty
 tty.setraw(0)
@@ -67,13 +70,22 @@ text = ""
 def draw():
     sys.stdout.write("\r\x1b[K❯\u00a0" + text)
     sys.stdout.flush()
+sys.stdout.write("\x1b[?1004h\x1b[?1000h\x1b[?1006h")
 draw()
+escape = 0  # 1 after ESC, 2 inside a CSI
 while True:
     chunk = os.read(0, 4096)
     if not chunk:
         break
     for b in chunk:
-        if b == 0x7F:
+        if escape == 1:
+            escape = 2 if b == 0x5B else 0
+        elif escape == 2:
+            if 0x40 <= b <= 0x7E:
+                escape = 0
+        elif b == 0x1B:
+            escape = 1
+        elif b == 0x7F:
             text = text[:-1]
         elif 0x20 <= b < 0x7F:
             text += chr(b)
@@ -145,6 +157,11 @@ def steps():
     view, first = tab._view, tab.terminal
     frame = view.frame
     check("the tab's terminal sits in the frame that pins it", isinstance(frame, ptyclient.TerminalFrame))
+    # Margins wider than a cell around the terminal: the box must count
+    # them once (the Fable review of PR 627, S1: a 60x15 pin came out
+    # 62x16 with 12 px margins).
+    for side in ("start", "end", "top", "bottom"):
+        getattr(first, f"set_margin_{side}")(12)
 
     def vte_grid() -> tuple[int, int]:
         return (first.get_column_count(), first.get_row_count())
@@ -182,6 +199,15 @@ def steps():
         return real_send_event(message)
 
     tab._client.send_event = recording_send_event
+    # And every input frame it sends.
+    inputs: list[bytes] = []
+    real_send_input = tab._client.send_input
+
+    def recording_send_input(pty_id, data):
+        inputs.append(bytes(data))
+        return real_send_input(pty_id, data)
+
+    tab._client.send_input = recording_send_input
 
     # -- the second client: a bare link on another device ------------------------------
     app_id = os.environ["COLLINS_APP_ID"]
@@ -228,6 +254,7 @@ def steps():
     )
     check("…as plain text", not frame.banner.get_use_markup())
     sent_before = len(resizes)
+    withheld_before = view.grids_withheld
     # The allocation moves (the window grows, then shrinks): nothing regrids
     # the pinned VTE and nothing is sent.
     win.set_default_size(1500, 950)
@@ -238,6 +265,11 @@ def steps():
     yield 400
     check("an allocation that moves leaves the pinned grid alone", vte_grid() == theirs, vte_grid())
     check("…and the tab sends no resize", len(resizes) == sent_before, resizes[sent_before:])
+    check(
+        "…its allocations' grids withheld instead",
+        view.grids_withheld > withheld_before,
+        (view.grids_withheld, withheld_before),
+    )
     check("…so the service's grid is still the second's", service_grid() == theirs, service_grid())
 
     # A grid larger than the tab's pane: the box holds it all the same.
@@ -254,6 +286,26 @@ def steps():
     )
     yield 400
     check("…and still nothing is sent", len(resizes) == sent_before, resizes[sent_before:])
+
+    # -- the pinned tab attaches again (a reconnect) ---------------------------------
+    # The stub turned focus reporting on, so when the redraw guard drops the
+    # tab tells the program its focus state, as input: a report its VTE
+    # commits on its own, which must not take the size (the Fable review of
+    # PR 627, M1; §3.3).
+    inputs.clear()
+    reply = view.attach(pty)
+    check("the pinned tab attaches again and is told it is not active", reply.get("active") is False, reply)
+    check("…with focus reporting among the modes", "?1004h" in (reply.get("modes") or ()), reply.get("modes"))
+    yield from wait(lambda: not view.guarded, 30)
+    yield 800
+    check(
+        "…its focus report reached the pty as input",
+        any(frame_ in (b"\x1b[I", b"\x1b[O") for frame_ in inputs),
+        inputs,
+    )
+    check("…and took nothing: the tab is still pinned", not view.active and frame.banner.get_revealed())
+    check("…at the second's grid", vte_grid() == big and service_grid() == big, (vte_grid(), service_grid()))
+    check("…which the second still owns", (second_role() or {}).get("active") is True, second_role())
 
     # -- Use this size --------------------------------------------------------------
     frame.banner.emit("button-clicked")
@@ -293,7 +345,19 @@ def steps():
     yield from wait(lambda: service_grid() == vte_grid())
     check("…at the tab's grid", service_grid() == vte_grid(), (service_grid(), vte_grid()))
 
+    # -- the active client leaves ---------------------------------------------------
+    # The role passes at once to the client that stays (§3.3 as ruled on
+    # the Fable review of PR 627, S2): a lone window is never left pinned.
+    second.send_input(pty, b"w")
+    yield from wait(lambda: not view.active)
+    check("the second takes the size once more", not view.active and frame.banner.get_revealed())
     second.request({"t": "detach", "pty": pty})
+    yield from wait(lambda: view.active)
+    check("the second detaching hands the size to the tab", view.active)
+    yield from wait(lambda: not frame.banner.get_revealed() and not frame.pinbox.pinned)
+    check("…the banner goes and the box lets go", not frame.banner.get_revealed() and not frame.pinbox.pinned)
+    yield from wait(lambda: service_grid() == vte_grid())
+    check("…and the tab's grid is the service's", service_grid() == vte_grid(), (service_grid(), vte_grid()))
     second.close()
     second_link.shutdown()
     app.quit()

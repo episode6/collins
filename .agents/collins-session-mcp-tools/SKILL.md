@@ -470,8 +470,10 @@ cache's copy — the service's own file when the link is `local`.
 inside a root the service knows (`files.roots`), inside the asking
 session's upload directory or `_pending/` (`uploads.inside`; a pending
 upload only for the device that sent it, `uploads.PendingOwners` on the
-core as `pending_owners`, recorded by `UploadBlobs.put` from the client's
-hello `device` and empty after a restart, PR-3.5), or one the
+core as `pending_owners`, recorded by `UploadBlobs.put` from
+`blobs.pending_owner`: the client's hello `device`, or its `client_id`
+when it named none; self-declared, a scoping and no boundary; empty
+after a restart, PR-3.5), or one the
 **session's own agent** named — a show_image path in the registry, or an
 image the service's transcript scan of that live session found
 (`Session.transcript.attachments`) — or anything for a `local` client. The

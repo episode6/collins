@@ -217,7 +217,10 @@ space beside it where it is larger), under a banner that says *Sized for
 \<device\>* (the other computer's host name). **Use this size** takes the
 size over, and so does typing into the terminal or clicking into it; the
 banner goes, the terminal fills the pane again, and the session is redrawn
-at that size. The other window is pinned in turn. Within one window none
+at that size. The other window is pinned in turn. Moving the mouse over
+a pinned terminal, scrolling it or switching away from it takes nothing.
+When the window that has the size lets go of the session (it detaches,
+quits or loses its connection), the other one takes the size at once. Within one window none
 of this shows: a session has one tab there.
 
 A picture or file you drop into a composer before its session has started

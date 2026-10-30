@@ -885,25 +885,36 @@ resume). `save_panel_history` is the `panel.history` request.
   for <device>" (`sizerole.banner_title`: the device is foreign, bounded
   and stripped of control and format characters, shown with
   `use_markup` off) with *Use this size*, over a `PinBox` that allocates
-  the scrolled window exactly the terminal's natural size (its grid) plus
-  the chrome it learned unpinned, top left and clipped. `halign START`
+  the scrolled window the grid's cells (`cols × char width`) plus
+  everything around the cells as the last unpinned allocation measured it
+  (the scrolled window's width less the cells the terminal fitted: its
+  frame, the terminal's margins, border and padding, the remainder short
+  of a cell), top left and clipped; never the terminal's `measure()` at
+  that point, whose cache still holds the grid from before the allocation
+  that regridded it, and never against `get_width()`, the content box,
+  which counted margins and padding twice (the Fable review of PR 627,
+  S1: a 60x15 pin with 12 px margins came out 62x16). `halign START`
   alone is not enough (F2 holds only while the pane is larger: a
   `Gtk.ScrolledWindow` allocates a scrollable child its viewport, so a
   smaller pane regrids the VTE; measured). *Use this size* is
   `take_size()`: a `focus {focused: true}` event and `grab_focus`; a click
   (a capture-phase `GestureClick` on the terminal, `view.click`, never
   claimed) does the same while pinned, and a key is input, which the
-  service counts as taking the role. On `RELEASED` the box lets go,
+  service counts as taking the role (only typing: a frame of nothing but
+  focus and mouse reports takes nothing, `ptyserver.takes_role`, so the
+  focus state sent when a re-attach's guard drops, a focus-out, a hover
+  or a wheel leave the size where it is). On `RELEASED` the box lets go,
   `_last_grid` is cleared and the VTE re-allocated, so the grid it lands
   on is sent even when it equals the one sent before the pin.
-  `ClientTerminal.active` is the role's, read-only. With no active client
-  at all (the active one detached) every remaining client reads
-  `active: False` and stays pinned at the last grid until one of them
-  types, clicks or focuses: the service's word, shown as is.
-  `scripts/check_two_clients.py` is the e2e (the app's tab and a bare
-  `SocketLink` on another device: attach, pinned, take the size, the tab
-  pinned through window resizes and a grid larger than its pane, the
-  banner's button, a key, a click).
+  `ClientTerminal.active` is the role's, read-only. When the active
+  client detaches the service hands the role on at once (below), so a
+  lone window is never left pinned. `scripts/check_two_clients.py` is the
+  e2e (the app's tab with 12 px margins, a stub that turns `?1004h` and
+  SGR mouse reports on, and a bare `SocketLink` on another device: attach,
+  pinned, take the size, the tab pinned through window resizes and a grid
+  larger than its pane, the pinned tab re-attached and still pinned after
+  its focus report, the banner's button, a key, a click, the second's
+  detach handing the size back).
 - **`feed_message` is `paint`** (rule 2 of §3.1) once the pty is attached:
   the line goes into the stream on the service, so the model and every
   client show it; before the spawn or after the exit it is fed to the
@@ -1150,10 +1161,17 @@ The `Session` is the service's (spec §3.19). The pieces:
   read), and a pty's responder takes its active sink's
   (`PtyServer.pty_term`, re-applied whenever the active client or a
   term changes), the last term any client sent while none is active.
-- **The active client owns the size** (D1): the last sink to type
-  (`write(…, sink=)`) or take focus (`focus(…, True)`), the first to
+- **The active client owns the size** (D1, §3.3 as ruled on the Fable
+  review of PR 627): the last sink to type (`write(…, sink=)` with a frame
+  that is not only focus or mouse reports: `takes_role`; a focus report,
+  a motion or wheel report or a click's press and release take nothing)
+  or report focus (`focus(…, True)`, the client's event), the first to
   attach when none (a newcomer takes the role when nobody holds it, other
-  sinks or not). Its resize applies (`TIOCSWINSZ`, the model, the filter's
+  sinks or not). When the active sink detaches with others attached the
+  role passes at once (`_detach` → `_take_role`) to the sink that most
+  recently typed or reported focus (`_Attachment.acted`), else the most
+  recently attached (`attached`), its remembered size applied as
+  `_activate` would; with none left the size is left alone. Its resize applies (`TIOCSWINSZ`, the model, the filter's
   grid); another sink's is remembered and applied when it becomes active;
   `resize(pty, cols, rows)` with no sink is the service's own. An attaching
   sink that is active and differs in grid is applied before its redraw, so
