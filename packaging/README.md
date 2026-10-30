@@ -37,12 +37,14 @@ scripts). Every system channel cuts it into **two binary packages**
 `collins-service` installs on its own on a headless box (the guide's
 *Install the service*); `collins` pulls it in. Where each recipe says it:
 
-- **PPA** (`debian/`): two stanzas in `debian/control`; `PYBUILD_DESTDIR=debian/tmp`
-  in `debian/rules` (with `PYBUILD_NAME` set pybuild would install into
-  `debian/python3-collins`, a package that does not exist), and
-  `debian/collins-service.install` / `debian/collins.install` divide
-  `debian/tmp`; compat 13's `dh_missing --fail-missing` fails the build on
-  a file neither claims. `collins` depends on `collins-service (=
+- **PPA** (`debian/`): two stanzas in `debian/control`. With
+  `PYBUILD_NAME` set, pybuild installs the wheel into
+  `debian/python3-collins` (a staging tree, not a package) on noble's
+  dh-python and resolute's alike — noble's pyproject plugin ignores
+  `PYBUILD_DESTDIR` — so `debian/rules` runs `dh_install` and `dh_missing
+  --fail-missing` with `--sourcedir=debian/python3-collins`, and
+  `debian/collins-service.install` / `debian/collins.install` divide that
+  tree; a file neither claims fails the build. `collins` depends on `collins-service (=
   ${source:Version})`.
 - **`.deb`** (`scripts/build_deb.sh`): two staging roots and two control
   blocks, kept equal to `debian/control`'s Depends.

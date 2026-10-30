@@ -3,17 +3,23 @@
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
 # fork. Last modified: 2026-10-30. Full change history: git log for this file.
 export PYBUILD_NAME=collins
-# Two binary packages from the one wheel (debian/control): pybuild installs
-# the wheel into debian/tmp (with PYBUILD_NAME set it would pick
-# debian/python3-collins, a package that does not exist), and
-# debian/collins-service.install and debian/collins.install divide it -- the
-# Python package and the collins-service and collins-keeper commands to
-# collins-service, the collins launcher to collins. dh_missing
-# (--fail-missing at compat 13) fails the build on a file neither claims.
-export PYBUILD_DESTDIR=debian/tmp
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
+
+# Two binary packages from the one wheel (debian/control). With PYBUILD_NAME
+# set, pybuild installs the wheel into debian/python3-collins -- a staging
+# tree here, not a package -- on noble's dh-python and resolute's alike
+# (noble's pyproject plugin ignores PYBUILD_DESTDIR, so that tree is the one
+# both agree on). debian/collins-service.install and debian/collins.install
+# divide it: the Python package and the collins-service and collins-keeper
+# commands to collins-service, the collins launcher to collins. dh_missing
+# fails the build on a file in it neither claims.
+override_dh_install:
+	dh_install --sourcedir=debian/python3-collins
+
+override_dh_missing:
+	dh_missing --sourcedir=debian/python3-collins --fail-missing
 
 # Both user units are installed and never enabled or started by the package
 # (split-service spec §3.10): the window starts the service on demand, and
