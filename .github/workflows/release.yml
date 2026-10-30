@@ -1,12 +1,13 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 
 name: Release
 
 # Push a v* tag (scripts/ship-release.py, from a release branch) → build the
-# wheel/sdist + .deb + binary .rpm, publish to PyPI (OIDC trusted publishing),
-# attach the .deb and .rpm to the GitHub Release, upload a source package per
+# wheel/sdist + the two .debs + the two binary .rpms (collins and
+# collins-service each), publish to PyPI (OIDC trusted publishing),
+# attach the .debs and .rpms to the GitHub Release, upload a source package per
 # Ubuntu series to ppa:episode6/stable, and an SRPM to the episode6/stable
 # COPR. See RELEASE_CHECKLIST.md.
 on:
@@ -61,7 +62,8 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
 
-  # The binary noarch RPM for the GitHub Release -- the .deb's counterpart
+  # The binary noarch RPMs (collins and collins-service) for the GitHub
+  # Release -- the .debs' counterparts
   # for anyone installing straight from the releases page. Built the way
   # ci.yml's rpm job rehearses on every PR (build-copr-srpm.sh --rebuild:
   # SRPM, rpmlint, rebuild with the spec's %check), in the same Fedora image.
@@ -102,7 +104,7 @@ jobs:
       # from docs/releases.md) before the tag ever reaches CI, so the normal
       # path is attaching to it. A bare tag pushed without a release still
       # works, as a fallback.
-      - name: Attach the .deb and .rpm to the GitHub Release
+      - name: Attach the .debs and .rpms to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

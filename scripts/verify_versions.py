@@ -128,7 +128,8 @@ def main():
         # pkgver bump that edits only the pkgver and source lines leaves it
         # pointing at the previous release.
         rel_match = re.search(r"^pkgrel=(\S+)", read_file(PKGBUILD), re.MULTILINE)
-        pkgrel = rel_match.group(1) if rel_match else "<missing>"
+        # pkgrel=1 and pkgrel="1" are the same to bash; .SRCINFO spells it bare.
+        pkgrel = rel_match.group(1).strip("'\"") if rel_match else "<missing>"
         dep_match = re.search(r"^\s*depends = collins-service=(\S+)", srcinfo, re.MULTILINE)
         if not dep_match or dep_match.group(1) != f"{pkgver}-{pkgrel}":
             found = dep_match.group(1) if dep_match else "<missing>"

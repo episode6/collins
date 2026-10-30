@@ -294,7 +294,8 @@ login shell's `PATH`.
   the `lingering:` line names the command for your user while it is off,
   and says why it cannot tell (`no loginctl`, or `loginctl did not say`)
   when it reads `unknown`. Lingering is a note, not a requirement: it
-  never makes `--check` exit 1.
+  never makes `--check` exit 1. Where polkit wants an administrator for
+  it, run the command with `sudo`.
   Without a runtime directory the keeper's lock falls back under
   `~/.local/state/collins/<app id>/` with the rest; on a home directory
   shared over NFS by two machines, Linux's NFS `flock` emulation can make

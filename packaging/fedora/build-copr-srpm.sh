@@ -24,13 +24,15 @@
 # Usage:  packaging/fedora/build-copr-srpm.sh [--rebuild]
 # Then:   copr-cli build episode6/stable /tmp/collins-copr/collins-<VER>-<REL>.src.rpm
 #
-# --rebuild also builds the binary RPM from the SRPM, the way a COPR chroot
-# would (rpmbuild --rebuild, with the BuildRequires installed locally) --
-# what CI's rpm job does to prove the package installs and %check passes,
-# and what release.yml's rpm job attaches to the GitHub Release. %{?dist}
-# stays empty here too: the binary is noarch and not tied to the building
-# image's Fedora, and the fixed collins-<VER>-<REL>.noarch.rpm name is what
-# CI and the release upload glob for.
+# --rebuild also builds the binary RPMs from the SRPM (collins and its
+# collins-service subpackage), the way a COPR chroot would (rpmbuild
+# --rebuild, with the BuildRequires installed locally) -- what CI's rpm job
+# does to prove both packages install and %check passes, and what
+# release.yml's rpm job attaches to the GitHub Release. %{?dist} stays empty
+# here too: the binaries are noarch and not tied to the building image's
+# Fedora, and the fixed collins-<VER>-<REL>.noarch.rpm and
+# collins-service-<VER>-<REL>.noarch.rpm names are what CI and the release
+# upload glob for.
 set -euo pipefail
 
 rebuild=false

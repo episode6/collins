@@ -153,6 +153,10 @@ loginctl enable-linger "$USER"   # once: keep the service past your last logout
 collins-service --check          # what is still missing
 ```
 
+`loginctl enable-linger` for your own user usually needs no password from
+an active login; where polkit asks for an administrator instead, run it as
+`sudo loginctl enable-linger "$USER"`.
+
 ## On the box
 
 `collins-service` on a headless box has two needs of its own, and
