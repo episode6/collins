@@ -884,16 +884,19 @@ resume). `save_panel_history` is the `panel.history` request.
   scrolled window is a `ptyclient.TerminalFrame`: an `Adw.Banner` "Sized
   for <device>" (`sizerole.banner_title`: the device is foreign, bounded
   and stripped of control and format characters, shown with
-  `use_markup` off) with *Use this size*, over a `PinBox` that allocates
-  the scrolled window the grid's cells (`cols × char width`) plus
-  everything around the cells as the last unpinned allocation measured it
-  (the scrolled window's width less the cells the terminal fitted: its
-  frame, the terminal's margins, border and padding, the remainder short
-  of a cell), top left and clipped; never the terminal's `measure()` at
-  that point, whose cache still holds the grid from before the allocation
-  that regridded it, and never against `get_width()`, the content box,
-  which counted margins and padding twice (the Fable review of PR 627,
-  S1: a 60x15 pin with 12 px margins came out 62x16). `halign START`
+  `use_markup` off) with *Use this size*, over a `PinBox` pinned to the
+  role's grid (`set_pinned(grid)`) that allocates the scrolled window that
+  grid's cells at the cell size of the moment (`cols × get_char_width()`)
+  plus what surrounds the terminal's content box, learned at the last
+  unpinned allocation (`child.get_width() − terminal.get_width()`: the
+  window's frame and the terminal's margins and padding, no sub-cell
+  remainder), top left and clipped. Never the terminal's own column count
+  (a regrid would stick), never a chrome that carries the old font's
+  remainder (a zoom out turned 60x15 into 64x15: the Fable verification
+  of PR 627, V1), never `measure()`'s natural at that point (its cache
+  still holds the pre-allocation grid, and it counts margins and padding
+  again: S1's 62x16). A font change while pinned keeps the grid.
+  `halign START`
   alone is not enough (F2 holds only while the pane is larger: a
   `Gtk.ScrolledWindow` allocates a scrollable child its viewport, so a
   smaller pane regrids the VTE; measured). *Use this size* is
@@ -909,12 +912,12 @@ resume). `save_panel_history` is the `panel.history` request.
   `ClientTerminal.active` is the role's, read-only. When the active
   client detaches the service hands the role on at once (below), so a
   lone window is never left pinned. `scripts/check_two_clients.py` is the
-  e2e (the app's tab with 12 px margins, a stub that turns `?1004h` and
-  SGR mouse reports on, and a bare `SocketLink` on another device: attach,
-  pinned, take the size, the tab pinned through window resizes and a grid
-  larger than its pane, the pinned tab re-attached and still pinned after
-  its focus report, the banner's button, a key, a click, the second's
-  detach handing the size back).
+  e2e (the app's tab with 12 px margins and zoomed while pinned, a stub
+  that turns `?1004h` and SGR mouse reports on, and a bare `SocketLink`
+  on another device: attach, pinned, take the size, the tab pinned
+  through window resizes and a grid larger than its pane, the pinned tab
+  re-attached and still pinned after its focus report, the banner's
+  button, a key, a click, the second's detach handing the size back).
 - **`feed_message` is `paint`** (rule 2 of §3.1) once the pty is attached:
   the line goes into the stream on the service, so the model and every
   client show it; before the spawn or after the exit it is fed to the

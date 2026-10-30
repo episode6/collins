@@ -271,6 +271,14 @@ def steps():
         (view.grids_withheld, withheld_before),
     )
     check("…so the service's grid is still the second's", service_grid() == theirs, service_grid())
+    # A font change while pinned (a zoom, Preferences) keeps the grid and
+    # sends nothing: the box re-allocates the same grid at the new cell
+    # size (the Fable verification of PR 627, V1).
+    for scale in (0.7, 0.5, 1.4, 1.0):
+        first.set_font_scale(scale)
+        yield 500
+        check(f"a zoom to {scale} while pinned leaves the grid alone", vte_grid() == theirs, vte_grid())
+    check("…and still nothing is sent", len(resizes) == sent_before, resizes[sent_before:])
 
     # A grid larger than the tab's pane: the box holds it all the same.
     big = (min(400, own[0] + 120), min(200, own[1] + 60))
