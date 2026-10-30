@@ -1,0 +1,417 @@
+#!/usr/bin/env python3
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+"""End-to-end check that a service restart keeps every session (spec §3.10
+item 2, PR-3.6: the keeper and the adoption).
+
+A service with its keeper, one Collins on it with two sessions against a
+`claude` stub: a plain one, typed into, and one in a sandbox (the fake
+bubblewrap of check_sandbox_policy) with a directory allowed to it. The
+service is stopped with SIGTERM, as *Restart service*, an upgrade and
+`systemctl --user restart` stop it: it must exit 0 and leave both agents
+alive under the keeper, their rows in the pty table and their saved
+models on disk. A second service on the same state must adopt both: the
+window reconnects by itself and re-attaches each tab, whose screen must
+match the service's model of record (`debug.screen`) text for text with
+the first service's typing on it, typing must reach the same process (the
+pid the pty table named before), and the sandboxed session's box must be
+held again under the new service's pid (its lease), its plan file kept
+and its live grants registered again, the allowed directory in the same
+state as before the restart (live where the machine delivers grants live,
+pending where it cannot: either way, what the first service had).
+
+    bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
+        python3 scripts/check_service_restart.py
+"""
+
+import atexit
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+# Under ~/.cache, not /tmp: a box carries /tmp, so a plan whose state file
+# lives there is refused (check_sandbox_policy stages the same way).
+STAGE = os.path.join(os.path.expanduser("~"), ".cache", "collins-e2e")
+os.makedirs(STAGE, exist_ok=True)
+E2E = tempfile.mkdtemp(prefix="service-restart-", dir=STAGE)
+RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
+HOME = f"{E2E}/home"
+
+
+def mounts_under(tree: str) -> list[str]:
+    found = []
+    with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            fields = line.split(" ")
+            if len(fields) > 4:
+                point = fields[4].replace("\\040", " ")
+                if point == tree or point.startswith(tree + "/"):
+                    found.append(point)
+    return sorted(found, key=len, reverse=True)
+
+
+def clear_tree() -> None:
+    """Remove the scratch tree, never through a mount (a live grant's
+    bindfs mount *is* the granted directory): unmount first."""
+    for point in mounts_under(E2E):
+        subprocess.run(["fusermount3", "-u", "-z", point], check=False, capture_output=True)
+    if mounts_under(E2E):
+        print(f"not removing {E2E}: still mounted", file=sys.stderr)
+        return
+    shutil.rmtree(E2E, ignore_errors=True)
+
+
+atexit.register(clear_tree)
+
+os.environ["HOME"] = HOME
+os.environ["COLLINS_DEBUG_API"] = "1"
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
+os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
+os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
+os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
+os.environ["COLLINS_SANDBOX_ROOT"] = f"{E2E}/sbx"
+os.environ["COLLINS_PTY_STATE_DIR"] = f"{E2E}/pty"
+os.environ["COLLINS_UPLOADS_DIR"] = f"{E2E}/uploads"
+os.environ["COLLINS_BWRAP"] = f"{E2E}/bin/bwrap"
+os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
+os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
+os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"
+os.environ["XDG_DATA_HOME"] = f"{HOME}/.local/share"
+os.environ["SANDBOX_FAKE_LOG"] = f"{E2E}/bwrap.log"
+os.environ.pop("COLLINS_KEEPER", None)  # the keeper is the point
+os.environ.pop("TMPDIR", None)
+for var in list(os.environ):
+    if var.startswith("CLAUDE_"):
+        del os.environ[var]
+
+PLAIN = f"{E2E}/dev/plain"  # pinned unsandboxed: the typed-into session
+BOXED = f"{E2E}/dev/alpha"  # sandboxed by the project default
+GRANT = f"{HOME}/dev/granted"  # allowed to the boxed session while it runs
+SHIM = f"{E2E}/bin/claude"
+STATE_FILE = f"{E2E}/config/collins/state.json"
+TYPED = "typed before the restart"
+AFTER = "typed after the restart"
+
+for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", PLAIN, BOXED, GRANT, f"{HOME}/.claude"):
+    os.makedirs(path, exist_ok=True)
+with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
+    fh.write("{}")
+os.makedirs(f"{E2E}/config/collins", exist_ok=True)
+with open(STATE_FILE, "w", encoding="utf-8") as fh:
+    json.dump(
+        {
+            "settings": {
+                "welcome_seen": True,
+                "gh_welcome_dismissed": True,
+                "title_model": "none",
+                "sandbox_new_sessions": True,
+            },
+            "project_sandbox": {"plain": False},
+        },
+        fh,
+    )
+
+# The stub: the CLI's box (❯ + U+00A0), a transcript so the row resolves,
+# and a line editor that echoes what it is typed, so the screen holds the
+# first service's typing for the second one to show.
+_SHIM = r"""#!/usr/bin/env python3
+import json, os, sys, time, tty, uuid
+projects = os.environ["COLLINS_PROJECTS_DIR"]
+cwd = os.getcwd()
+encoded = "".join(c if c.isalnum() else "-" for c in cwd)
+os.makedirs(os.path.join(projects, encoded), exist_ok=True)
+sid = str(uuid.uuid4())
+now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+with open(os.path.join(projects, encoded, sid + ".jsonl"), "w") as fh:
+    fh.write(json.dumps({"type": "user", "cwd": cwd, "sessionId": sid, "timestamp": now,
+                         "message": {"role": "user", "content": "survive the restart"}}) + "\n")
+tty.setraw(0)
+text = ""
+def draw():
+    sys.stdout.write("\r\x1b[K❯ " + text)
+    sys.stdout.flush()
+sys.stdout.write("session " + sid + "\r\n")
+draw()
+while True:
+    chunk = os.read(0, 4096)
+    if not chunk:
+        break
+    for b in chunk:
+        if b == 0x7F:
+            text = text[:-1]
+        elif b == 0x0D:
+            sys.stdout.write("\r\n" + "you said: " + text + "\r\n")
+            text = ""
+        elif 0x20 <= b < 0x7F:
+            text += chr(b)
+    draw()
+"""
+with open(SHIM, "w", encoding="utf-8") as fh:
+    fh.write(_SHIM)
+os.chmod(SHIM, 0o755)
+# The fake bubblewrap (check_sandbox_policy's): dump the plan, run the
+# command in place.
+_FAKE = r"""#!/usr/bin/env python3
+import os, sys
+if len(sys.argv) < 3 or sys.argv[1] != "--args":
+    sys.exit(0)
+fd = int(sys.argv[2])
+chunks = []
+while True:
+    chunk = os.read(fd, 65536)
+    if not chunk:
+        break
+    chunks.append(chunk)
+with open(os.environ["SANDBOX_FAKE_LOG"], "ab") as fh:
+    fh.write(b"".join(chunks) + b"\n\n")
+os.execvp(sys.argv[4], sys.argv[4:])
+"""
+with open(os.environ["COLLINS_BWRAP"], "w", encoding="utf-8") as fh:
+    fh.write(_FAKE)
+os.chmod(os.environ["COLLINS_BWRAP"], 0o755)
+os.environ["PATH"] = f"{E2E}/bin:{os.environ['PATH']}"
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import e2e_service  # noqa: E402
+
+PASSED = 0
+FAILED = 0
+
+
+def check(label: str, ok: bool, detail: object = "") -> None:
+    global PASSED, FAILED
+    if ok:
+        PASSED += 1
+        print(f"  ok  {label}")
+    else:
+        FAILED += 1
+        print(f"FAIL  {label}  {detail!r}")
+
+
+def watchdog() -> None:
+    time.sleep(240)
+    print("timed out", file=sys.stderr)
+    clear_tree()
+    os._exit(3)
+
+
+threading.Thread(target=watchdog, daemon=True).start()
+
+
+def state_json() -> dict:
+    try:
+        with open(STATE_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def alive(pid: int | None) -> bool:
+    return bool(pid) and os.path.exists(f"/proc/{pid}")
+
+
+def read_lease(box: str) -> dict:
+    try:
+        with open(f"{E2E}/sbx/{box}/lease", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Vte", "3.91")
+from gi.repository import GLib  # noqa: E402
+
+from collins import i18n, sandboxstatus, trust  # noqa: E402
+from collins import terminal as terminal_mod  # noqa: E402
+from collins.app import App  # noqa: E402
+from collins.connection import CONNECTED  # noqa: E402
+from collins.state import AppState  # noqa: E402
+
+i18n.init(AppState().get_setting("language"))
+trust.trust_dir(PLAIN)
+trust.trust_dir(BOXED)
+service = e2e_service.start_service()
+app = App()
+
+
+def probe(target: str, name: str, *args):
+    reply = app._service_link.call({"t": "debug.sandbox", "target": target, "name": name, "args": list(args)})
+    return reply.get("value")
+
+
+def vte_lines(tab) -> list[str]:
+    text = terminal_mod._capture_contents(tab.terminal)
+    return [line.rstrip() for line in text.splitlines() if line.strip()]
+
+
+def model_lines(tab, pty: int) -> list[str]:
+    screen = tab._client.request({"t": "debug.screen", "pty": pty})
+    return [line.rstrip() for line in screen["capture"].splitlines() if line.strip()]
+
+
+def steps():
+    global service
+    win = app.get_active_window()
+    while win is None or sandboxstatus.probe_reason() is None:
+        yield 100
+        win = app.get_active_window()
+    check("the fake bwrap passes the probe", sandboxstatus.probe_reason() == "")
+    status = app._service_link.call({"t": "service.status"})
+    keeper_pid = status.get("keeper")
+    check("the service runs with a keeper", bool(keeper_pid) and alive(keeper_pid), status)
+    first_pid = status.get("pid")
+
+    plain = win.start_background_session(PLAIN)
+    boxed = win.start_background_session(BOXED)
+    check("two sessions started", plain is not None and boxed is not None)
+    for _ in range(150):
+        if plain.takes_prompt() and boxed.takes_prompt() and plain.session_id and boxed.session_id:
+            break
+        yield 200
+    ids = (plain.session_id, boxed.session_id)
+    check("both sessions resolved", all(ids), ids)
+    check("the second session launched sandboxed", boxed.sandboxed and bool(boxed.sandbox_box), ids)
+    box = boxed.sandbox_box
+    plan_path = boxed.sandbox_plan_path
+    check("…with a plan file", bool(plan_path) and os.path.isfile(plan_path), plan_path)
+    plain.feed_child_text(TYPED + "\r")
+    for _ in range(50):
+        if any(TYPED in line for line in vte_lines(plain)):
+            break
+        yield 100
+    check("the typing shows on the plain tab", any(TYPED in line for line in vte_lines(plain)))
+
+    # A directory allowed while the boxed session runs: live where the
+    # machine can (a real bindfs and FUSE), pending where it cannot.
+    if not box:
+        check("the boxed session has a box to allow a directory to", False, boxed.sandbox_plan_path)
+        app.quit()
+        return
+    try:
+        app._service_link.call({"t": "sandbox.allow", "box": box, "path": GRANT, "scope": "session"})
+        check("the directory is allowed to the boxed session", True)
+    except Exception as exc:  # noqa: BLE001 - the check reports, never dies
+        check("the directory is allowed to the boxed session", False, exc)
+    yield 1500
+    grants = app._service_link.call({"t": "sandbox.grants", "box": box})
+    rows = {row["path"]: row for row in grants.get("grants", [])}
+    check("…and listed for its box", GRANT in rows, grants)
+    status_before = rows.get(GRANT, {}).get("status")
+    print(f"      the grant stands {status_before!r} before the restart")
+    check("the box is held by the first service", probe("host", "held", box) is True)
+    check("…and registered with the live grants", probe("grants", "registered", box) is True)
+    check("…its lease is the first service's pid", read_lease(box).get("pid") == first_pid, read_lease(box))
+
+    rows_before = state_json().get("ptys") or {}
+    plain_pty, boxed_pty = plain._view.pty, boxed._view.pty
+    both = {str(plain_pty), str(boxed_pty)}
+    check("the pty table holds both", both <= set(rows_before), sorted(rows_before))
+    pids = {pty: (rows_before.get(str(pty)) or {}).get("pid") for pty in (plain_pty, boxed_pty)}
+    check("…with their pids", all(alive(pid) for pid in pids.values()), pids)
+
+    # -- the restart: SIGTERM to the service, as every restart is ----------------------
+    e2e_service.stop_service(service)
+    check("the service exited 0 on SIGTERM", service.returncode == 0, service.returncode)
+    check("the keeper lives on", alive(keeper_pid))
+    check("both agents live on under it", all(alive(pid) for pid in pids.values()), pids)
+    after = state_json()
+    check("the pty table kept both rows", {str(plain_pty), str(boxed_pty)} <= set(after.get("ptys") or {}))
+    check("nothing is recorded to resume", after.get("resume_on_start", []) == [])
+    check(
+        "both saved models are on disk",
+        all(os.path.isfile(f"{E2E}/pty/{pty}.model") for pty in (plain_pty, boxed_pty)),
+        sorted(os.listdir(f"{E2E}/pty")) if os.path.isdir(f"{E2E}/pty") else None,
+    )
+    check("the plan file survived the stop", bool(plan_path) and os.path.isfile(plan_path), plan_path)
+
+    # -- the next service: the window reconnects, the tabs attach again --------------
+    service = e2e_service.start_service()
+    for _ in range(300):
+        if app._connection.state == CONNECTED and app._service_link is not None:
+            try:
+                status = app._service_link.call({"t": "service.status"})
+                break
+            except Exception:
+                pass
+        yield 100
+    else:
+        check("the window reconnected to the new service", False, app._connection.state)
+        app.quit()
+        return
+    check("the window reconnected to the new service", status.get("pid") != first_pid, status)
+    check("the new service adopted both ptys", status.get("ptys") == 2, status)
+    check("…and found the same keeper", status.get("keeper") == keeper_pid, status)
+    second_pid = status.get("pid")
+    for tab in (plain, boxed):
+        for _ in range(100):
+            if not tab._view.guarded and tab._view.pty:
+                break
+            yield 100
+    yield 1000  # the repaint's two steps, and the tabs' redraws
+    for name, tab, pty in (("plain", plain, plain_pty), ("boxed", boxed, boxed_pty)):
+        info = tab._client.request({"t": "pty.info", "pty": pty})
+        same = info.get("child_pid") == pids[pty]
+        check(f"the {name} tab is attached to the same process", same, (info, pids))
+        check(
+            f"the {name} tab's screen matches the model of record",
+            vte_lines(tab) == model_lines(tab, pty),
+            (vte_lines(tab)[-3:], model_lines(tab, pty)[-3:]),
+        )
+    check("the first service's typing is on the plain tab", any(TYPED in line for line in vte_lines(plain)))
+    plain.feed_child_text(AFTER + "\r")
+    for _ in range(50):
+        if any(("you said: " + AFTER) in line for line in vte_lines(plain)):
+            break
+        yield 100
+    answered = any(("you said: " + AFTER) in line for line in vte_lines(plain))
+    check("typing reaches the adopted agent", answered)
+    model = app.store.model
+    items = [model.get_item(i) for i in range(model.get_n_items())]
+    item = next((i for i in items if getattr(i, "session_id", None) == plain.session_id), None)
+    check("the plain session is a running row", item is not None and bool(item.running), item)
+
+    # -- the sandbox: re-held, re-mounted, in §3.9's order ------------------------------
+    check("the box is held by the new service", probe("host", "held", box) is True)
+    check("…its lease rewritten under its pid", read_lease(box).get("pid") == second_pid, read_lease(box))
+    check("…and registered with the live grants again", probe("grants", "registered", box) is True)
+    check("the plan file was kept from the sweep", os.path.isfile(plan_path), plan_path)
+    for _ in range(50):
+        grants = app._service_link.call({"t": "sandbox.grants", "box": box})
+        rows = {row["path"]: row for row in grants.get("grants", [])}
+        if rows.get(GRANT, {}).get("status") == status_before:
+            break
+        yield 200
+    check(
+        "the allowed directory stands as it did before the restart",
+        rows.get(GRANT, {}).get("status") == status_before,
+        (rows.get(GRANT), status_before),
+    )
+    check("the boxed tab's mirror still names its box", boxed.sandbox_box == box, boxed.sandbox_box)
+    app.quit()
+
+
+generator = steps()
+
+
+def tick() -> bool:
+    try:
+        delay = next(generator)
+    except StopIteration:
+        return GLib.SOURCE_REMOVE
+    GLib.timeout_add(delay, tick)
+    return GLib.SOURCE_REMOVE
+
+
+GLib.timeout_add(250, tick)
+app.run([])
+print(f"\n{PASSED} passed, {FAILED} failed")
+sys.exit(1 if FAILED else 0)

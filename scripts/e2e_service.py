@@ -70,6 +70,7 @@ WAIT_S = 20.0
 STOP_S = 15.0
 
 _services: list[subprocess.Popen] = []
+_keeper_ids: set[str] = set()  # the app ids whose keeper this check's services may have started
 
 
 def _die_with_parent() -> None:
@@ -96,9 +97,32 @@ def _stop(proc: subprocess.Popen) -> None:
             pass
 
 
+def _stop_keepers() -> None:
+    """The keeper each check's service started (PR-3.6): with it present
+    a service's SIGTERM leaves every pty running for the next service, so
+    the check's shims would outlive the check. SIGTERM to the keeper ends
+    its children; it is found by the pid file beside its socket."""
+    import signal as _signal
+
+    from collins.service import keeper
+
+    for app_id in list(_keeper_ids):
+        pid = keeper.read_pid(api_server.keeper_socket_path(app_id))
+        if pid is None:
+            continue
+        try:
+            os.kill(pid, _signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and os.path.exists(f"/proc/{pid}"):
+            time.sleep(0.05)
+
+
 def _stop_all() -> None:
     for proc in list(_services):
         _stop(proc)
+    _stop_keepers()
     if RUNTIME_DIR:
         import shutil
 
@@ -146,6 +170,7 @@ def start_service(
         env["COLLINS_E2E_STUBS"] = STUBS_MODULE
         env["COLLINS_E2E_STUBS_DATA"] = _stubs_data
     path = api_server.socket_path(app_id)
+    _keeper_ids.add(app_id)
     proc = subprocess.Popen(
         [sys.executable, "-m", "collins.service.main", "--app-id", app_id],
         env=env,
@@ -170,10 +195,20 @@ def start_service(
 
 def stop_service(proc: subprocess.Popen) -> None:
     """SIGTERM the service and wait (a check that wants it gone before it
-    ends)."""
+    ends). With a keeper (PR-3.6) the service's ptys run on, for the next
+    `start_service` on the same app id to adopt; the keeper itself is
+    ended at the check's exit."""
     _stop(proc)
     if proc in _services:
         _services.remove(proc)
+
+
+def keeper_pid(app_id: str | None = None) -> int | None:
+    """The pid of the keeper serving *app_id* (default: the check's), None
+    with none running."""
+    from collins.service import keeper
+
+    return keeper.read_pid(api_server.keeper_socket_path(app_id or os.environ["COLLINS_APP_ID"]))
 
 
 def harness_link(device: str = "harness", stubs: dict | None = None):

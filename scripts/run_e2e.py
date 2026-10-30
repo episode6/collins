@@ -97,6 +97,10 @@ CHECK_SECONDS = {
     # PR-3.5; not yet timed on CI: about 12 s on a dev box under the
     # headless shell (one app, a second link, the size passed four times).
     "check_two_clients.py": 12.0,
+    # PR-3.6; not yet timed on CI: about 40 s on a dev box under the
+    # headless shell (one app, two sessions, the service stopped and started
+    # again under them, the window's reconnect and the sandbox's re-hold).
+    "check_service_restart.py": 40.0,
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,
     "check_auto_delete.py": 5.2,
