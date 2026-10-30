@@ -3,7 +3,7 @@
 
 Split-service spec §3.10 item 2 (PR-3.6). The keeper is a small program on
 a Unix socket beside the service's: it forks every pty child on the
-service's request, stays their parent, holds a duplicate of every master
+service's request, stays their parent, keeps a duplicate of every master
 and hands the master to the service over the socket with ``SCM_RIGHTS``.
 **It reads and writes no pty.** When the service goes away (a restart, an
 upgrade, a crash) the kernel's pty buffer fills, the agent blocks in
@@ -17,28 +17,51 @@ service restart still has something to ask, and such a child's exit is
 reported with ``status: null``.
 
 The keeper's protocol is six messages, one JSON object per line each way,
-versioned apart from the API's (`KEEPER_PROTOCOL`), fds riding on the
-reply with ``SCM_RIGHTS``:
+versioned apart from the API's (`KEEPER_PROTOCOL`; a service speaks
+`MIN_KEEPER_PROTOCOL..KEEPER_PROTOCOL`), fds riding on the reply with
+``SCM_RIGHTS``:
 
-    spawn  {id, argv, cwd, env, cols, rows}  -> {ok, pid}        + the master
-    list   {fds?}                            -> {ok, ptys: [...]} + every master (with fds)
+    spawn  {id, argv, cwd, env, cols, rows}  -> {ok, pid}                 + the master
+    list   {fds?, after?, limit?}            -> {ok, ptys: [...], more}   + their masters (with fds)
     resize {id, cols, rows}                  -> {ok}
     signal {id, signal}                      -> {ok}
-    reap   {id, wait?}                       -> {ok, status, alive}   (the entry dropped once known)
+    reap   {id, wait?}                       -> {ok, status, alive}  (the entry dropped once known)
     adopt  {id, pid}         + a master       -> {ok}
 
 Every reply carries ``keeper`` (this process's pid) and ``v``. A `spawn`
 whose exec failed answers ``ok: false, error: "spawn", errno, stage`` (the
 report pipe of `fork_child`: ENOENT for an argv or a cwd that is not there,
-as `ptyserver.spawn` raised before the keeper). A `reap` of a child the
+as `ptyserver.spawn` raised before the keeper). `list` **pages**: at most
+`LIST_PAGE` entries a reply, ``after`` the last id seen, ``more`` when
+there are others; a control message carries a bounded number of fds and
+the kernel drops the rest without a word (the review of PR 629, M3), so
+no reply ever carries more than a page of them. A `reap` of a child the
 keeper forked waits ``wait`` seconds at most for its status and drops the
 entry (and closes its master) once the status is known; one of an adopted
 pid, which the keeper cannot wait for, answers ``status: null`` and
-``alive`` off ``/proc``. The keeper exits on SIGTERM and SIGINT, ending
-every child it still holds (SIGHUP to its group, then SIGKILL): under
-``KillMode=process`` a ``systemctl --user stop collins-keeper`` is how
-every session is stopped for good, where stopping the service alone
-leaves them running for the next service.
+``alive`` off ``/proc`` (the pid *and its start time*: a recycled pid is
+not the child, N1). A request of another protocol is refused ``protocol``
+with the keeper's and ``held``, how many ptys it holds, which is what a
+newer service decides by (PR-3.6's ruling on an older keeper).
+
+**Single instance** (M2): the keeper's first step is an `flock` on
+``keeper.lock`` beside its socket, held for its life; a second keeper for
+the path exits 0 on it, and a socket file is unlinked before the bind only
+when nobody answers on it. At exit the socket and the pid file are removed
+only while they are still this process's. **Every fd received** (M1) is
+taken ``MSG_CMSG_CLOEXEC`` and made non-inheritable again on arrival, so
+no child the keeper forks (nor one the service forks) ever holds another
+session's master; fds that ride on a request that does not take them are
+closed on every path (S5). **No client stalls the keeper** (S4): the client
+sockets are non-blocking, each readiness is one read into that client's
+buffer, every complete line in it is served, and a client whose line
+passes `LINE_MAX` or whose reply cannot be sent is dropped.
+
+The keeper exits on SIGTERM and SIGINT, ending every child it still holds
+(SIGHUP to its group, then SIGKILL): under ``KillMode=process`` a
+``systemctl --user stop collins-keeper`` is how every session is stopped
+for good, where stopping the service alone leaves them running for the
+next service.
 
 The socket is ``keeper.sock`` beside the API socket (`--socket`, or
 ``$XDG_RUNTIME_DIR/collins/<app id>/keeper.sock``); the keeper writes its
@@ -55,7 +78,7 @@ import fcntl
 import json
 import logging
 import os
-import select
+import selectors
 import signal
 import socket
 import struct
@@ -66,14 +89,23 @@ import time
 log = logging.getLogger(__name__)
 
 KEEPER_PROTOCOL = 1
+MIN_KEEPER_PROTOCOL = 1
 SOCKET_NAME = "keeper.sock"
 PID_NAME = "keeper.pid"
+LOCK_NAME = "keeper.lock"
 # A request or a reply is one line; a spawn carries an environment.
 LINE_MAX = 1024 * 1024
+# How many entries (and masters) one `list` reply carries at most: a control
+# message holds a bounded number of fds (SCM_MAX_FD is 253) and a receiver's
+# buffer sized for fewer loses the rest without a word.
+LIST_PAGE = 32
 # How long a reap waits for a child's status by default.
 REAP_WAIT_S = 0.5
-# How long a client of the keeper waits for a reply.
-CALL_TIMEOUT_S = 10.0
+# How long a client of the keeper waits for a reply. The service calls on
+# its main loop: short, so a stalled keeper stalls nobody for long.
+CALL_TIMEOUT_S = 3.0
+# How long the keeper gives a client to take a reply before dropping it.
+SEND_TIMEOUT_S = 2.0
 # At exit, a child that ignores SIGHUP is killed this much later.
 END_GRACE_S = 3.0
 
@@ -87,6 +119,10 @@ class KeeperError(OSError):
     def __init__(self, code: int, text: str, reply: dict | None = None) -> None:
         super().__init__(code, text)
         self.reply = reply or {}
+
+    @property
+    def protocol_mismatch(self) -> bool:
+        return self.reply.get("error") == "protocol"
 
 
 # -- the child -------------------------------------------------------------------------
@@ -171,17 +207,83 @@ def get_window_size(fd: int) -> tuple[int, int]:
     return cols, rows
 
 
-def pid_alive(pid: int) -> bool:
-    """Whether *pid* exists and is not a zombie."""
+def _proc_stat_fields(pid: int) -> list[str] | None:
     try:
         with open(f"/proc/{pid}/stat") as fh:
             text = fh.read()
     except OSError:
-        return False
+        return None
     try:
-        return text[text.rindex(")") + 2 :].split()[0] != "Z"
-    except (ValueError, IndexError):
+        return text[text.rindex(")") + 2 :].split()
+    except ValueError:
+        return None
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether *pid* exists and is not a zombie."""
+    fields = _proc_stat_fields(pid)
+    return bool(fields) and fields[0] != "Z"
+
+
+def pid_start(pid: int) -> int | None:
+    """The process's start time in clock ticks since boot (``/proc/<pid>/
+    stat`` field 22): with the pid, what names one process and never a
+    later one that took its number."""
+    fields = _proc_stat_fields(pid)
+    if not fields or len(fields) < 20:
+        return None
+    try:
+        return int(fields[19])
+    except ValueError:
+        return None
+
+
+def process_alive(pid: int, start: int | None) -> bool:
+    """`pid_alive`, and the same process: *start* (from `pid_start` when it
+    was first seen) still matches, or was unknown."""
+    if not pid_alive(pid):
         return False
+    return start is None or pid_start(pid) == start
+
+
+_boot_time: float | None = None
+
+
+def process_start_wall(pid: int) -> float | None:
+    """When *pid* started, as wall-clock seconds (boot time plus its start
+    ticks): what an adopted session's resolver takes as its baseline (S6),
+    None when it cannot be read."""
+    global _boot_time
+    start = pid_start(pid)
+    if start is None:
+        return None
+    if _boot_time is None:
+        try:
+            with open("/proc/stat") as fh:
+                for line in fh:
+                    if line.startswith("btime "):
+                        _boot_time = float(line.split()[1])
+                        break
+        except (OSError, ValueError, IndexError):
+            return None
+        if _boot_time is None:
+            return None
+    try:
+        ticks = os.sysconf("SC_CLK_TCK")
+    except (ValueError, OSError):
+        ticks = 100
+    return _boot_time + start / float(ticks or 100)
+
+
+def is_keeper_process(pid: int) -> bool:
+    """Whether *pid* runs this program (its cmdline names the module or the
+    command): what `read_pid` requires before it names a pid to kill."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            cmdline = fh.read(4096)
+    except OSError:
+        return False
+    return b"collins.service.keeper" in cmdline or b"collins-keeper" in cmdline
 
 
 # -- the wire ---------------------------------------------------------------------------
@@ -195,21 +297,41 @@ def _send(sock: socket.socket, message: dict, fds: list[int] = ()) -> None:
         sock.sendall(payload)
 
 
-def _recv_line(sock: socket.socket, buffer: bytearray) -> tuple[bytes | None, list[int]]:
+def _take_fds(fds) -> list[int]:
+    """Received fds, made non-inheritable (M1): `recv_fds` takes them with
+    ``MSG_CMSG_CLOEXEC``, and this is the belt to that brace."""
+    out = []
+    for fd in fds:
+        try:
+            os.set_inheritable(fd, False)
+        except OSError:
+            pass
+        out.append(fd)
+    return out
+
+
+def _close_all(fds) -> None:
+    for fd in fds:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+
+
+def _recv_line(
+    sock: socket.socket, buffer: bytearray, max_fds: int = LIST_PAGE
+) -> tuple[bytes | None, list[int]]:
     """One line off *sock* (the bytes before the newline, or None at EOF)
-    and the fds that rode on what was read; *buffer* carries the rest."""
+    and the fds that rode on what was read (non-inheritable); *buffer*
+    carries the rest. The client's side: it waits for the whole line."""
     fds: list[int] = []
     while b"\n" not in buffer:
-        data, got, _flags, _addr = socket.recv_fds(sock, 65536, 64)
-        fds.extend(got)
+        data, got, _flags, _addr = socket.recv_fds(sock, 65536, max_fds, socket.MSG_CMSG_CLOEXEC)
+        fds.extend(_take_fds(got))
         if not data:
-            for fd in fds:
-                os.close(fd)
+            _close_all(fds)
             return None, []
         buffer.extend(data)
         if len(buffer) > LINE_MAX:
-            for fd in fds:
-                os.close(fd)
+            _close_all(fds)
             raise KeeperError(errno.EMSGSIZE, "a keeper line over the bound")
     line, _, rest = bytes(buffer).partition(b"\n")
     buffer[:] = rest
@@ -220,7 +342,7 @@ def _recv_line(sock: socket.socket, buffer: bytearray) -> tuple[bytes | None, li
 
 
 class _Entry:
-    __slots__ = ("id", "pid", "fd", "status", "adopted", "exited_at")
+    __slots__ = ("id", "pid", "fd", "status", "adopted", "start", "exited_at")
 
     def __init__(self, pty_id: int, pid: int, fd: int, adopted: bool = False) -> None:
         self.id = pty_id
@@ -228,7 +350,11 @@ class _Entry:
         self.fd = fd
         self.status: int | None = None
         self.adopted = adopted
+        self.start = pid_start(pid)
         self.exited_at: float | None = None
+
+    def alive(self) -> bool:
+        return self.status is None and process_alive(self.pid, self.start)
 
     def listed(self) -> dict:
         try:
@@ -243,7 +369,7 @@ class _Entry:
             "id": self.id,
             "pid": self.pid,
             "status": self.status,
-            "alive": self.status is None and pid_alive(self.pid),
+            "alive": self.alive(),
             "adopted": self.adopted,
             "cols": cols,
             "rows": rows,
@@ -253,27 +379,62 @@ class _Entry:
         }
 
 
+class _Client:
+    __slots__ = ("sock", "buffer", "fds")
+
+    def __init__(self, sock: socket.socket) -> None:
+        self.sock = sock
+        self.buffer = bytearray()
+        self.fds: list[int] = []  # received with the bytes not yet forming a line
+
+
 class Keeper:
     """The keeper's table and its message handlers; `serve` is its loop."""
 
     def __init__(self, socket_path: str) -> None:
         self.socket_path = socket_path
         self.pid_path = os.path.join(os.path.dirname(socket_path), PID_NAME)
+        self.lock_path = os.path.join(os.path.dirname(socket_path), LOCK_NAME)
         self.ptys: dict[int, _Entry] = {}
         self.listener: socket.socket | None = None
-        self.clients: dict[socket.socket, bytearray] = {}
+        self.clients: dict[socket.socket, _Client] = {}
+        self._lock_fd: int | None = None
+        self._socket_ino: int | None = None
         self._stop = False
         self._wake_r, self._wake_w = os.pipe()
         os.set_blocking(self._wake_w, False)
+        self._selector = selectors.DefaultSelector()
 
     # -- life
 
-    def listen(self) -> None:
+    def lock(self) -> bool:
+        """The single-instance lock (M2): True when this keeper holds it,
+        False when another keeper for the path does."""
         directory = os.path.dirname(self.socket_path)
         os.makedirs(directory, mode=0o700, exist_ok=True)
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return False
+        self._lock_fd = fd
+        return True
+
+    def listen(self) -> None:
+        """Bind the socket (a stale file nobody answers on is unlinked
+        first; one that answers is another keeper's, `OSError`), write the
+        pid file."""
+        if self._lock_fd is None and not self.lock():
+            raise OSError(errno.EADDRINUSE, f"another keeper holds {self.lock_path}")
+        directory = os.path.dirname(self.socket_path)
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        if os.path.exists(self.socket_path):
+            if socket_answers(self.socket_path):
+                raise OSError(errno.EADDRINUSE, f"a keeper answers on {self.socket_path}")
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(self.socket_path)
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(self.socket_path)
         old = os.umask(0o177)
         try:
             listener.bind(self.socket_path)
@@ -282,11 +443,15 @@ class Keeper:
         listener.listen(16)
         listener.setblocking(False)
         self.listener = listener
+        with contextlib.suppress(OSError):
+            self._socket_ino = os.stat(self.socket_path).st_ino
         tmp = f"{self.pid_path}.{os.getpid()}"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as fh:
             fh.write(str(os.getpid()))
         os.replace(tmp, self.pid_path)
+        self._selector.register(listener, selectors.EVENT_READ, "listener")
+        self._selector.register(self._wake_r, selectors.EVENT_READ, "wake")
 
     def _wake(self, *_args) -> None:
         with contextlib.suppress(OSError):
@@ -311,78 +476,115 @@ class Keeper:
         return 0
 
     def step(self, timeout: float = 1.0) -> None:
-        """One turn of the loop: wait for a client, a line or a wake-up,
-        answer what arrived and reap what exited."""
+        """One turn of the loop: wait for a client, bytes or a wake-up,
+        answer every complete line that arrived and reap what exited."""
         assert self.listener is not None
-        watched = [self.listener, self._wake_r, *self.clients]
         try:
-            ready, _, _ = select.select(watched, [], [], timeout)
+            ready = self._selector.select(timeout)
         except InterruptedError:
             ready = []
-        for sock in ready:
-            if sock is self._wake_r:
+        for key, _events in ready:
+            if key.data == "wake":
                 with contextlib.suppress(OSError):
                     os.read(self._wake_r, 4096)
-            elif sock is self.listener:
+            elif key.data == "listener":
                 with contextlib.suppress(OSError):
-                    client, _ = self.listener.accept()
-                    client.setblocking(True)
-                    self.clients[client] = bytearray()
+                    sock, _ = self.listener.accept()
+                    sock.setblocking(False)
+                    self.clients[sock] = _Client(sock)
+                    self._selector.register(sock, selectors.EVENT_READ, "client")
             else:
-                self._serve_client(sock)
+                self._serve_client(key.fileobj)
         self.reap_exited()
 
     def _serve_client(self, sock: socket.socket) -> None:
-        buffer = self.clients[sock]
+        client = self.clients.get(sock)
+        if client is None:
+            return
         try:
-            line, fds = _recv_line(sock, buffer)
-        except (OSError, KeeperError):
-            line, fds = None, []
-        if line is None:
+            data, got, _flags, _addr = socket.recv_fds(sock, 65536, LIST_PAGE, socket.MSG_CMSG_CLOEXEC)
+        except BlockingIOError:
+            return
+        except OSError:
+            data, got = b"", []
+        client.fds.extend(_take_fds(got))
+        if not data:
             self._drop_client(sock)
             return
-        try:
-            message = json.loads(line)
-            if not isinstance(message, dict):
-                raise ValueError("not an object")
-        except ValueError:
-            for fd in fds:
-                os.close(fd)
-            self._reply(sock, {"ok": False, "error": "invalid"})
+        client.buffer.extend(data)
+        if len(client.buffer) > LINE_MAX and b"\n" not in client.buffer:
+            log.warning("keeper: a client's line passed the bound; dropped")
+            self._drop_client(sock)
             return
-        reply, out_fds = self.handle(message, fds)
-        self._reply(sock, reply, out_fds)
+        # Every complete line, in order (N3); the fds received so far ride
+        # with the first of them, as the sender's SCM_RIGHTS did.
+        while b"\n" in client.buffer:
+            line, _, rest = bytes(client.buffer).partition(b"\n")
+            client.buffer[:] = rest
+            fds, client.fds = client.fds, []
+            try:
+                message = json.loads(line)
+                if not isinstance(message, dict):
+                    raise ValueError("not an object")
+            except ValueError:
+                _close_all(fds)
+                if not self._reply(sock, {"ok": False, "error": "invalid"}):
+                    return
+                continue
+            reply, out_fds = self.handle(message, fds)
+            if not self._reply(sock, reply, out_fds):
+                return
 
-    def _reply(self, sock: socket.socket, reply: dict, fds: list[int] = ()) -> None:
+    def _reply(self, sock: socket.socket, reply: dict, fds: list[int] = ()) -> bool:
+        """Send *reply*; False when the client was dropped for it."""
         reply = {**reply, "keeper": os.getpid(), "v": KEEPER_PROTOCOL}
         try:
-            _send(sock, reply, fds)
-        except OSError:
+            sock.settimeout(SEND_TIMEOUT_S)
+            try:
+                _send(sock, reply, fds)
+            finally:
+                sock.setblocking(False)
+        except OSError as exc:
+            log.info("keeper: a client did not take its reply (%s); dropped", exc)
             self._drop_client(sock)
+            return False
+        return True
 
     def _drop_client(self, sock: socket.socket) -> None:
-        self.clients.pop(sock, None)
+        client = self.clients.pop(sock, None)
+        if client is not None:
+            _close_all(client.fds)
+        with contextlib.suppress(Exception):
+            self._selector.unregister(sock)
         with contextlib.suppress(OSError):
             sock.close()
 
     # -- the messages
 
     def handle(self, message: dict, fds: list[int]) -> tuple[dict, list[int]]:
-        """Answer one request; the fds that arrived with it are the handler's
-        to keep or close."""
+        """Answer one request. The fds that arrived with it are the
+        handler's: `adopt` keeps its one, every other path closes them
+        (S5)."""
+        kept: list[int] = []
+        try:
+            return self._handle(message, fds, kept)
+        finally:
+            _close_all(fd for fd in fds if fd not in kept)
+
+    def _handle(self, message: dict, fds: list[int], kept: list[int]) -> tuple[dict, list[int]]:
         kind = message.get("t")
         version = message.get("v", KEEPER_PROTOCOL)
         if version != KEEPER_PROTOCOL:
-            for fd in fds:
-                os.close(fd)
-            return {"ok": False, "error": "protocol", "protocol": KEEPER_PROTOCOL}, []
+            return {
+                "ok": False, "error": "protocol", "protocol": KEEPER_PROTOCOL, "held": len(self.ptys)
+            }, []  # fmt: skip
         try:
             if kind == "spawn":
                 return self._spawn(message)
             if kind == "list":
-                return self._list(bool(message.get("fds", True)))
+                return self._list(message)
             if kind == "adopt":
-                return self._adopt(message, fds), []
+                return self._adopt(message, fds, kept), []
             entry = self.ptys.get(_pty_id(message.get("id")))
             if entry is None:
                 return {"ok": False, "error": "unknown"}, []
@@ -393,6 +595,8 @@ class Keeper:
                 number = message.get("signal")
                 if not isinstance(number, int) or not 1 <= number < 65:
                     return {"ok": False, "error": "invalid"}, []
+                if not entry.alive():
+                    return {"ok": False, "error": "gone"}, []
                 try:
                     os.kill(entry.pid, number)
                 except ProcessLookupError:
@@ -402,12 +606,7 @@ class Keeper:
                 return self._reap(entry, message.get("wait")), []
         except (ValueError, TypeError, OSError) as exc:
             log.warning("keeper: %s refused: %s", kind, exc)
-            for fd in fds:
-                with contextlib.suppress(OSError):
-                    os.close(fd)
             return {"ok": False, "error": "invalid", "detail": str(exc)}, []
-        for fd in fds:
-            os.close(fd)
         return {"ok": False, "error": "unknown"}, []
 
     def _spawn(self, message: dict) -> tuple[dict, list[int]]:
@@ -439,25 +638,30 @@ class Keeper:
         self.ptys[pty_id] = _Entry(pty_id, pid, master)
         return {"ok": True, "pid": pid}, [master]
 
-    def _list(self, with_fds: bool) -> tuple[dict, list[int]]:
-        entries = [self.ptys[key] for key in sorted(self.ptys)]
+    def _list(self, message: dict) -> tuple[dict, list[int]]:
+        with_fds = bool(message.get("fds", True))
+        after = message.get("after")
+        after = after if isinstance(after, int) and not isinstance(after, bool) else 0
+        limit = message.get("limit")
+        whole = isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= LIST_PAGE
+        limit = limit if whole else LIST_PAGE
+        ids = sorted(key for key in self.ptys if key > after)
+        page, rest = ids[:limit], ids[limit:]
+        entries = [self.ptys[key] for key in page]
         listed = [entry.listed() for entry in entries]
         fds = [entry.fd for entry in entries] if with_fds else []
-        return {"ok": True, "ptys": listed, "fds": with_fds}, fds
+        return {"ok": True, "ptys": listed, "fds": with_fds, "more": bool(rest)}, fds
 
-    def _adopt(self, message: dict, fds: list[int]) -> dict:
+    def _adopt(self, message: dict, fds: list[int], kept: list[int]) -> dict:
         pty_id = _pty_id(message.get("id"))
         pid = message.get("pid")
         if len(fds) != 1:
-            for fd in fds:
-                os.close(fd)
             raise ValueError("adopt takes one fd")
         if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
-            os.close(fds[0])
             raise ValueError("pid")
         if pty_id in self.ptys:
-            os.close(fds[0])
             return {"ok": False, "error": "duplicate"}
+        kept.append(fds[0])
         self.ptys[pty_id] = _Entry(pty_id, pid, fds[0], adopted=True)
         return {"ok": True}
 
@@ -467,12 +671,12 @@ class Keeper:
         deadline = time.monotonic() + seconds
         while True:
             self.reap_exited()
-            if entry.status is not None or entry.adopted and not pid_alive(entry.pid):
+            if not entry.alive():
                 break
             if time.monotonic() >= deadline:
                 break
             time.sleep(0.02)
-        alive = entry.status is None and pid_alive(entry.pid)
+        alive = entry.alive()
         if not alive:
             # Known for good (or unknowable): the entry goes with its master.
             self.ptys.pop(entry.id, None)
@@ -500,24 +704,28 @@ class Keeper:
     # -- the end
 
     def close(self) -> None:
-        """End every child still held and remove the socket and pid file."""
+        """End every child still held (the pid and its start time checked:
+        never a process that took a dead child's number) and remove the
+        socket and pid file while they are still this keeper's."""
         for sock in list(self.clients):
             self._drop_client(sock)
         if self.listener is not None:
+            with contextlib.suppress(Exception):
+                self._selector.unregister(self.listener)
             with contextlib.suppress(OSError):
                 self.listener.close()
             self.listener = None
-        live = [entry for entry in self.ptys.values() if entry.status is None and pid_alive(entry.pid)]
+        live = [entry for entry in self.ptys.values() if entry.alive()]
         for entry in live:
             _signal_group(entry.pid, signal.SIGHUP)
         deadline = time.monotonic() + END_GRACE_S
         while time.monotonic() < deadline:
             self.reap_exited()
-            if all(entry.status is not None or not pid_alive(entry.pid) for entry in live):
+            if not any(entry.alive() for entry in live):
                 break
             time.sleep(0.05)
         for entry in live:
-            if entry.status is None and pid_alive(entry.pid):
+            if entry.alive():
                 _signal_group(entry.pid, signal.SIGKILL)
         time.sleep(0.05)
         self.reap_exited()
@@ -525,9 +733,37 @@ class Keeper:
             with contextlib.suppress(OSError):
                 os.close(entry.fd)
         self.ptys.clear()
-        for path in (self.socket_path, self.pid_path):
+        if self._owns_socket():
             with contextlib.suppress(FileNotFoundError, OSError):
-                os.unlink(path)
+                os.unlink(self.socket_path)
+        if read_pid_file(self.socket_path) == os.getpid():
+            with contextlib.suppress(FileNotFoundError, OSError):
+                os.unlink(self.pid_path)
+        if self._lock_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(self._lock_fd)
+            self._lock_fd = None
+
+    def _owns_socket(self) -> bool:
+        if self._socket_ino is None:
+            return False
+        try:
+            return os.stat(self.socket_path).st_ino == self._socket_ino
+        except OSError:
+            return False
+
+
+def socket_answers(path: str, timeout: float = 1.0) -> bool:
+    """Whether something accepts a connection on the socket at *path*."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(path)
+    except OSError:
+        return False
+    finally:
+        sock.close()
+    return True
 
 
 def _signal_group(pid: int, sig: int) -> None:
@@ -555,8 +791,8 @@ def _grid(value: object) -> int:
 
 class KeeperClient:
     """The service's connection to a keeper: one blocking request at a time
-    (the calls are rare: a spawn, a reap, the list at start). Raises
-    `KeeperError` when the keeper refuses or is gone."""
+    (the calls are rare: a spawn, a reap, the list at start), bounded by
+    *timeout*. Raises `KeeperError` when the keeper refuses or is gone."""
 
     def __init__(self, socket_path: str, timeout: float = CALL_TIMEOUT_S) -> None:
         self.socket_path = socket_path
@@ -576,7 +812,7 @@ class KeeperClient:
             raise KeeperError(code, f"no keeper at {self.socket_path}: {exc}") from exc
         self.sock = sock
         self._buffer = bytearray()
-        reply, _ = self.call({"t": "list", "fds": False})
+        reply, _ = self.call({"t": "list", "fds": False, "limit": 1})
         self.pid = reply.get("keeper")
 
     @property
@@ -609,13 +845,11 @@ class KeeperClient:
         try:
             reply = json.loads(line)
         except ValueError as exc:
-            for fd in got:
-                os.close(fd)
+            _close_all(got)
             self.close()
             raise KeeperError(errno.EPROTO, "the keeper answered nonsense") from exc
         if not isinstance(reply, dict) or not reply.get("ok"):
-            for fd in got:
-                os.close(fd)
+            _close_all(got)
             error = reply.get("error") if isinstance(reply, dict) else "invalid"
             details = reply if isinstance(reply, dict) else {}
             raise KeeperError(errno.EINVAL, f"the keeper refused: {error}", details)
@@ -639,23 +873,35 @@ class KeeperClient:
                 raise OSError(code, os.strerror(code), spawn_failure_what(stage, argv, cwd)) from None
             raise
         if len(fds) != 1:
-            for fd in fds:
-                os.close(fd)
+            _close_all(fds)
             raise KeeperError(errno.EPROTO, "the keeper handed no master")
         return int(reply["pid"]), fds[0]
 
     def list(self, with_fds: bool = True) -> list[dict]:
         """Every pty the keeper holds, each with ``fd`` (the caller's to
-        close) when *with_fds*."""
-        reply, fds = self.call({"t": "list", "fds": with_fds})
-        entries = reply.get("ptys") or []
-        if with_fds:
-            if len(fds) != len(entries):
-                for fd in fds:
-                    os.close(fd)
-                raise KeeperError(errno.EPROTO, "the keeper's list and its fds differ")
-            for entry, fd in zip(entries, fds, strict=True):
-                entry["fd"] = fd
+        close) when *with_fds*; paged (`LIST_PAGE`) so no reply carries
+        more fds than a control message holds. On any failure the fds
+        already taken are closed and nothing is returned."""
+        entries: list[dict] = []
+        after = 0
+        try:
+            while True:
+                reply, fds = self.call({"t": "list", "fds": with_fds, "after": after, "limit": LIST_PAGE})
+                page = reply.get("ptys") or []
+                if with_fds:
+                    if len(fds) != len(page):
+                        _close_all(fds)
+                        raise KeeperError(errno.EPROTO, "the keeper's list and its fds differ")
+                    for entry, fd in zip(page, fds, strict=True):
+                        entry["fd"] = fd
+                entries.extend(page)
+                if not page or not reply.get("more"):
+                    break
+                after = max(int(e["id"]) for e in page)
+        except (KeeperError, KeyError, TypeError, ValueError):
+            if with_fds:
+                _close_all(e["fd"] for e in entries if "fd" in e)
+            raise
         return entries
 
     def resize(self, pty_id: int, cols: int, rows: int) -> None:
@@ -686,14 +932,24 @@ def default_socket_path(app_id: str) -> str | None:
     return os.path.join(runtime, "collins", app_id, SOCKET_NAME)
 
 
-def read_pid(socket_path: str) -> int | None:
-    """The pid the keeper at *socket_path* wrote beside it, if it lives."""
+def read_pid_file(socket_path: str) -> int | None:
+    """The pid written beside *socket_path*, as written (alive or not)."""
     try:
         with open(os.path.join(os.path.dirname(socket_path), PID_NAME)) as fh:
             pid = int(fh.read().strip())
     except (OSError, ValueError):
         return None
-    return pid if pid > 1 and pid_alive(pid) else None
+    return pid if pid > 1 else None
+
+
+def read_pid(socket_path: str) -> int | None:
+    """The pid of the keeper at *socket_path*, if it lives and is one (N4:
+    a pid file a SIGKILLed keeper left behind can name any process by
+    now; only a `collins-keeper` is answered)."""
+    pid = read_pid_file(socket_path)
+    if pid is None or not pid_alive(pid) or not is_keeper_process(pid):
+        return None
+    return pid
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -711,8 +967,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     keeper = Keeper(path)
     try:
+        if not keeper.lock():
+            # Another keeper serves this path: exit 0, so a unit does not
+            # restart over it (M2).
+            log.info("another keeper holds %s; not starting", keeper.lock_path)
+            return 0
         keeper.listen()
     except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            log.info("not starting: %s", exc)
+            return 0
         print(f"collins-keeper: could not listen on {path}: {exc}", file=sys.stderr)
         return 1
     log.info("collins-keeper %d listening on %s", os.getpid(), path)
