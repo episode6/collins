@@ -370,6 +370,9 @@ class MainWindow(Adw.ApplicationWindow):
         # set_restart_pending).
         self._banner_reconnecting = False
         self._banner_restart_pending = False
+        # A remote service that speaks another protocol, after the dialog's
+        # Cancel: the name shown with a *Connect to…* button (set_mismatch).
+        self._banner_mismatch = ""
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -1118,6 +1121,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._banner_restart_pending = bool(pending)
         self._sync_service_banner()
 
+    def set_mismatch(self, name: str) -> None:
+        """A remote service that speaks another protocol, with the dialog
+        answered Cancel (§3.24): nothing is connected, so say so in the
+        banner with a *Connect to…* button; "" lowers it."""
+        self._banner_mismatch = name or ""
+        self._sync_service_banner()
+
     def _sync_service_banner(self) -> None:
         banner = getattr(self, "reconnect_banner", None)
         if banner is None:
@@ -1135,6 +1145,11 @@ class MainWindow(Adw.ApplicationWindow):
                 banner.set_title(_("Reconnecting to the Collins service"))
             banner.set_button_label(None)
             banner.set_revealed(True)
+        elif self._banner_mismatch:
+            banner.set_title(_("{name} speaks another protocol; nothing is connected").format(
+                name=self._banner_mismatch))
+            banner.set_button_label(_("Connect to…"))
+            banner.set_revealed(True)
         elif self._banner_restart_pending:
             banner.set_title(_("Restarting when idle"))
             banner.set_button_label(_("Cancel"))
@@ -1144,6 +1159,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_banner_button(self, _banner) -> None:
         app = self.get_application()
+        if self._banner_mismatch and not self._banner_reconnecting:
+            self._open_connect_dialog()
+            return
         if self._banner_restart_pending and hasattr(app, "cancel_service_restart"):
             app.cancel_service_restart()
 

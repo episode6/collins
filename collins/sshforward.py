@@ -50,7 +50,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import sandboxplan
+from . import APP_ID, sandboxplan
 from .api import server as api_server
 from .connections import Connection, Target
 from .i18n import N_, translate
@@ -64,14 +64,30 @@ SERVER_ALIVE_COUNT_MAX = 3
 SSH_EXIT_FAILED = 255  # ssh's own failure: no connection, no key, no host key
 SHELL_EXIT_NOT_FOUND = 127  # the remote shell found no collins-service
 # The remote command, run through the box's login shell (ruled 2026-10-29,
-# the review of PR 623, Q3): `ssh host cmd` gets a non-login PATH that
-# misses `~/.local/bin`, where a pipx install puts collins-service, while
-# the guide (rightly) says "the login shell's PATH". One fixed string; the
-# app id goes inside the single quotes, validated to [A-Za-z0-9._-] by
-# `connections.valid_app_id`, so the remote shell reads nothing of a
-# person's. `$SHELL` is what sshd runs the command with, so it is set.
+# the review of PR 623, Q3, amended by its verification): `ssh host cmd`
+# gets a non-login PATH that misses `~/.local/bin`, where a pipx install
+# puts collins-service, while the guide (rightly) says "the login shell's
+# PATH". sshd hands the string to the user's own shell, so the outer layer
+# is POSIX `sh -c '…'` with single quotes only (every shell family keeps
+# them literal: tcsh, nushell and xonsh included); inside, a POSIX-family
+# shell or fish runs the command as `$SHELL -lic` (what the service's own
+# login-shell capture uses, so ~/.zshrc and ~/.bashrc count too), any
+# other login shell gets `sh -lc`. One fixed string; the app id goes inside
+# the inner double quotes, validated to [A-Za-z0-9._-] by
+# `connections.valid_app_id` and checked again below, so no shell reads
+# anything of a person's. No `!` anywhere (csh history inside quotes).
 REMOTE_COMMAND = "collins-service --print-socket"
-REMOTE_SHELL_PREFIX = 'exec "$SHELL" -lc '
+REMOTE_SHELLS = "bash|zsh|dash|sh|ksh|mksh|fish"
+
+
+def remote_command(command: str) -> str:
+    """The one argument after the destination: the POSIX wrapper around
+    *command* (see `REMOTE_COMMAND`)."""
+    return (
+        "sh -c 'case \"${SHELL##*/}\" in "
+        f'{REMOTE_SHELLS}) exec "$SHELL" -lic "exec {command}";; '
+        f'*) exec sh -lc "exec {command}";; esac\''
+    )
 # How much of the child's stderr is kept: the last line, this long.
 DETAIL_MAX = 240
 STOP_WAIT_S = 2.0
@@ -80,9 +96,11 @@ STARTED_HOW = "forward"  # the manager's `started_how` for a remote start
 # ssh expands `${VAR}` and `%`-tokens of a LocalForward connect path on the
 # client and sends the result to the box, so whatever prints the last line
 # of `--print-socket` would choose which of this device's variables cross.
-# Letters, digits, dot, underscore, dash and slash, absolute, within the
-# kernel's sun_path bound on the far side; a ':' would misparse -L.
-SOCKET_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]{1,107}$")
+# Letters, digits, dot, underscore, dash, slash and the `@ + , =` an
+# SSSD/AD home holds (`/home/jo.doe@corp.example`), absolute, within the
+# kernel's sun_path bound on the far side; ssh expands only `%` and `${}`
+# and parses `:` and `[]` for -L, so those stay out (the verification's N4).
+SOCKET_PATH_RE = re.compile(r"^/[A-Za-z0-9._/@+,=-]{1,107}$")
 # The pid file beside each forward's socket (ruled 2026-10-29, the review
 # of PR 623, Q2): the ssh child's pid, this client's pid and the socket, so
 # a forward left by a client that crashed is ended before the socket is
@@ -161,7 +179,7 @@ def print_socket_argv(connection: Connection) -> list[str]:
         if not re.fullmatch(r"[A-Za-z0-9._-]+", connection.remote_app_id):
             raise ValueError(f"connection {connection.id!r} has an app id a shell could read")
         command = f"{command} --app-id {connection.remote_app_id}"
-    return [SSH, *ssh_options(target), target.destination, f"{REMOTE_SHELL_PREFIX}'exec {command}'"]
+    return [SSH, *ssh_options(target), target.destination, remote_command(command)]
 
 
 def forward_argv(connection: Connection, local_path: str, remote_path: str) -> list[str]:
@@ -188,23 +206,27 @@ def forward_argv(connection: Connection, local_path: str, remote_path: str) -> l
 # ---- the local socket ----------------------------------------------------------------
 
 
-def remote_dir() -> str:
-    """``<runtime dir>/collins/remote``: the local sockets of every
-    forward, in the per-user runtime directory (`$XDG_RUNTIME_DIR`), else
-    under Collins' state directory, as `api.server.runtime_dir` falls back;
-    an intended path too long for a socket takes the same hashed stand-in."""
+def remote_dir(app_id: str = APP_ID) -> str:
+    """``<runtime dir>/collins/remote/<app id>``: the local sockets (and
+    pid files) of every forward of one app id, in the per-user runtime
+    directory (`$XDG_RUNTIME_DIR`), else under Collins' state directory, as
+    `api.server.runtime_dir` falls back; an intended path too long for a
+    socket takes the same hashed stand-in. Scoped by app id (the
+    verification of PR 623, N1): `collins` and `./start-debug` share
+    `ui-state.json` and so the connection ids, and must never share a
+    forward's path, or each would take over the other's."""
     if os.environ.get("XDG_RUNTIME_DIR"):
-        directory = os.path.join(os.environ["XDG_RUNTIME_DIR"], "collins", "remote")
+        directory = os.path.join(os.environ["XDG_RUNTIME_DIR"], "collins", "remote", app_id)
     else:
-        directory = os.path.join(sandboxplan.state_base(), "collins", "remote")
+        directory = os.path.join(sandboxplan.state_base(), "collins", "remote", app_id)
     longest = os.path.join(directory, "f" * 32 + ".sock")
     if len(longest.encode()) > api_server.SOCKET_PATH_MAX:
         directory = api_server._short_runtime_dir(directory)
     return directory
 
 
-def local_socket_path(connection_id: str) -> str:
-    return os.path.join(remote_dir(), f"{connection_id}.sock")
+def local_socket_path(connection_id: str, app_id: str = APP_ID) -> str:
+    return os.path.join(remote_dir(app_id), f"{connection_id}.sock")
 
 
 def ensure_remote_dir(directory: str) -> None:
@@ -395,45 +417,84 @@ def is_our_forward(pid: int, local_path: str) -> bool:
     return any(arg.startswith(want) for arg in argv)
 
 
+def _signal_forward(pid: int, local_path: str, sig: int) -> bool:
+    """Signal *pid* only while its command line is still that forward's:
+    with `pidfd_open` the check and the signal name one process (a pid
+    reused in between is never hit: the verification's N7); without it
+    (an older kernel) the check precedes a plain `os.kill`."""
+    pidfd_open = getattr(os, "pidfd_open", None)
+    send = getattr(signal, "pidfd_send_signal", None)
+    if pidfd_open is not None and send is not None:
+        try:
+            fd = pidfd_open(pid)
+        except OSError:
+            return False
+        try:
+            if not is_our_forward(pid, local_path):
+                return False
+            send(fd, sig)
+            return True
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+    if not is_our_forward(pid, local_path):
+        return False
+    try:
+        os.kill(pid, sig)
+    except OSError:
+        return False
+    return True
+
+
 def end_stale_forward(local_path: str) -> int | None:
     """End the ssh child a pid file beside *local_path* names, when it is
-    still that forward (its command line says so), and remove the file.
+    still that forward (its command line says so) and its client is gone
+    or is this process, and remove the file. A record whose client still
+    lives and is another process is left as it is, file included: that is
+    another client's live forward (the verification of PR 623, N1), and
+    with the path scoped by app id only a reused client pid can read so.
     Returns the pid ended, None when there was nothing to end. Called
     before a new forward binds the socket, and by `sweep_orphans`."""
     path = pid_path(local_path)
     record = read_pid_file(path)
+    if record is None:
+        try:
+            os.unlink(path)  # garbage, or nothing
+        except OSError:
+            pass
+        return None
+    if record["socket"] != local_path:
+        return None
+    if record["client"] != os.getpid() and pid_alive(record["client"]):
+        log.warning("sshforward: %s names a living client (pid %d); its forward is left alone",
+                    path, record["client"])
+        return None
     try:
         os.unlink(path)
     except OSError:
         pass
-    if record is None or record["socket"] != local_path:
-        return None
     pid = record["ssh"]
-    if not is_our_forward(pid, local_path):
+    if not _signal_forward(pid, local_path, signal.SIGTERM):
         return None
     log.info("sshforward: ending the forward left at %s (ssh pid %d)", local_path, pid)
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        return None
     deadline = time.monotonic() + STOP_WAIT_S
     while time.monotonic() < deadline:
         if not pid_alive(pid) or not is_our_forward(pid, local_path):
             return pid
         time.sleep(0.05)
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except OSError:
-        pass
+    _signal_forward(pid, local_path, signal.SIGKILL)
     return pid
 
 
-def sweep_orphans(directory: str | None = None) -> list[int]:
-    """At launch: every pid file whose *client* no longer lives names a
-    forward left by a client that crashed — end it. A file whose client
-    still lives is another client's on this device and is left alone.
-    Returns the pids ended."""
-    directory = directory or remote_dir()
+def sweep_orphans(directory: str | None = None, app_id: str = APP_ID) -> list[int]:
+    """At launch: every pid file of this app id whose *client* no longer
+    lives names a forward left by a client that crashed — end it. A file
+    whose client still lives is another client's on this device and is
+    left alone; a record naming a socket that is not this file's own
+    (`<name>.sock` beside it) is ignored (the verification's N5). Returns
+    the pids ended."""
+    directory = directory or remote_dir(app_id)
     try:
         names = os.listdir(directory)
     except OSError:
@@ -445,6 +506,9 @@ def sweep_orphans(directory: str | None = None) -> list[int]:
         path = os.path.join(directory, name)
         record = read_pid_file(path)
         if record is None:
+            continue
+        if record["socket"] != os.path.join(directory, name[: -len(".pid")] + ".sock"):
+            log.warning("sshforward: %s names a socket elsewhere; ignored", path)
             continue
         if pid_alive(record["client"]):
             continue  # a living client's (this one's included): left alone
@@ -578,9 +642,11 @@ class RemoteTransport:
         print_socket: Callable[[Connection], PrintSocketResult] = print_socket,
         make_forward: Callable[..., Forward] = Forward,
         probe: Callable[[str], str] = api_server.probe_socket,
+        app_id: str = APP_ID,
     ) -> None:
         self.connection = connection
-        self.local_path = local_socket_path(connection.id)
+        self.app_id = app_id
+        self.local_path = local_socket_path(connection.id, app_id)
         self._on_lost = on_lost
         self._land = land
         self._print_socket = print_socket
@@ -631,7 +697,7 @@ class RemoteTransport:
             self.forward = forward
         try:
             forward.start()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:  # a non-socket at the path, no ssh, a bad path
             with self._lock:
                 if self.forward is forward:
                     self.forward = None

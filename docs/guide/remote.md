@@ -45,25 +45,30 @@ Collins runs two ssh commands and nothing else:
 ```
 ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o RemoteCommand=none \
     -o RequestTTY=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p PORT] \
-    TARGET 'exec "$SHELL" -lc '"'"'exec collins-service --print-socket'"'"''
+    TARGET "sh -c '<login-shell wrapper> collins-service --print-socket'"
 ssh -o ExitOnForwardFailure=yes <the same options> [-p PORT] -N \
-    -L <runtime dir>/collins/remote/<id>.sock:<remote api.sock> TARGET
+    -L <runtime dir>/collins/remote/<app id>/<id>.sock:<remote api.sock> TARGET
 ```
 
 The first runs `collins-service --print-socket` through your **login
-shell** on the box (`$SHELL -lc`), so a `pipx install collins` in
-`~/.local/bin` is found the way your shell finds it; the path it prints
-is taken only when it is a plain absolute path (letters, digits, `.`,
-`_`, `-`, `/`), since ssh expands `${VAR}` and `%`-tokens in a forward's
-path on *your* side. The second holds the forward. Both run as
+shell** on the box: a small POSIX `sh -c` wrapper (which every login
+shell hands on literally, tcsh and nushell included) runs `$SHELL -lic`
+for bash, zsh, dash, sh, ksh, mksh and fish, and `sh -lc` for any other
+shell, so a `pipx install collins` in `~/.local/bin` is found the way
+your shell finds it — the same login-shell capture the service itself
+uses. The path it prints is taken only when it is a plain absolute path
+(letters, digits, `.`, `_`, `-`, `/`, and the `@`, `+`, `,`, `=` of a
+directory-service home), since ssh expands `${VAR}` and `%`-tokens in a
+forward's path on *your* side. The second holds the forward. Both run as
 connections of their own (`ControlMaster=no`) with your config's
 `RemoteCommand` and `RequestTTY` set aside, so nothing in `~/.ssh/config`
 changes what they are; the rest of it applies (a jump host, a key file,
-a user name). Beside each forward's socket Collins writes a small pid
-file (`<id>.pid`): a forward a crashed window left behind is ended by
-the next window on this machine (or the next connect to that box)
-before a new one binds, and a forward of another window that is still
-running is left alone.
+a user name). The forward's socket lives under your app id (the real
+Collins and the debug instance never share one). Beside it Collins
+writes a small pid file (`<id>.pid`, naming the ssh and the window that
+started it): a forward a crashed window left behind is ended by the next
+window on this machine (or the next connect to that box) before a new
+one binds, and a forward whose window is still running is left alone.
 
 Authentication, encryption, host verification and key management are all
 ssh's. **`BatchMode=yes`** means ssh never asks you

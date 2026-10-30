@@ -2237,7 +2237,7 @@ class App(Adw.Application):
         # file names a client that no longer lives) is ended now; another
         # client's, still living, is left alone (§3.24, ruled 2026-10-29).
         try:
-            ended = sshforward.sweep_orphans()
+            ended = sshforward.sweep_orphans(app_id=self.get_application_id())
         except Exception:
             log.exception("sweeping orphaned forwards failed")
         else:
@@ -2297,6 +2297,7 @@ class App(Adw.Application):
         loop as the manager's `lost`."""
         return sshforward.RemoteTransport(
             connection,
+            app_id=self.get_application_id(),  # the socket's path is this app id's alone
             on_lost=lambda text: self._connection.lost(text),
             land=lambda fn: GLib.idle_add(
                 lambda: (fn(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT
@@ -2323,6 +2324,39 @@ class App(Adw.Application):
             log.warning("could not prepare the forward for %s: %s", connection.name, exc)
             self._show_refused_write(_("Could not connect to {name}: {detail}").format(
                 name=connection.name, detail=str(exc)[: sshforward.DETAIL_MAX]))
+            return
+        # Unsaved editor buffers first, as the quit asks (Save / Don't Save /
+        # Cancel per window, in turn): the files are the old machine's and
+        # the old link is still up for the saves; Cancel aborts the switch
+        # (the verification of PR 623, N2).
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+
+        def ask(index: int) -> None:
+            if index >= len(windows):
+                self._switch_now(connection, transport)
+                return
+            window = windows[index]
+            tabs = [
+                window.tab_view.get_nth_page(i).get_child()
+                for i in range(window.tab_view.get_n_pages())
+            ]
+            tabs = [tab for tab in tabs if hasattr(tab, "editor_dirty_count")]
+            window._ask_save_editors(
+                tabs,
+                lambda: ask(index + 1),
+                lambda: (
+                    transport.stop() if transport is not None else None,
+                    log.info("the switch to %s was cancelled at the editor's ask", connection.name),
+                ),
+            )
+
+        ask(0)
+
+    def _switch_now(self, connection: connections.Connection, transport) -> None:
+        """The switch itself, once every window's editors are settled."""
+        if connection.id == self.current_connection.id or self._connection is None:
+            if transport is not None:
+                transport.stop()
             return
         self._flush_open_tabs()
         self._open_tabs_frozen = True
@@ -2444,8 +2478,13 @@ class App(Adw.Application):
         # service's banner reads as before.
         name = self.connection_label()
         detail = self._connection.last_error if name and self._connection is not None else ""
+        # A remote service that speaks another protocol: nothing is
+        # connected and nothing retries, so the banner says so with a
+        # *Connect to…* button (the verification of PR 623, N6).
+        mismatch = name if state == "mismatch" and name else ""
         for window in self.get_windows():
             if isinstance(window, MainWindow):
+                window.set_mismatch(mismatch)
                 window.set_reconnecting(reconnecting, name=name, detail=detail)
 
     def _on_connection_notice(self, msgid: str) -> None:

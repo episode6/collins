@@ -28,9 +28,16 @@ PLAIN = connections.Connection(id="b" * 32, name="plain", kind="ssh", target="bu
 def test_print_socket_argv_is_batch_mode_with_the_port():
     argv = sshforward.print_socket_argv(CONNECTION)
     assert argv[0] == "ssh"
-    # The remote command is one fixed string, run through the box's login
-    # shell (Q3 of PR 623's review): a pipx install's ~/.local/bin is found.
-    assert argv[-2:] == ["collins@localhost", "exec \"$SHELL\" -lc 'exec collins-service --print-socket'"]
+    # The remote command is one fixed string: a POSIX `sh -c` outer layer
+    # (single quotes only, literal in every shell family) running the box's
+    # login shell as `-lic` for the POSIX family and fish, `sh -lc` otherwise
+    # (Q3 of PR 623's review, amended by its verification).
+    assert argv[-2] == "collins@localhost"
+    assert argv[-1] == sshforward.remote_command("collins-service --print-socket")
+    assert argv[-1].startswith("sh -c 'case \"${SHELL##*/}\" in bash|zsh|dash|sh|ksh|mksh|fish) ")
+    assert 'exec "$SHELL" -lic "exec collins-service --print-socket";; ' in argv[-1]
+    assert argv[-1].endswith('*) exec sh -lc "exec collins-service --print-socket";; esac\'')
+    assert argv[-1].count("'") == 2 and "!" not in argv[-1]  # the outer quotes only; no csh history
     assert "-o" in argv and "BatchMode=yes" in argv
     assert argv[argv.index("-p") + 1] == "2222"
     for option in ("ControlMaster=no", "ControlPath=none", "RemoteCommand=none", "RequestTTY=no"):
@@ -46,9 +53,10 @@ def test_print_socket_argv_carries_a_remote_app_id():
         id="c" * 32, name="x", kind="ssh", target="h", remote_app_id="com.episode6.Collins.Debug"
     )
     argv = sshforward.print_socket_argv(other)
-    assert argv[-1] == (
-        "exec \"$SHELL\" -lc 'exec collins-service --print-socket --app-id com.episode6.Collins.Debug'"
+    assert argv[-1] == sshforward.remote_command(
+        "collins-service --print-socket --app-id com.episode6.Collins.Debug"
     )
+    assert 'exec collins-service --print-socket --app-id com.episode6.Collins.Debug"' in argv[-1]
 
 
 def test_forward_argv_is_the_spec_command():
@@ -76,15 +84,19 @@ def test_argv_refuses_a_connection_with_no_valid_target():
 
 def test_local_socket_path_is_under_the_runtime_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")  # nothing is created by the path alone
-    path = sshforward.local_socket_path("a" * 32)
-    assert path == "/run/user/1000/collins/remote/" + "a" * 32 + ".sock"
+    path = sshforward.local_socket_path("a" * 32, "com.episode6.Collins")
+    assert path == "/run/user/1000/collins/remote/com.episode6.Collins/" + "a" * 32 + ".sock"
+    # Scoped by app id (N1): the debug instance shares ui-state.json and the
+    # connection ids, never a forward's path.
+    debug = sshforward.local_socket_path("a" * 32, "com.episode6.Collins.Debug")
+    assert debug != path and debug.endswith("/com.episode6.Collins.Debug/" + "a" * 32 + ".sock")
 
 
 def test_local_socket_path_falls_back_to_the_state_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", "/home/u/.local/state")
-    path = sshforward.local_socket_path("a" * 32)
-    assert path == "/home/u/.local/state/collins/remote/" + "a" * 32 + ".sock"
+    path = sshforward.local_socket_path("a" * 32, "com.episode6.Collins")
+    assert path == "/home/u/.local/state/collins/remote/com.episode6.Collins/" + "a" * 32 + ".sock"
 
 
 def test_a_too_long_runtime_dir_takes_the_hashed_stand_in(tmp_path, monkeypatch):
@@ -575,3 +587,82 @@ def test_forward_start_writes_the_pid_file_and_stop_removes_it(tmp_path):
     forward.stop()
     forward._reader.join(5)
     assert not os.path.exists(sshforward.pid_path(str(local)))
+
+
+# ---- the verification of PR 623 ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "/home/jo.doe@corp.example/.local/state/collins/com.episode6.Collins/api.sock",
+        "/home/jo.doe@corp.example/a+b,c=d.sock",
+    ],
+)
+def test_print_socket_takes_an_ad_home(line):
+    """N4: ssh passes `@ + , =` through -L untouched; an SSSD/AD home holds them."""
+    result = sshforward.print_socket(CONNECTION, run=FakeRun(stdout=(line + "\n").encode()))
+    assert result.ok and result.path == line
+    assert sshforward.forward_argv(CONNECTION, "/run/user/1/collins/remote/x/a.sock", line)
+
+
+def test_two_app_ids_never_share_a_forward_and_a_living_client_is_left_alone(tmp_path, monkeypatch):
+    """N1: `collins` and `./start-debug` share ui-state.json (and so a
+    connection id) — their forwards live under their own app id's
+    directory, and a record whose client still lives (another process) is
+    never taken over: its ssh stays, its pid file stays."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    real = sshforward.RemoteTransport(
+        CONNECTION, on_lost=lambda t: None, print_socket=lambda c: None,
+        make_forward=FakeForward, probe=lambda p: "live", app_id="com.episode6.Collins",
+    )
+    debug = sshforward.RemoteTransport(
+        CONNECTION, on_lost=lambda t: None, print_socket=lambda c: None,
+        make_forward=FakeForward, probe=lambda p: "live", app_id="com.episode6.Collins.Debug",
+    )
+    assert real.local_path != debug.local_path
+    assert os.path.dirname(real.local_path) != os.path.dirname(debug.local_path)
+    # A living foreign client's forward on this very path (a reused client
+    # pid, or a second client of the same app id): the stand-in child is a
+    # renamed ssh with the -L in its argv, its "client" another living pid
+    # (this test's parent process).
+    local = str(tmp_path / "a.sock")
+    child = subprocess.Popen(
+        ["bash", "-c", f'exec -a ssh bash -c "sleep 300" x -N -L {local}:/remote/api.sock'],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.3)
+        with open(sshforward.pid_path(local), "w") as fh:
+            json.dump({"ssh": child.pid, "client": os.getppid(), "socket": local}, fh)
+        assert sshforward.end_stale_forward(local) is None
+        assert child.poll() is None  # alive
+        assert os.path.exists(sshforward.pid_path(local))  # and its record kept
+        # The same record naming this process as the client is ours to end.
+        with open(sshforward.pid_path(local), "w") as fh:
+            json.dump({"ssh": child.pid, "client": os.getpid(), "socket": local}, fh)
+        if sshforward.is_our_forward(child.pid, local):
+            assert sshforward.end_stale_forward(local) == child.pid
+            child.wait(5)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_the_sweep_ignores_a_record_naming_a_socket_elsewhere(tmp_path):
+    """N5: a record's `socket` must be the file's own `<name>.sock`; the
+    sweep neither unlinks a pid file elsewhere nor signals for it."""
+    directory = tmp_path / "remote"
+    directory.mkdir()
+    elsewhere = tmp_path / "out-x"
+    elsewhere.mkdir()
+    target_pid = sshforward.pid_path(str(elsewhere / "thing.sock"))
+    pathlib_write = open(target_pid, "w")
+    pathlib_write.write("{}")
+    pathlib_write.close()
+    with open(directory / "aaaa.pid", "w") as fh:
+        json.dump({"ssh": os.getpid(), "client": 2**22 - 1, "socket": str(elsewhere / "thing.sock")}, fh)
+    assert sshforward.sweep_orphans(str(directory)) == []
+    assert os.path.exists(target_pid)  # untouched
+    assert os.path.exists(directory / "aaaa.pid")  # ignored, not removed

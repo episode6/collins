@@ -756,7 +756,23 @@ a WAITING round's poll chain and `_poll` stops when its generation moved
 settling state (`_closing_pages`, `_bg_closing`, `_close_asking`,
 `_bg_queue`) so every page leaves the old service instead of re-attaching
 its old pty id on the new one; `expect_restart` is skipped for a remote
-restart (the pid is the box's). A tab's (and a
+restart (the pid is the box's).
+**From its verification (ruled 2026-10-29):** the socket and pid file are
+`<runtime dir>/collins/remote/<app id>/<id>.{sock,pid}` — `ui-state.json`
+and so the connection ids are shared by the real and the debug instance,
+and two app ids on one path took over each other's forward on every
+reconnect; `end_stale_forward` leaves a record whose client lives
+(another process) alone, file included, and signals through
+`pidfd_open` + `pidfd_send_signal` after the cmdline check; the sweep
+ignores a record naming a socket that is not its own `<name>.sock`; the
+remote command is a POSIX `sh -c '…'` wrapper (single quotes only, so
+tcsh/nushell hand it on) choosing `$SHELL -lic` for the POSIX family and
+fish, `sh -lc` otherwise (`sshforward.remote_command`); `switch_connection`
+asks about unsaved editor buffers per window (`_ask_save_editors`; Cancel
+aborts the switch and stops the prepared transport) before `_switch_now`;
+a remote mismatch answered Cancel shows "{name} speaks another protocol;
+nothing is connected" with a *Connect to…* button (`set_mismatch`); the
+path grammar admits `@ + , =`. A tab's (and a
 panel shell's) client is an `api.client.PtyClient` from
 `terminal._pty_client`: `request`, `send_input`, `send_event`, `close`, fed the
 output frames and events of the ptys it spawned or attached. Tests and
