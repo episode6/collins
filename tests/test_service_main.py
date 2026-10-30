@@ -36,6 +36,12 @@ def test_the_capture_fails_soft(tmp_path):
     assert service_main.login_shell_environment(str(slow), timeout=0.2) == {}
 
 
+def _rounds(capture):
+    """The parts of a capture a test compares: what it found and which
+    rounds counted."""
+    return capture.environment, capture.login, capture.interactive
+
+
 def _fake_shell(tmp_path, name, body):
     shell = tmp_path / name
     shell.write_text("#!/bin/sh\n" + body)
@@ -44,18 +50,23 @@ def _fake_shell(tmp_path, name, body):
 
 
 def test_a_round_with_no_path_counts_as_nothing(tmp_path):
-    greeting = _fake_shell(tmp_path, "greeter", "printf 'hello there\\0FOO=bar\\0'\n")
-    assert service_main.capture_login_shell(greeting) == service_main.LoginCapture({}, False, False)
+    greeting = _fake_shell(tmp_path, "greeter", "printf 'hello there\\n'\n")
+    assert _rounds(service_main.capture_login_shell(greeting)) == ({}, False, False)
     # A round that exits 1 with no output (auto-tmux refusing) is the same.
     refused = _fake_shell(tmp_path, "refuser", "exit 1\n")
-    assert service_main.capture_login_shell(refused) == service_main.LoginCapture({}, False, False)
+    assert _rounds(service_main.capture_login_shell(refused)) == ({}, False, False)
     # Only the interactive round answers: it counts, the login round does not.
     mixed = _fake_shell(
         tmp_path, "mixed", 'case "$1" in -lic) printf "PATH=/x/bin\\0A=1\\0";; *) echo hi;; esac\n'
     )
-    assert service_main.capture_login_shell(mixed) == service_main.LoginCapture(
-        {"PATH": "/x/bin", "A": "1"}, False, True
-    )
+    assert _rounds(service_main.capture_login_shell(mixed)) == ({"PATH": "/x/bin", "A": "1"}, False, True)
+
+
+def test_a_greeting_before_env_does_not_take_the_first_variable(tmp_path):
+    shell = _fake_shell(tmp_path, "greeter2", "printf 'hello\\nPATH=/x\\0A=1\\0'\n")
+    assert _rounds(service_main.capture_login_shell(shell)) == ({"PATH": "/x", "A": "1"}, True, True)
+    two_lines = _fake_shell(tmp_path, "greeter3", "printf 'hi\\nthere\\nSHELL=/bin/x\\0PATH=/y\\0'\n")
+    assert service_main.capture_login_shell(two_lines).environment == {"SHELL": "/bin/x", "PATH": "/y"}
 
 
 def test_the_interactive_round_overlays_the_login_round_path_included(tmp_path):
@@ -65,7 +76,7 @@ def test_the_interactive_round_overlays_the_login_round_path_included(tmp_path):
         'case "$1" in -lic) printf "PATH=/i/bin\\0B=i\\0";; *) printf "PATH=/l/bin\\0A=l\\0B=l\\0";; esac\n',
     )
     capture = service_main.capture_login_shell(shell)
-    assert capture == service_main.LoginCapture({"PATH": "/i/bin", "A": "l", "B": "i"}, True, True)
+    assert _rounds(capture) == ({"PATH": "/i/bin", "A": "l", "B": "i"}, True, True)
 
 
 def test_a_slow_round_beside_a_fast_one_returns_within_one_timeout(tmp_path):
@@ -74,22 +85,36 @@ def test_a_slow_round_beside_a_fast_one_returns_within_one_timeout(tmp_path):
     )
     started = time.monotonic()
     capture = service_main.capture_login_shell(fast_lc, timeout=1.0)
-    assert capture == service_main.LoginCapture({"PATH": "/l/bin"}, True, False)
+    assert _rounds(capture) == ({"PATH": "/l/bin"}, True, False)
     assert time.monotonic() - started < 1.8
     slow_lc = _fake_shell(
         tmp_path, "slow_lc", 'case "$1" in -lc) exec sleep 10;; *) printf "PATH=/i/bin\\0";; esac\n'
     )
     started = time.monotonic()
     capture = service_main.capture_login_shell(slow_lc, timeout=1.0)
-    assert capture == service_main.LoginCapture({"PATH": "/i/bin"}, False, True)
+    assert _rounds(capture) == ({"PATH": "/i/bin"}, False, True)
     assert time.monotonic() - started < 1.8
 
 
 def test_two_slow_rounds_share_one_deadline(tmp_path):
     slow = _fake_shell(tmp_path, "slow2", "exec sleep 10\n")
     started = time.monotonic()
-    assert service_main.capture_login_shell(slow, timeout=1.0) == service_main.LoginCapture()
+    assert _rounds(service_main.capture_login_shell(slow, timeout=1.0)) == ({}, False, False)
     assert time.monotonic() - started < 1.8  # one timeout, not two
+
+
+def test_a_grandchild_in_a_session_of_its_own_does_not_hold_the_deadline(tmp_path):
+    """`setsid cmd &` in an rc leaves the killed group and keeps the pipe
+    open; the drain after the kill must not wait for it."""
+    shell = _fake_shell(
+        tmp_path,
+        "daemonizer",
+        'case "$1" in -lic) setsid sleep 3 & printf "PATH=/x\\0";; *) printf "PATH=/l/bin\\0";; esac\n',
+    )
+    started = time.monotonic()
+    capture = service_main.capture_login_shell(shell, timeout=0.5)
+    assert time.monotonic() - started < 1.3
+    assert capture.login and not capture.interactive
 
 
 def _login_shell_home(tmp_path, *, path_only_interactive: bool, handover: bool):
@@ -121,7 +146,7 @@ needs_bash = pytest.mark.skipif(not os.path.exists("/usr/bin/bash"), reason="nee
 @needs_bash
 def test_a_path_in_the_login_profile_is_found_by_both_rounds(tmp_path):
     _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=False, handover=False)
-    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    capture = service_main.capture_login_shell("/usr/bin/bash", timeout=20.0, env=env)
     assert capture.login and capture.interactive
     assert capture.environment["PATH"].split(":")[0] == str(bin_dir)
 
@@ -134,7 +159,7 @@ def test_a_path_only_in_the_guarded_rc_is_found_by_the_interactive_round(tmp_pat
         env=env, stdin=subprocess.DEVNULL, capture_output=True, check=False,
     )
     assert str(bin_dir) not in service_main._parse_env0(login_only.stdout)["PATH"]  # the login round lacks it
-    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    capture = service_main.capture_login_shell("/usr/bin/bash", timeout=20.0, env=env)
     assert capture.login and capture.interactive
     assert capture.environment["PATH"].split(":")[0] == str(bin_dir)  # the overlay holds it
 
@@ -142,7 +167,7 @@ def test_a_path_only_in_the_guarded_rc_is_found_by_the_interactive_round(tmp_pat
 @needs_bash
 def test_an_rc_that_hands_the_shell_on_costs_only_the_interactive_round(tmp_path):
     _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=False, handover=True)
-    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    capture = service_main.capture_login_shell("/usr/bin/bash", timeout=20.0, env=env)
     assert capture.login and not capture.interactive
     assert capture.environment["PATH"].split(":")[0] == str(bin_dir)  # the login PATH kept
 
@@ -150,7 +175,7 @@ def test_an_rc_that_hands_the_shell_on_costs_only_the_interactive_round(tmp_path
 @needs_bash
 def test_a_path_only_in_a_rc_that_hands_the_shell_on_is_not_seen(tmp_path):
     _, env, bin_dir = _login_shell_home(tmp_path, path_only_interactive=True, handover=True)
-    capture = service_main.capture_login_shell("/usr/bin/bash", env=env)
+    capture = service_main.capture_login_shell("/usr/bin/bash", timeout=20.0, env=env)
     assert capture.login and not capture.interactive
     assert str(bin_dir) not in capture.environment["PATH"]
 
@@ -562,7 +587,9 @@ def test_check_names_what_the_shell_rounds_found(runtime, monkeypatch):
         monkeypatch.setattr(
             service_main,
             "capture_login_shell",
-            lambda login=login, interactive=interactive: service_main.LoginCapture({}, login, interactive),
+            lambda login=login, interactive=interactive: service_main.LoginCapture(
+                {}, login, interactive, "/usr/bin/zsh"
+            ),
         )
         out = io.StringIO()
         assert service_main.check("com.example.Check", out=out) == 0  # not counted in `missing`

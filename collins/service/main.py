@@ -85,18 +85,26 @@ def take_lock(app_id: str) -> int:
 class LoginCapture:
     """What the login-shell capture found (§3.10, D63): the *environment*
     (the login round's parse overlaid by the interactive round's) and which
-    rounds counted, a round counting only when its output held a ``PATH``."""
+    rounds counted, a round counting only when its output held a ``PATH``.
+    *shell* is the shell the rounds ran, worked out once, so ``--check``
+    names the one the capture used."""
 
     environment: dict[str, str] = field(default_factory=dict)
     login: bool = False
     interactive: bool = False
+    shell: str = ""
 
 
 def _parse_env0(stdout: bytes) -> dict[str, str]:
     """``env -0``'s NUL-separated ``NAME=value`` pairs; what is not a pair
-    or not decodable is dropped."""
+    or not decodable is dropped. What an rc printed before ``env`` ran (a
+    greeting ends in a newline, not a NUL) sits in front of the first entry:
+    that entry is read again from after its last newline."""
     parsed: dict[str, str] = {}
-    for entry in stdout.split(b"\0"):
+    for index, entry in enumerate(stdout.split(b"\0")):
+        if index == 0 and b"\n" in entry:
+            if not entry.partition(b"=")[0].decode(errors="replace").isidentifier():
+                entry = entry.rsplit(b"\n", 1)[-1]
         if b"=" not in entry:
             continue
         key, _, value = entry.partition(b"=")
@@ -151,14 +159,24 @@ def capture_login_shell(
                 os.killpg(proc.pid, signal.SIGKILL)
             except OSError:
                 pass
-            proc.communicate()
+            # Not a second `communicate()`: that reads to EOF, and a
+            # grandchild the rc put in a session of its own (`setsid cmd &`)
+            # is outside the killed group and holds the pipe, so it would
+            # wait past the deadline for as long as the grandchild lives.
+            # Nothing of the partial output is wanted.
+            if proc.stdout is not None:
+                proc.stdout.close()
+            proc.wait()
             log.info("login-shell capture (%s) timed out after %.0f s", flags, timeout)
+            return
+        except Exception as exc:  # never raises: a round that breaks yields nothing
+            log.info("login-shell capture (%s) failed: %s", flags, exc)
             return
         found = _parse_env0(stdout)
         if "PATH" not in found:
             log.info("login-shell capture (%s) exited %s with no PATH", flags, proc.returncode)
             return
-        parsed[flags] = found
+        parsed[flags] = found  # one thread a key ("-lc" / "-lic"): no two write the same entry
 
     # One thread a round, so a slow round never spends the other's time.
     waiters = [
@@ -174,6 +192,7 @@ def capture_login_shell(
         environment={**(login or {}), **(interactive or {})},
         login=login is not None,
         interactive=interactive is not None,
+        shell=shell,
     )
 
 
@@ -284,7 +303,7 @@ def check(app_id: str, out=sys.stdout) -> int:
     path = api_server.socket_path(app_id)
     print(f"socket:       {path} ({api_server.probe_socket(path)})", file=out)
     capture = capture_login_shell()
-    shell = os.environ.get("SHELL") or "/bin/sh"
+    shell = capture.shell
     if capture.login and capture.interactive:
         verdict = "login profile and interactive rc read"
     elif capture.login:
