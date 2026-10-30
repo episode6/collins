@@ -152,6 +152,28 @@ def test_listing_applies_only_the_newest_answer():
     assert listing.needs("~", False)
 
 
+def test_an_ask_drops_the_previous_folders_rows_until_its_answer_lands():
+    """The Fable review of PR 624, S1: while a folder's listing is on its
+    way, the previous folder's rows, path, cut and refusal are gone, so no
+    click, Tab or New folder acts on them under the new folder's name."""
+    listing = model.Listing()
+    assert not listing.pending
+    token = listing.ask("/home/u", False)
+    assert listing.pending
+    listing.land(token, [Folder("dev"), Folder("docs")], path="/home/u", truncated=True)
+    assert not listing.pending and listing.path == "/home/u"
+    listing.ask("/home/u/dev", False)
+    assert listing.pending
+    assert listing.rows == [] and listing.path is None and not listing.truncated and listing.error == ""
+    # The same folder typed on (a filter) asks nothing more, and is still pending.
+    assert not listing.needs("/home/u/dev", False) and listing.pending
+    failed = listing.ask("/root", False)
+    listing.land(failed, None, error="Couldn't read the folder")
+    assert not listing.pending
+    listing.ask("/srv", False)
+    assert listing.error == ""  # a refusal of the folder left is not this one's
+
+
 def test_a_refused_listing_says_why_and_is_asked_again():
     listing = model.Listing()
     token = listing.ask("/root", False)

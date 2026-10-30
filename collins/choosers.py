@@ -9,7 +9,8 @@ Preferences, a sandbox grant). A client on the service's machine (the
 `local` proof, D11: `apilink.is_local()`) gets the desktop's own
 `Gtk.FileDialog`, as it always did: its folders are the service's. Any
 other client gets `pathpicker.PathPicker`, which lists the service's
-folders over `fs.list`. Either way *on_done(path)* is called with the
+folders over its own unconfined `fs.dirs` and makes one with `fs.newdir`
+(D60; never the editor's confined `fs.list` / `fs.mkdir`). Either way *on_done(path)* is called with the
 folder picked, a path on the service's machine, and a dismissal calls
 nothing.
 

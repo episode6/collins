@@ -37,6 +37,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from . import remotefiles
+from .i18n import N_
 from .projectfiles import RenameError, name_error
 
 # How long the entry waits after a keystroke before it lists (§3.24).
@@ -156,14 +157,15 @@ def shortcuts(home: str | None, roots: Iterable[str]) -> list[tuple[str, str]]:
 
 
 def new_folder_error(name: str) -> str | None:
-    """Why *name* can't be a new folder's name (an untranslated msgid), or
+    """Why *name* can't be a new folder's name (a msgid, marked `N_` for
+    the pot and translated by the caller), or
     None: the service's own rule (`projectfiles.name_error`), run first so
     a typo is not a round trip."""
     verdict = name_error(name.strip())
     if verdict is RenameError.EMPTY:
-        return "Type a name for the folder"
+        return N_("Type a name for the folder")
     if verdict is not None:
-        return "A folder takes a bare name"
+        return N_("A folder takes a bare name")
     return None
 
 
@@ -177,6 +179,7 @@ class Listing:
 
     def __init__(self) -> None:
         self.asked = 0
+        self.landed = 0  # the token of the last answer applied
         self.folder: str | None = None
         self.hidden = False
         self.path: str | None = None
@@ -184,15 +187,30 @@ class Listing:
         self.truncated = False
         self.error = ""
 
+    @property
+    def pending(self) -> bool:
+        """An ask is in flight: there are no rows to show, click, complete
+        against or make a folder in until it lands (the previous folder's
+        are gone with `ask`)."""
+        return self.asked != self.landed
+
     def needs(self, folder: str, hidden: bool) -> bool:
         """Whether the rows are not already *folder*'s with *hidden* as
         asked: a filter alone asks the service nothing."""
         return folder != self.folder or hidden != self.hidden
 
     def ask(self, folder: str, hidden: bool) -> int:
+        """A new listing is asked for: the previous folder's rows, path,
+        cut and refusal go now, so nothing acts on them under the new
+        folder's name while the answer is on its way (the Fable review of
+        PR 624, S1)."""
         self.asked += 1
         self.folder = folder
         self.hidden = hidden
+        self.path = None
+        self.rows = []
+        self.truncated = False
+        self.error = ""
         return self.asked
 
     def land(
@@ -208,6 +226,7 @@ class Listing:
         was applied."""
         if token != self.asked:
             return False
+        self.landed = token
         self.rows = list(rows or [])
         self.truncated = bool(truncated) and rows is not None
         self.error = error if rows is None else ""

@@ -1037,8 +1037,9 @@ class ServiceCore:
     def _req_debug_local(self, message: protocol.Message, client: Client) -> dict:
         """`debug.local {local}`: whether the service treats the asking
         client as local (D60): a check's stand-in for a client over ssh,
-        the service then confining its requests and serving it no file
-        whole. The proof, `prove_local` and the `local` request are
+        the service then confining its requests and serving it a file the
+        session's agent named whole (D51), which it never serves a local
+        client. The proof, `prove_local` and the `local` request are
         untouched; served only with COLLINS_DEBUG_API=1 (`handle`'s gate)."""
         client.local = bool(message.get("local"))
         return protocol.reply(message.id)

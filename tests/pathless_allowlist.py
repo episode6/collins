@@ -359,7 +359,8 @@ LOCAL_EXTRAS = frozenset(
 #    PR-3.2**: the four window sites, the clone dialog's, Preferences' and
 #    the sandbox chip's are `choosers.choose_folder` (the desktop's chooser
 #    behind the proof, one `LOCAL_EXTRAS` site; the path picker over the
-#    service's `fs.list` otherwise); the composer's attach starts in the
+#    service's `fs.dirs` / `fs.newdir` otherwise, D60); the composer's
+#    attach starts in the
 #    agent's cwd only for a `local` client and, for any other, uploads the
 #    picked file as a drop does and mentions the copy (D56).
 # Lesser: this device's `Path.home()` sent as a service cwd

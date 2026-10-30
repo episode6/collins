@@ -441,10 +441,16 @@ class SandboxChip(Gtk.MenuButton):
             self._rebuild()
 
     def _pick_directory(self, workspace: str) -> None:
-        """*Allow a directory…*: the desktop's folder chooser, then the guard.
-        The chooser is modal over the window and closes this popover; the
-        outcome — allowed, or refused with the reason — goes out as a toast
-        either way, so the answer is seen without reopening the chip."""
+        """*Allow a directory…*: the popover pops down, then the folder
+        chooser (`choosers.choose_folder`: the desktop's for a `local`
+        client, the path picker over the service's folders otherwise), then
+        the guard. The path picker is an `Adw.Dialog` inside the window,
+        which an autohide popover does not close on (the desktop's chooser,
+        a toplevel of its own, did), so the popover goes first, as
+        `_restart` and `_open_shell` do. The outcome — allowed, or refused
+        with the reason — goes out as a toast either way, so the answer is
+        seen without reopening the chip."""
+        self.get_popover().popdown()
         choosers.choose_folder(
             self.get_root(),
             _("Allow a directory"),

@@ -211,7 +211,8 @@ are the `debug.session.*` requests (a dotted name walks from the
 `debug.local {local}` sets whether the service treats the asking client as
 local (D60). `e2e_service.drop_local(link)` calls it with False and clears
 `link.local`, so both ends agree the client is what an ssh client is (the
-service confines its `fs.*`, serves it no file whole; `apilink.is_local()`
+service confines its `fs.*` and serves it a file the agent named whole,
+D51, which a local client is never served; `apilink.is_local()`
 and `app.local` say no); a reconnect proves again, so call it again after
 one. `check_local_extras.py` and `check_path_picker.py` use it. The
 service serves them only with `COLLINS_DEBUG_API=1` in its environment:

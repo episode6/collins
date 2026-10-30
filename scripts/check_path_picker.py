@@ -145,8 +145,8 @@ def row_names(picker: PathPicker) -> list[str]:
     names = []
     child = picker.rows.get_first_child()
     while child is not None:
-        if getattr(child, "name", None):
-            names.append(child.name)
+        if getattr(child, "folder", None):
+            names.append(child.folder)
         child = child.get_next_sibling()
     return names
 
@@ -154,7 +154,7 @@ def row_names(picker: PathPicker) -> list[str]:
 def row_named(picker: PathPicker, name: str):
     child = picker.rows.get_first_child()
     while child is not None:
-        if getattr(child, "name", None) == name:
+        if getattr(child, "folder", None) == name:
             return child
         child = child.get_next_sibling()
     return None
@@ -259,7 +259,15 @@ def make_folder() -> bool:
         dirs = {"refused": refusal.msgid}
     check("…while fs.dirs of it answers, with the folder made",
           dirs.get("path") == WORK and dirs.get("entries") == [{"name": "made", "symlink": False}], dirs)
-    # A typed path: filtered after the debounce, completed by Tab.
+    # A typed folder is asked for only once the debounce has run out.
+    asked = picker._listing.asked
+    picker.entry.set_text(SERVICE_HOME + "/")
+    check("typing arms the debounce and asks nothing yet",
+          picker._debounce is not None and picker._listing.asked == asked, picker._listing.asked - asked)
+    relisted = wait(lambda: picker._listing.path == SERVICE_HOME and picker._listing.asked == asked + 1)
+    count = picker._listing.asked - asked
+    check("…then lists the folder typed, once", relisted, (picker._listing.path, count))
+    # A typed name: filtered after the debounce, completed by Tab.
     picker.go(WORK)
     wait(lambda: picker._listing.path == WORK)
     picker.entry.set_text(WORK + "/ma")

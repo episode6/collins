@@ -42,7 +42,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import apilink, remotefiles  # noqa: E402
 from . import pathpickermodel as model  # noqa: E402
-from .i18n import _  # noqa: E402
+from .i18n import N_, _  # noqa: E402
 from .sessions import worktree_project_root  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -200,7 +200,7 @@ class PathPicker(Adw.Dialog):
 
     def _on_row(self, _box: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         folder = self._listing.path
-        name = getattr(row, "name", None)
+        name = getattr(row, "folder", None)
         if folder and name:
             self.go(model.child(folder, name))
 
@@ -241,7 +241,12 @@ class PathPicker(Adw.Dialog):
     def _list(self, folder: str, prefix: str) -> None:
         hidden = self.hidden_btn.get_active()
         if not self._listing.needs(folder, hidden):
-            self._show_rows(prefix)
+            if self._listing.pending:
+                # This folder's answer is on its way: nothing to show yet
+                # (`Listing.ask` dropped the previous folder's rows).
+                self._show_status(_("Listing…"), "", icon="content-loading-symbolic")
+            else:
+                self._show_rows(prefix)
             return
         token = self._listing.ask(folder, hidden)
         self._show_status(_("Listing…"), "", icon="content-loading-symbolic")
@@ -282,7 +287,7 @@ class PathPicker(Adw.Dialog):
         shown = model.matching(listing.rows, prefix)
         for folder in shown:
             row = Gtk.ListBoxRow()
-            row.name = folder.name
+            row.folder = folder.name
             row.set_child(
                 _row("folder-symbolic", folder.name, "emblem-symbolic-link-symbolic" if folder.link else None)
             )
@@ -315,9 +320,11 @@ class PathPicker(Adw.Dialog):
             return False
         text = self.entry.get_text()
         where = model.split(text)
-        if where is None or where[0] != self._listing.folder or self._listing.error:
-            # The rows are not of the folder typed yet: ask now, and let the
-            # next Tab complete against them.
+        listing = self._listing
+        if where is None or where[0] != listing.folder or listing.pending or listing.error:
+            # The rows are not of the folder typed yet (or are still on their
+            # way): ask now if need be, and let the next Tab complete
+            # against them.
             self._cancel_debounce()
             self._list_for_text()
             return True
@@ -375,7 +382,7 @@ class PathPicker(Adw.Dialog):
         error = model.new_folder_error(name)
         folder = self._listing.path
         if error is None and not folder:
-            error = "List a folder first"
+            error = N_("List a folder first")
         if error is not None:
             self.new_note.set_text(_(error))
             self.new_note.set_visible(True)
