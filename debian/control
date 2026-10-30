@@ -46,6 +46,15 @@ Depends: ${python3:Depends},
          python3-gi,
          gir1.2-glib-2.0,
          gir1.2-soup-3.0
+# The transition (Debian Policy §7.6.1): before the split the collins
+# package owned the Python tree this package now holds, so it takes those
+# files over from every pre-split collins (0.1.4 and older), which is
+# deconfigured first. 0.1.5~ sorts below every 0.1.5 build (0.1.5~noble1,
+# 0.1.5~resolute1, 0.1.5) and above every 0.1.4 one; it marks the split and
+# stays at 0.1.5~, never moving with the version. Keep it equal in
+# scripts/build_deb.sh; scripts/verify_package_split.py checks both.
+Breaks: collins (<< 0.1.5~)
+Replaces: collins (<< 0.1.5~)
 Recommends: bubblewrap,
             bindfs,
             fuse3

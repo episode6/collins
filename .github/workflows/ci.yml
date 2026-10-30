@@ -129,6 +129,9 @@ jobs:
           dpkg -x dist/collins-service_*_all.deb /tmp/deb-root
           dpkg -x dist/collins_*_all.deb /tmp/deb-root
           dpkg-deb -f dist/collins_*_all.deb Depends | grep -q 'collins-service (= '
+          # The transition from a pre-split collins (debian/control): without
+          # both fields an upgrade from 0.1.4 fails on the first shared file.
+          test "$(dpkg-deb -f dist/collins-service_*_all.deb Breaks Replaces | grep -c 'collins (<< 0.1.5~)')" = 2
           cd /tmp
           PYTHONPATH=/tmp/deb-root/usr/lib/python3/dist-packages python3 -c "import collins.app, collins.service.main, collins.service.keeper; print(collins.app.__file__)"
           # The service's and the keeper's commands and their (never enabled) user units.
@@ -176,7 +179,7 @@ jobs:
           (cd /tmp/collins-ppa-binary/src && dpkg-buildpackage -b -us -uc)
           ls -l /tmp/collins-ppa-binary/*.deb
           dpkg-deb -f /tmp/collins-ppa-binary/collins_*_all.deb Depends
-          dpkg-deb -f /tmp/collins-ppa-binary/collins-service_*_all.deb Depends Recommends
+          dpkg-deb -f /tmp/collins-ppa-binary/collins-service_*_all.deb Depends Recommends Breaks Replaces
           python3 scripts/verify_package_split.py deb /tmp/collins-ppa-binary/collins-service_*_all.deb /tmp/collins-ppa-binary/collins_*_all.deb
 
   # Everything release.yml's copr job does short of uploading, plus what

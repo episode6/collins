@@ -94,3 +94,28 @@ def test_the_service_holds_nothing_a_desktop_shell_reads():
 def test_a_bad_command_line_prints_the_usage(capsys):
     assert split.main(["verify_package_split.py", "tar", "a", "b"]) == 2
     assert "deb <collins-service.deb>" in capsys.readouterr().err
+
+
+def test_neither_package_enables_a_unit_or_ships_etc():
+    link = "usr/lib/systemd/user/default.target.wants/collins-service.service"
+    assert split.problems(SERVICE | {link, "etc/collins.conf"}, APP | {"etc/x"}) == [
+        "collins holds etc/x",
+        f"collins-service holds {link}",
+        "collins-service holds etc/collins.conf",
+    ]
+
+
+def test_the_window_s_private_icon_root_is_not_the_service_s():
+    icon = "usr/share/collins/icons/hicolor/scalable/actions/tab-close-symbolic.svg"
+    assert split.problems(SERVICE | {icon}, APP - {icon}) == [f"collins-service holds {icon}"]
+
+
+def test_the_deb_transition_needs_both_fields_at_the_marker():
+    both = {"Breaks": "collins (<< 0.1.5~)", "Replaces": "foo, collins (<< 0.1.5~)"}
+    assert split.deb_metadata_problems(both) == []
+    moved = {"Breaks": "collins (<< 0.1.5~)", "Replaces": "collins (<< 0.1.6~)"}
+    assert split.deb_metadata_problems(moved) == ["collins-service's Replaces lacks collins (<< 0.1.5~)"]
+    assert split.deb_metadata_problems({}) == [
+        "collins-service's Breaks lacks collins (<< 0.1.5~)",
+        "collins-service's Replaces lacks collins (<< 0.1.5~)",
+    ]

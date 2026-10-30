@@ -44,10 +44,19 @@ scripts). Every system channel cuts it into **two binary packages**
   `PYBUILD_DESTDIR` — so `debian/rules` runs `dh_install` and `dh_missing
   --fail-missing` with `--sourcedir=debian/python3-collins`, and
   `debian/collins-service.install` / `debian/collins.install` divide that
-  tree; a file neither claims fails the build. `collins` depends on `collins-service (=
-  ${source:Version})`.
+  tree; a file neither claims fails the build, and `debian/clean` removes
+  the staging tree (`dh_clean` removes only the packages' own). `collins`
+  depends on `collins-service (= ${source:Version})`.
+- **The transition** (dpkg only): every pre-split install has the Python
+  tree in `collins`, so `collins-service` declares `Breaks: collins (<<
+  0.1.5~)` and `Replaces: collins (<< 0.1.5~)` (Debian Policy §7.6.1) in
+  `debian/control` and `build_deb.sh` alike; without them installing the
+  pair over `collins` 0.1.4 fails on the first shared file. `0.1.5~` marks
+  the split and never moves with the version. rpm and pacman move the files
+  within the one transaction the exact-version dependency forces and need
+  nothing.
 - **`.deb`** (`scripts/build_deb.sh`): two staging roots and two control
-  blocks, kept equal to `debian/control`'s Depends.
+  blocks, kept equal to `debian/control`'s Depends, Breaks and Replaces.
 - **RPM** (`collins.spec`): `%package service`; `%pyproject_save_files`'s
   list goes to `%files service`, and `collins` has `Requires:
   collins-service = %{version}-%{release}`. The service requires
@@ -58,8 +67,9 @@ scripts). Every system channel cuts it into **two binary packages**
   in full, and `scripts/verify_versions.py` checks it follows `pkgver`.
 
 **CI** holds each split with `scripts/verify_package_split.py` (every file
-in exactly one package, each package's must-haves, and nothing of the
-other half): the `packaging` job on `build_deb.sh`'s two debs, the
+in exactly one package, each package's must-haves, nothing of the other
+half, no enablement link or `/etc` file, and for a `.deb` pair the
+transition's Breaks and Replaces): the `packaging` job on `build_deb.sh`'s two debs, the
 `ppa-source` legs on the binary packages they now build from the source
 package they made (`dpkg-buildpackage -b`, what Launchpad's builders run
 next), and the `rpm` job on the two RPMs, which it then `dnf install`s

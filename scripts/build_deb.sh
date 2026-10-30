@@ -135,7 +135,11 @@ mkdir -p "$SERVICE/DEBIAN" "$APP/DEBIAN"
 # libspelling is only recommended (composer.py degrades to an unchecked text
 # box without it). The two version floors are the measured ones: GTK 4.10
 # for Gtk.FileDialog/FontDialog, libadwaita 1.5 for Adw.AlertDialog and
-# friends.
+# friends. Source: names the source package where it differs from the binary
+# package's name, so only collins-service carries it. Breaks/Replaces is the
+# transition debian/control explains: collins-service takes the Python tree
+# over from a pre-split collins (<< 0.1.5~, a marker that never moves), or
+# installing this pair over collins 0.1.4 fails on the first shared file.
 cat > "$SERVICE/DEBIAN/control" <<EOF
 Package: $SVC
 Source: $PKG
@@ -144,6 +148,8 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.10), python3-gi, gir1.2-glib-2.0, gir1.2-soup-3.0
+Breaks: $PKG (<< 0.1.5~)
+Replaces: $PKG (<< 0.1.5~)
 Recommends: bubblewrap, bindfs, fuse3
 Installed-Size: $(du -sk "$SERVICE" --exclude=DEBIAN | cut -f1)
 Maintainer: episode6 <support@episode6.com>
