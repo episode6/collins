@@ -1719,33 +1719,44 @@ class Session:
 
     # -- the transcript resolver ------------------------------------------------
 
-    def start_resolver(self, cwd: str) -> None:
+    def start_resolver(self, cwd: str, since: float | None = None) -> None:
         """Find the transcript of the session this terminal is about to
         start in *cwd*. The transcript only appears once the first prompt is
         sent, which can be arbitrarily long after the tab opens: poll for as
         long as the tab is in the foreground; in the background allow ~3 min
         before pausing, and resume whenever the tab is brought back
-        (`arm_resolver`, which the tab calls on every map)."""
+        (`arm_resolver`, which the tab calls on every map). *since* is a
+        session adopted from the keeper (PR-3.6) whose shell started then
+        (wall-clock seconds): the baseline is that moment, not now, so a
+        transcript its CLI wrote before the restart is its own to bind, not
+        another session's to leave out."""
         self.resolver_cwd = cwd
-        self.arm_resolver()
+        self.arm_resolver(since)
 
-    def arm_resolver(self) -> None:
+    def arm_resolver(self, since: float | None = None) -> None:
         if self.resolver_cwd is None or (self.session_id is not None and not self.fork_resolve):
             return  # never started for this session, or already resolved
         self._resolver_attempts = 0
         if self._resolver_source is not None:
             return  # already polling; just refresh the background budget
+        if since is not None and not self._resolver_armed_at:
+            self._resolver_armed_at = since
         # A brand-new session must attach to a transcript that appeared while
         # polling: the newest one *existing* at (re)start belongs to some other
         # session — a submitted prompt creates the file well within the ~3 min
         # background budget, so anything from a pause can't be ours either.
         # `--continue` (continue_recent) reuses the newest existing
-        # transcript, which is exactly the session it resumes.
-        self._known_transcripts = (
-            set(self.provider.transcripts_for_cwd(self.resolver_cwd))
-            if not self.continue_recent
-            else set()
-        )
+        # transcript, which is exactly the session it resumes. An adopted
+        # session's baseline (*since*) is its shell's start: only what
+        # predates that is another session's (S6 of the review of PR 629).
+        if self.continue_recent:
+            self._known_transcripts = set()
+        elif since is not None:
+            self._known_transcripts = {
+                p for p in self.provider.transcripts_for_cwd(self.resolver_cwd) if self._predates_resolver(p)
+            }
+        else:
+            self._known_transcripts = set(self.provider.transcripts_for_cwd(self.resolver_cwd))
         self._baselined_dirs = {self.resolver_cwd}
         # Stamp the instant polling *first* starts, before any prompt has
         # created a transcript. A worktree we later follow into may hold

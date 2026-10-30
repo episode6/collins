@@ -1020,6 +1020,8 @@ REPLIES = {
         "cli": "/home/u/.local/bin/claude",
         "home": "/home/u",
         "keeper": 4243,
+        "unkept": 1,
+        "keeper_mismatch": 0,
     },
     "cli.check": {"found": "", "detected": "/home/u/.local/bin/claude", "status": "versioned"},
 }

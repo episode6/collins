@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -772,12 +772,23 @@ def _clean_new_chat_drafts(raw: object) -> dict[str, dict]:
     return out
 
 
-def _clean_ptys(raw: object) -> dict[str, dict]:
+def _clean_ptys(raw: object) -> dict[str, dict[str, dict]]:
+    """The pty table by app id (PR-3.6's ruling on M4 of the review of PR
+    629): ``{<app id>: {<pty id>: row}}``. The flat table a service before
+    the keeper wrote (pty id -> row) is dropped: no pty of a keeperless
+    service survives its stop, so its rows name nothing."""
     if not isinstance(raw, dict):
         return {}
-    return {
-        k: v for k, v in raw.items() if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
-    }
+    out: dict[str, dict[str, dict]] = {}
+    for app_id, rows in raw.items():
+        if not isinstance(app_id, str) or not app_id or app_id.isdigit() or not isinstance(rows, dict):
+            continue
+        clean = {
+            k: v for k, v in rows.items() if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
+        }
+        if clean:
+            out[app_id] = clean
+    return out
 
 
 def _clean_settings(raw: object) -> dict:
@@ -804,8 +815,16 @@ def _clean_service_id(raw: object) -> str:
     return raw if uistate._is_id(raw) else ""
 
 
-def _clean_next_id(raw: object) -> int:
-    return raw if isinstance(raw, int) and not isinstance(raw, bool) and 1 <= raw < 2**32 else 1
+def _valid_next_id(raw: object) -> bool:
+    return isinstance(raw, int) and not isinstance(raw, bool) and 1 <= raw < 2**32
+
+
+def _clean_next_id(raw: object) -> dict[str, int]:
+    """The next pty id per app id (PR-3.6): ``{<app id>: n}``; a scalar, the
+    shape before the keeper, is dropped with the flat table."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and k and _valid_next_id(v)}
 
 
 def _clean_notifications(raw: object) -> list[dict]:
@@ -862,7 +881,7 @@ SHARED_KEYS: dict[str, SharedKey] = {
         # client reopening its tabs finds them resumable.
         SharedKey("resume_on_start", LIST, _clean_set, writable=False),
         SharedKey("ptys", MAP, _clean_ptys, writable=False),
-        SharedKey("pty_next_id", SCALAR, _clean_next_id, writable=False),
+        SharedKey("pty_next_id", MAP, _clean_next_id, writable=False),
         # The tree copies the service has in flight (PR-3.6, §8): written by
         # fs.paste around each top temporary directory and read at the next
         # start to remove exactly those trees.
@@ -1063,16 +1082,18 @@ class AppState:
         # session id -> the tool's arguments, handed to the first client
         # that subscribes (service.tools, §3.7).
         self.pending_diffs: dict[str, dict] = {}
-        # The pty table (split-service spec §3.8): pty id (as a string, JSON
-        # keys) -> the row the service's PtyServer keeps for a live pty
-        # (kind, session, cwd, pid, cols, rows, box, plan, options). Written
-        # by the server through set_pty / remove_pty (wired in PR-1.7). A
-        # row left by a service that died stays until the service that
-        # starts next clears it (PR-1.12; before the keeper, PR-3.6, no pty
-        # survives a restart). pty_next_id is the id the next spawn takes,
-        # persisted so a saved model file never names two ptys.
-        self.ptys: dict[str, dict] = {}
-        self.pty_next_id: int = 1
+        # The pty table (split-service spec §3.8), by app id (PR-3.6's
+        # ruling on M4 of the review of PR 629: state.json is shared by every
+        # app id, each with a keeper of its own): app id -> pty id (as a
+        # string, JSON keys) -> the row the service's PtyServer keeps for a
+        # live pty (kind, session, cwd, pid, cols, rows, box, plan, options).
+        # Written by the server through set_pty / remove_pty (wired in
+        # PR-1.7). A service reads, adopts, drops and prunes its own app
+        # id's rows alone; another app id's stay as they are. pty_next_id
+        # is the id the next spawn takes, per app id, persisted so a saved
+        # model file never names two ptys.
+        self.ptys: dict[str, dict[str, dict]] = {}
+        self.pty_next_id: dict[str, int] = {}
         # The tree copies in flight (PR-3.6, §8): {"dest", "name"} each, a
         # top temporary directory an fs.paste is building a tree under,
         # recorded until the tree lands or its undo removes it; the
@@ -1227,12 +1248,8 @@ class AppState:
         self.pending_diffs = {
             k: v for k, v in (data.get("pending_diffs") or {}).items() if isinstance(v, dict)
         }
-        self.ptys = {
-            k: v for k, v in (data.get("ptys") or {}).items()
-            if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
-        }
-        next_id = data.get("pty_next_id")
-        self.pty_next_id = next_id if isinstance(next_id, int) and 1 <= next_id < 2**32 else 1
+        self.ptys = _clean_ptys(data.get("ptys"))
+        self.pty_next_id = _clean_next_id(data.get("pty_next_id"))
         self.inflight_copies = _clean_inflight_copies(data.get("inflight_copies"))
         self.notifications = notifycenter.clean_records(data.get("notifications"))
         settings = dict(data.get("settings") or {})
@@ -1988,31 +2005,43 @@ class AppState:
 
     # -- the pty table (§3.8)
 
-    def set_pty(self, pty_id: int, row: dict | None) -> None:
-        """A pty's row as the service's PtyServer reports it; None removes
-        it (the pty exited)."""
+    def set_pty(self, app_id: str, pty_id: int, row: dict | None) -> None:
+        """A pty's row as the service for *app_id* reports it; None removes
+        it (the pty exited). Another app id's rows are never touched."""
+        app_id = str(app_id)
         key = str(int(pty_id))
+        rows = self.ptys.get(app_id) or {}
         if row is None:
-            if self.ptys.pop(key, None) is None:
+            if key not in rows:
                 return
+            rows = {k: v for k, v in rows.items() if k != key}
         else:
-            if self.ptys.get(key) == row:
+            if rows.get(key) == row:
                 return
-            self.ptys[key] = dict(row)
+            rows = {**rows, key: dict(row)}
+        if rows:
+            self.ptys = {**self.ptys, app_id: rows}
+        else:
+            self.ptys = {k: v for k, v in self.ptys.items() if k != app_id}
         self.save()
 
-    def remove_pty(self, pty_id: int) -> None:
-        self.set_pty(pty_id, None)
+    def remove_pty(self, app_id: str, pty_id: int) -> None:
+        self.set_pty(app_id, pty_id, None)
 
-    def get_ptys(self) -> dict[int, dict]:
-        return {int(k): dict(v) for k, v in self.ptys.items()}
+    def get_ptys(self, app_id: str) -> dict[int, dict]:
+        """The rows of *app_id*'s service, by pty id."""
+        return {int(k): dict(v) for k, v in (self.ptys.get(str(app_id)) or {}).items()}
 
-    def set_pty_next_id(self, next_id: int) -> None:
-        """The id the service's next pty takes (PtyServer's counter)."""
+    def get_pty_next_id(self, app_id: str) -> int:
+        return self.pty_next_id.get(str(app_id), 1)
+
+    def set_pty_next_id(self, app_id: str, next_id: int) -> None:
+        """The id *app_id*'s next pty takes (its PtyServer's counter)."""
         next_id = int(next_id)
-        if not 1 <= next_id < 2**32 or next_id == self.pty_next_id:
+        app_id = str(app_id)
+        if not 1 <= next_id < 2**32 or next_id == self.pty_next_id.get(app_id):
             return
-        self.pty_next_id = next_id
+        self.pty_next_id = {**self.pty_next_id, app_id: next_id}
         self.save()
 
     # -- the tree copies in flight (PR-3.6, §8)

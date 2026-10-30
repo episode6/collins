@@ -277,11 +277,11 @@ EOF_AFTER_REAP_MS = 1000
 RECORD_DEBOUNCE_MS = 1000
 DEFAULT_VTE_VERSION = 8400
 MODEL_SUFFIX = ".model"
-# The keeper (PR-3.6): how long a reap waits for a kept child's status
-# after its EOF, how often it is asked again while the child lives on, how
-# often the keeper's list is read for a kept child that died with its slave
-# still held, and the two steps of the repaint after an adoption.
-KEPT_REAP_WAIT_S = 0.5
+# The keeper (PR-3.6): how often a kept child is asked for its status
+# again after its EOF while it lives on (the reap itself never waits on
+# the main loop), how often the keeper's list is read for a kept child that
+# died with its slave still held, and the two steps of the repaint after an
+# adoption.
 KEPT_REAP_POLL_MS = 1000
 KEPT_POLL_MS = 2000
 REPAINT_STEP_MS = 150
@@ -571,6 +571,13 @@ class PtyServer:
         self.keeper = keeper
         self._keeper_restart = keeper_restart
         self._kept_poll = 0
+        # The keeper's restart and the kept poll run off the main loop (S3
+        # of the review of PR 629): a worker brings the new keeper, another
+        # reads the list on a connection of its own, each landing at
+        # PRIORITY_DEFAULT.
+        self._keeper_restarting = False
+        self._poll_client: keeper_mod.KeeperClient | None = None
+        self._poll_running = False
 
     # -- the table
 
@@ -698,20 +705,33 @@ class PtyServer:
 
     # -- the keeper (PR-3.6)
 
-    def adopt(self, pty_id: int, master: int, pid: int, row: dict, alive: bool = True) -> Pty:
+    def adopt(
+        self,
+        pty_id: int,
+        master: int,
+        pid: int,
+        row: dict,
+        alive: bool = True,
+        grid: tuple[int, int] | None = None,
+    ) -> Pty:
         """A pty the keeper held across a service restart, made this
         server's: *row* is the pty table's (`Pty.row`: kind, cwd, size,
         session, box, plan, options, a shell's history), *master* the
         descriptor the keeper handed over (the server's now), *pid* the
-        child. The saved model is loaded, else a fresh one at the row's
-        grid; the read loop is installed; nothing is written to the child
-        (`repaint` is the caller's, once every pty is adopted). With
-        *alive* False the child is already gone: the pty is finished the
-        moment its EOF is read."""
+        child, *grid* the pty's size as the keeper read it off the master
+        (``TIOCGWINSZ``, the truth; the row's size is a second behind, S2
+        of the review of PR 629). The saved model is loaded, else a fresh
+        one at that grid; the read loop is installed; nothing is written to
+        the child (`repaint` is the caller's, once every pty is adopted).
+        With *alive* False the child is already gone: the pty is finished
+        the moment its EOF is read."""
         kind = row.get("kind") if row.get("kind") in KINDS else _AGENT
-        cols, rows = termscreen._clamp_grid(
-            row.get("cols") or termscreen.DEFAULT_COLS, row.get("rows") or termscreen.DEFAULT_ROWS
-        )
+        if grid and all(isinstance(n, int) and n > 0 for n in grid):
+            cols, rows = termscreen._clamp_grid(*grid)
+        else:
+            cols, rows = termscreen._clamp_grid(
+                row.get("cols") or termscreen.DEFAULT_COLS, row.get("rows") or termscreen.DEFAULT_ROWS
+            )
         pty = Pty(self, pty_id, kind, str(row.get("cwd") or "/"), cols, rows)
         pty.session = row.get("session") if isinstance(row.get("session"), str) else None
         pty.box = row.get("box") if isinstance(row.get("box"), str) else None
@@ -785,14 +805,23 @@ class PtyServer:
         every row and model file left in place for the next service's
         `adopt`. Waits a bounded time for the saves. Nothing is sent to
         the sinks: the server's clients were disconnected first."""
+        self._stop_keeper_work()
         for pty in list(self.ptys.values()):
             if not pty._finished:
                 pty.suspended = True
                 self._write_model(pty)
+                # A size change still on its debounce reaches the row now
+                # (S2): the next service adopts at the keeper's size anyway,
+                # but the row must not lag what it will read.
+                if pty._record_source:
+                    self._record_row(pty)
         self.wait_for_saves()
         if self._kept_poll:
             GLib.source_remove(self._kept_poll)
             self._kept_poll = 0
+        if self._poll_client is not None:
+            self._poll_client.close()
+            self._poll_client = None
         for pty in list(self.ptys.values()):
             if pty._finished:
                 continue
@@ -813,33 +842,81 @@ class PtyServer:
     def kept_ptys(self) -> list[Pty]:
         return [pty for pty in self.ptys.values() if pty.kept and not pty._finished]
 
+    def _stop_keeper_work(self) -> None:
+        """A stopping server (shutdown or suspend) brings no keeper back and
+        polls none: the restart callable is dropped first, so a keeper that
+        goes while the ptys end is simply gone, and the poll's connection
+        closed."""
+        self._keeper_restart = None
+        if self._kept_poll:
+            GLib.source_remove(self._kept_poll)
+            self._kept_poll = 0
+        if self._poll_client is not None:
+            self._poll_client.close()
+            self._poll_client = None
+
+    def unkept_ptys(self) -> list[Pty]:
+        """The live ptys this process forked itself (no keeper at their
+        spawn): what a stop must end the item-1 way, since no keeper holds
+        them (S1 of the review of PR 629)."""
+        return [pty for pty in self.ptys.values() if not pty.kept and not pty._finished]
+
     def _keeper_lost(self, exc: Exception) -> None:
         """A call on the keeper failed: it is gone. A new one is asked for
-        (*keeper_restart*) and handed every kept master with `adopt`; the
-        children's statuses are unknown from here on either way."""
+        (*keeper_restart*, on a worker: the start waits on `systemctl` and
+        a socket, which the main loop must not) and, when it lands, handed
+        every live master with `adopt` (`_keeper_restarted`): the kept
+        ones, whose children's statuses are unknown from then on, and the
+        unkept ones forked here meanwhile, which a keeper can hold though
+        it cannot wait for them, so a stop leaves them running too."""
         log.warning(
             "the keeper is gone (%s); %d kept pty(s) go on without a parent", exc, len(self.kept_ptys())
         )
         if self.keeper is not None:
             self.keeper.close()
         self.keeper = None
-        if self._keeper_restart is None:
+        if self._poll_client is not None:
+            self._poll_client.close()
+            self._poll_client = None
+        if self._keeper_restart is None or self._keeper_restarting:
             return
-        try:
-            fresh = self._keeper_restart()
-        except Exception:
-            log.exception("restarting the keeper failed")
-            return
-        if fresh is None:
-            return
-        for pty in self.kept_ptys():
-            if pty.pid is None or pty._reaped or pty.master < 0:
+        self._keeper_restarting = True
+        restart = self._keeper_restart
+
+        def work() -> None:
+            fresh = None
+            try:
+                fresh = restart()
+            except Exception:
+                log.exception("restarting the keeper failed")
+            GLib.idle_add(self._keeper_restarted, fresh, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="keeper-restart", daemon=True).start()
+
+    def _keeper_restarted(self, fresh) -> bool:
+        self._keeper_restarting = False
+        if fresh is None or self.keeper is not None:
+            if fresh is not None:
+                fresh.close()
+            return GLib.SOURCE_REMOVE
+        for pty in list(self.ptys.values()):
+            if pty._finished or pty.pid is None or pty._reaped or pty.master < 0:
                 continue
             try:
                 fresh.adopt(pty.id, pty.pid, pty.master)
             except keeper_mod.KeeperError as err:
                 log.warning("pty %d: the new keeper refused to adopt it: %s", pty.id, err)
+                if not fresh.connected:
+                    return GLib.SOURCE_REMOVE
+                continue
+            if not pty.kept:
+                # Forked here while no keeper was there: the keeper holds
+                # its master now, so it outlives this process (S1); its
+                # exit stays this process's to reap (the child watch).
+                pty.kept = True
         self.keeper = fresh
+        self._sync_kept_poll()
+        return GLib.SOURCE_REMOVE
 
     def _sync_kept_poll(self) -> None:
         if self.kept_ptys() and not self._kept_poll:
@@ -848,18 +925,55 @@ class PtyServer:
     def _on_kept_poll(self) -> bool:
         """The keeper's word on every kept child, for the exits the master
         does not announce (a leftover holding the slave) and for a keeper
-        that is gone (then `/proc`'s word)."""
+        that is gone (then `/proc`'s word). The list is read on a worker
+        over a connection of the poll's own (S3), landing in
+        `_apply_kept_list`; a tick whose read is still out is skipped."""
         kept = [pty for pty in self.kept_ptys() if not pty._reaped]
         if not kept:
             self._kept_poll = 0
             return GLib.SOURCE_REMOVE
-        listed: dict[int, dict] | None = None
-        if self.keeper is not None:
+        if self.keeper is None:
+            self._apply_kept_list(None, None)
+            return GLib.SOURCE_CONTINUE
+        if self._poll_running:
+            return GLib.SOURCE_CONTINUE
+        self._poll_running = True
+        path = self.keeper.socket_path
+        client = self._poll_client
+
+        def work() -> None:
+            nonlocal client
+            listed = None
+            error = None
             try:
-                listed = {int(entry["id"]): entry for entry in self.keeper.list(with_fds=False)}
+                if client is None or not client.connected:
+                    client = keeper_mod.KeeperClient(path)
+                    client.connect()
+                listed = {int(entry["id"]): entry for entry in client.list(with_fds=False)}
             except (keeper_mod.KeeperError, KeyError, TypeError, ValueError) as exc:
-                self._keeper_lost(exc)
-        for pty in kept:
+                error = exc
+                if client is not None:
+                    client.close()
+            GLib.idle_add(self._kept_list_landed, client, listed, error, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="keeper-poll", daemon=True).start()
+        return GLib.SOURCE_CONTINUE
+
+    def _kept_list_landed(self, client, listed, error) -> bool:
+        self._poll_running = False
+        self._poll_client = client if client is not None and client.connected else None
+        if error is not None and self.keeper is not None:
+            # The poll's own connection failed: the keeper is gone, or
+            # stalled past the call's bound. Either way it is lost.
+            self._keeper_lost(error)
+            listed = None
+        self._apply_kept_list(listed, error)
+        return GLib.SOURCE_REMOVE
+
+    def _apply_kept_list(self, listed: dict[int, dict] | None, error) -> None:
+        for pty in [pty for pty in self.kept_ptys() if not pty._reaped]:
+            if pty._child_watch:
+                continue  # forked here, held by a keeper since: its exit is the watch's
             if listed is not None:
                 entry = listed.get(pty.id)
                 if entry is None:
@@ -873,7 +987,6 @@ class PtyServer:
                     continue
             if pty.pid is not None and not keeper_mod.pid_alive(pty.pid):
                 self._on_kept_exited(pty, None)
-        return GLib.SOURCE_CONTINUE
 
     def _reap_kept(self, pty: Pty) -> None:
         """The master read EOF on a kept pty: the keeper's word on the child,
@@ -882,9 +995,13 @@ class PtyServer:
             return
         status: int | None = None
         alive = True
+        if pty._child_watch:
+            return  # forked here, adopted by a keeper since: the child watch reaps it
         if self.keeper is not None:
             try:
-                status, alive = self.keeper.reap(pty.id, wait=KEPT_REAP_WAIT_S)
+                # No wait on the main loop (S3): a child still closing is
+                # asked again on the timer below.
+                status, alive = self.keeper.reap(pty.id, wait=0)
             except keeper_mod.KeeperError as exc:
                 self._keeper_lost(exc)
                 alive = pty.pid is not None and keeper_mod.pid_alive(pty.pid)
@@ -1410,6 +1527,7 @@ class PtyServer:
     def shutdown(self) -> None:
         """Save every model and close every pty (§3.10), and wait
         a bounded time for the saves in flight."""
+        self._stop_keeper_work()
         ptys = list(self.ptys.values())
         for pty in ptys:
             if not pty._finished:

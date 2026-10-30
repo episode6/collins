@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 
 import json
 import time
@@ -1581,24 +1581,55 @@ def test_sandbox_state_survives_junk_on_disk(app_state):
         assert app_state.AppState().sandboxed_sessions == {}
 
 
-def test_the_pty_table_is_written_and_read_back(app_state):
+def test_the_pty_table_is_written_and_read_back_per_app_id(app_state):
+    """PR-3.6's ruling (the review of PR 629, M4): the table is keyed by
+    app id, since state.json is shared by every app id and each has a
+    keeper of its own; one app id's writes never touch another's rows."""
+    app, other = "com.example.A", "com.example.B"
     state = app_state.AppState()
-    state.set_pty(3, {"kind": "shell", "cwd": "/tmp", "cols": 80, "rows": 24, "pid": 100})
-    state.set_pty(7, {"kind": "agent", "cwd": "/tmp", "cols": 120, "rows": 40, "session": "s1"})
+    state.set_pty(app, 3, {"kind": "shell", "cwd": "/tmp", "cols": 80, "rows": 24, "pid": 100})
+    state.set_pty(app, 7, {"kind": "agent", "cwd": "/tmp", "cols": 120, "rows": 40, "session": "s1"})
+    state.set_pty(other, 3, {"kind": "agent", "cwd": "/elsewhere", "cols": 80, "rows": 24})
     again = app_state.AppState()
-    assert again.get_ptys() == {
+    assert again.get_ptys(app) == {
         3: {"kind": "shell", "cwd": "/tmp", "cols": 80, "rows": 24, "pid": 100},
         7: {"kind": "agent", "cwd": "/tmp", "cols": 120, "rows": 40, "session": "s1"},
     }
-    again.remove_pty(3)
-    again.remove_pty(99)  # nothing to do, nothing written
-    assert app_state.AppState().get_ptys() == {7: again.get_ptys()[7]}
+    assert again.get_ptys(other) == {3: {"kind": "agent", "cwd": "/elsewhere", "cols": 80, "rows": 24}}
+    assert again.get_ptys("com.example.Nobody") == {}
+    again.remove_pty(app, 3)
+    again.remove_pty(app, 99)  # nothing to do, nothing written
+    assert app_state.AppState().get_ptys(app) == {7: again.get_ptys(app)[7]}
+    assert app_state.AppState().get_ptys(other) == again.get_ptys(other)
+    again.remove_pty(other, 3)
+    assert app_state.AppState().ptys == {app: {"7": again.get_ptys(app)[7]}}  # an empty app id goes
 
 
-def test_the_next_pty_id_is_persisted(app_state):
+def test_the_next_pty_id_is_persisted_per_app_id(app_state):
+    app = "com.example.A"
     state = app_state.AppState()
-    assert state.pty_next_id == 1
-    state.set_pty_next_id(42)
-    assert app_state.AppState().pty_next_id == 42
-    state.set_pty_next_id(0)  # out of range: ignored
-    assert app_state.AppState().pty_next_id == 42
+    assert state.get_pty_next_id(app) == 1
+    state.set_pty_next_id(app, 42)
+    assert app_state.AppState().get_pty_next_id(app) == 42
+    assert app_state.AppState().get_pty_next_id("com.example.B") == 1
+    state.set_pty_next_id(app, 0)  # out of range: ignored
+    assert app_state.AppState().get_pty_next_id(app) == 42
+
+
+def test_the_flat_pty_table_of_a_keeperless_service_is_dropped(app_state):
+    """The shape before PR-3.6 (pty id -> row, a scalar next id) names ptys
+    no keeper held, so nothing of it survives a load."""
+    import json
+
+    app_state.AppState().save()
+    path = app_state._STATE_FILE
+    data = json.loads(path.read_text())
+    data["ptys"] = {"3": {"kind": "shell", "cwd": "/tmp"}, "7": {"kind": "agent", "cwd": "/tmp"}}
+    data["pty_next_id"] = 8
+    path.write_text(json.dumps(data))
+    state = app_state.AppState()
+    assert state.ptys == {} and state.pty_next_id == {}
+    assert app_state._clean_ptys({"com.example.A": {"1": {"kind": "shell"}, "x": {}}, "9": {"1": {}}}) == {
+        "com.example.A": {"1": {"kind": "shell"}}
+    }
+    assert app_state._clean_next_id({"com.example.A": 5, "com.example.B": 0, "": 3}) == {"com.example.A": 5}

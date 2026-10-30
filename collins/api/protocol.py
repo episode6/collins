@@ -2672,7 +2672,13 @@ _TABLE: tuple[MessageType, ...] = (
                 # The keeper's pid (PR-3.6, §3.10 item 2): present when a
                 # keeper holds the ptys, so a restart of the service keeps
                 # every session running; absent when a restart ends them.
+                # `unkept`: the agent ptys forked while the keeper was away,
+                # which a restart still ends and resumes. `keeper_mismatch`:
+                # a keeper of another protocol holds that many ptys and the
+                # service runs without one (stop it to go on with a keeper).
                 "keeper": _i(1, PID_MAX),
+                "unkept": _COUNT,
+                "keeper_mismatch": _COUNT,
                 # Where the service's `claude` lookup lands ("" when it
                 # finds none): what the welcome gate asks (welcomegate).
                 # Absent from an older service, which the client reads as

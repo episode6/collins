@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -5956,7 +5956,10 @@ class MainWindow(Adw.ApplicationWindow):
         # With a keeper (PR-3.6) the sessions run on through the restart:
         # the dialog says so, and *Restart Now* is no longer destructive.
         keeper = bool(status.get("keeper"))
-        body = quitrules.restart_body(sessions=sessions, busy=busy, background=background, keeper=keeper)
+        body = quitrules.restart_body(
+            sessions=sessions, busy=busy, background=background, keeper=keeper,
+            unkept=int(status.get("unkept") or 0), mismatch=int(status.get("keeper_mismatch") or 0),
+        )
         choices = []
         if busy:
             choices.append(("idle", _("Restart When Idle"), ""))

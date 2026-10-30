@@ -95,21 +95,6 @@ def keeper_wanted() -> bool:
     return (os.environ.get("COLLINS_KEEPER") or "").strip().lower() not in KEEPER_OFF
 
 
-def connect_keeper(path: str, wait_s: float = 0.0) -> keeper_mod.KeeperClient | None:
-    """A connected client of the keeper at *path*, or None when none
-    answers within *wait_s*."""
-    deadline = time.monotonic() + wait_s
-    while True:
-        client = keeper_mod.KeeperClient(path)
-        try:
-            client.connect()
-            return client
-        except keeper_mod.KeeperError:
-            if time.monotonic() >= deadline:
-                return None
-            time.sleep(0.05)
-
-
 def start_keeper_process(app_id: str, path: str) -> bool:
     """Bring a keeper up for *app_id* on *path*: the user unit where it
     applies (the default id, `systemctl` present), else a detached
@@ -151,10 +136,69 @@ def start_keeper_process(app_id: str, path: str) -> bool:
     return True
 
 
+class KeeperMismatch(Exception):
+    """A keeper of another protocol holds *held* ptys (PR-3.6's ruling on
+    an older keeper): the service runs without a keeper and says so."""
+
+    def __init__(self, protocol: object, held: int) -> None:
+        super().__init__(f"the keeper speaks protocol {protocol} and holds {held} pty(s)")
+        self.protocol = protocol
+        self.held = held
+
+
+def _probe_keeper(path: str) -> keeper_mod.KeeperClient | None:
+    """One connect: the client, None when nothing answers, or
+    `KeeperMismatch` when a keeper of another protocol answers. A keeper
+    outside the window that holds nothing is stopped (SIGTERM, a bounded
+    wait) so the one started next takes its place; one that holds ptys is
+    left exactly as it is, neither replaced nor adopted from."""
+    client = keeper_mod.KeeperClient(path)
+    try:
+        client.connect()
+        return client
+    except keeper_mod.KeeperError as exc:
+        if not exc.protocol_mismatch:
+            return None
+        held = exc.reply.get("held")
+        held = held if isinstance(held, int) and held > 0 else 0
+        if held:
+            raise KeeperMismatch(exc.reply.get("protocol"), held) from None
+        pid = keeper_mod.read_pid(path)
+        log.warning(
+            "the keeper on %s speaks protocol %s and holds nothing; stopping it (pid %s)",
+            path, exc.reply.get("protocol"), pid,
+        )
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + KEEPER_WAIT_S
+            while time.monotonic() < deadline and keeper_mod.pid_alive(pid):
+                time.sleep(0.05)
+        return None
+
+
+def connect_keeper(path: str, wait_s: float = 0.0) -> keeper_mod.KeeperClient | None:
+    """A connected client of the keeper at *path*, or None when none
+    answers within *wait_s*; `KeeperMismatch` for one of another protocol
+    that holds ptys."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        client = _probe_keeper(path)
+        if client is not None:
+            return client
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
 def find_or_start_keeper(app_id: str) -> keeper_mod.KeeperClient | None:
     """The keeper for *app_id*, connected: the one running, else one
     started here; None when none can be had (the service then forks its
-    ptys itself, and a stop ends every session), or when it is off."""
+    ptys itself, and a stop ends every session), or when it is off;
+    `KeeperMismatch` when a keeper of another protocol holds ptys (the
+    service runs without one, touches no row and reports it)."""
     if not keeper_wanted():
         return None
     path = api_server.keeper_socket_path(app_id)
@@ -498,13 +542,12 @@ class Service:
         if api_server.probe_socket(path) == "live":
             raise OSError(errno.EADDRINUSE, f"a service is already listening on {path}")
         self.environment = merge_environment(dict(os.environ), login_shell_environment())
-        self.core = ServiceCore.with_state(environment=lambda: dict(self.environment))
-        self.core.app_id = app_id
+        self.core = ServiceCore.with_state(environment=lambda: dict(self.environment), app_id=app_id)
         # The keeper, before anything is spawned (PR-3.6); its loss mid-run
         # brings another (`PtyServer._keeper_lost`).
-        self.keeper = find_or_start_keeper(app_id)
+        self.keeper = self._find_keeper(app_id)
         if self.keeper is not None:
-            self.core.attach_keeper(self.keeper, restart=lambda: find_or_start_keeper(app_id))
+            self.core.attach_keeper(self.keeper, restart=lambda: self._find_keeper(app_id))
             log.info("the keeper is pid %s", self.keeper.pid)
         self._load_stubs()
         self.server = api_server.ApiServer(
@@ -519,6 +562,19 @@ class Service:
         # systemd's notify address, kept here: `start` pops it from the
         # environment after READY=1, and `stop` still owes STOPPING=1.
         self.notify_socket = os.environ.get("NOTIFY_SOCKET", "")
+
+    def _find_keeper(self, app_id: str) -> keeper_mod.KeeperClient | None:
+        """`find_or_start_keeper`, a mismatch recorded on the core (its
+        `service.status` says `keeper_mismatch`) and answered with no
+        keeper: the ruling on an older keeper that holds ptys."""
+        try:
+            client = find_or_start_keeper(app_id)
+        except KeeperMismatch as exc:
+            log.error("%s; running without a keeper, its ptys left as they are", exc)
+            self.core.keeper_mismatch = exc.held
+            return None
+        self.core.keeper_mismatch = 0
+        return client
 
     def _load_stubs(self) -> None:
         """The e2e checks' stubs (scripts/e2e_stubs.py), only under the
@@ -613,10 +669,22 @@ class Service:
             # of closing them one by one as their sessions end.
             self.server.stop()
             if self.core.keeper_holds:
-                kept = self.core.suspend()
-                keeper_pid = self.keeper.pid if self.keeper else "?"
-                log.info("leaving %d pty(s) to the keeper (pid %s)", kept, keeper_pid)
-                self._stopped()
+                # The agent ptys no keeper holds (forked while it was lost,
+                # S1) end the item-1 way first, recorded to resume; the
+                # rest are left to the keeper.
+                unkept = set(self.core.unkept_agent_ptys())
+
+                def suspended() -> None:
+                    kept = self.core.suspend(keep_resume=bool(unkept))
+                    keeper_pid = self.keeper.pid if self.keeper else "?"
+                    log.info("leaving %d pty(s) to the keeper (pid %s)", kept, keeper_pid)
+                    self._stopped()
+
+                if unkept:
+                    log.info("ending %d unkept session(s) first, recorded to resume", len(unkept))
+                    self.core.stop_sessions(done=suspended, only=unkept)
+                else:
+                    suspended()
                 return
             ended = self.core.stop_sessions(done=self._stopped)
             if ended:

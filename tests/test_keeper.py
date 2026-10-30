@@ -325,7 +325,11 @@ def test_reap_adopt_and_the_refusals(kept, tmp_path):
     assert reply["v"] == keeper.KEEPER_PROTOCOL and reply["keeper"] == kept.pid
     keeper._send(client.sock, {"t": "list", "v": 99})
     line, _ = keeper._recv_line(client.sock, client._buffer)
-    assert json.loads(line) == {"ok": False, "error": "protocol", "protocol": 1, "keeper": kept.pid, "v": 1}
+    # The refusal says how many ptys the keeper holds (`held`): what a newer
+    # service decides by (PR-3.6's ruling on an older keeper).
+    assert json.loads(line) == {
+        "ok": False, "error": "protocol", "protocol": 1, "held": 1, "keeper": kept.pid, "v": 1,
+    }
 
 
 def test_sigterm_ends_every_child_and_removes_the_socket(kept):
@@ -557,6 +561,8 @@ def test_a_lost_keeper_is_restarted_and_handed_the_masters(kept, runtime, tmp_pa
         pump(lambda: any(e["t"] == "pty-exited" for e in sink.events), timeout=6, what="pty-exited")
         assert next(e for e in sink.events if e["t"] == "pty-exited")["status"] is None
     finally:
+        server.shutdown()  # first: no restart, no poll, once the keepers go
+        pump(lambda: not server.ptys, timeout=8, what="the ptys to end")
         kill_child(child)
         for proc in second:
             proc.stop()
@@ -597,13 +603,13 @@ def test_a_service_restart_keeps_the_shell_and_the_next_service_adopts_it(tmp_pa
         client.request({"t": "attach", "pty": pty, "cols": 100, "rows": 30})
         link.send_input(pty, b"echo kept-$((40+2))\r")
         pump(lambda: any(b"kept-42" in d for p, d, f in output if f == 0), timeout=10, what="the echo")
-        child = live.state()["ptys"][str(pty)]["pid"]
+        child = live.state()["ptys"][live.app_id][str(pty)]["pid"]  # the table by app id (M4)
         link.shutdown()
         assert live.stop(signal.SIGTERM) == 0
         state = live.state()
-        assert str(pty) in state["ptys"] and state.get("resume_on_start", []) == []
+        assert str(pty) in state["ptys"][live.app_id] and state.get("resume_on_start", []) == []
         assert keeper.pid_alive(child) and keeper.pid_alive(keeper_pid)
-        model = tmp_path / "pty" / f"{pty}.model"
+        model = tmp_path / "pty" / live.app_id / f"{pty}.model"  # the models by app id (M4)
         assert model.exists()
         # The next service.
         live.proc = None
