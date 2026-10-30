@@ -276,9 +276,23 @@ def process_start_wall(pid: int) -> float | None:
 
 
 def is_pty_master(fd: int) -> bool:
-    """Whether *fd* is a pty master (``/dev/ptmx`` behind it)."""
+    """Whether *fd* is a pty master: it answers ``TIOCGPTN`` (its slave's
+    number), which no other file does. The link under ``/proc/self/fd``
+    is the fallback where the ioctl's constant is missing: ``/dev/ptmx``
+    on a host, ``/dev/pts/ptmx`` inside a container (CI), so either
+    ``ptmx`` name passes."""
+    # Linux's TIOCGPTN (_IOR('T', 0x30, unsigned int)); `termios` lacks the
+    # name on some builds, so the number is spelled out.
+    number = getattr(termios, "TIOCGPTN", 0x80045430)
     try:
-        return os.readlink(f"/proc/self/fd/{fd}") == "/dev/ptmx"
+        fcntl.ioctl(fd, number, b"\0" * 4)
+        return True
+    except OSError:
+        pass
+    # Every non-master (a slave, a pipe, /dev/null) answers ENOTTY; the
+    # link settles a master on a kernel that lacks the ioctl.
+    try:
+        return os.path.basename(os.readlink(f"/proc/self/fd/{fd}")) == "ptmx"
     except OSError:
         return False
 
