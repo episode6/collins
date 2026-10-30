@@ -82,6 +82,7 @@ os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"
 os.environ["XDG_DATA_HOME"] = f"{HOME}/.local/share"
 os.environ["SANDBOX_FAKE_LOG"] = f"{E2E}/bwrap.log"
+os.environ["RESTART_WINCH_LOG"] = f"{E2E}/winch.log"
 os.environ.pop("COLLINS_KEEPER", None)  # the keeper is the point
 os.environ.pop("TMPDIR", None)
 for var in list(os.environ):
@@ -93,6 +94,8 @@ BOXED = f"{E2E}/dev/alpha"  # sandboxed by the project default
 GRANT = f"{HOME}/dev/granted"  # allowed to the boxed session while it runs
 SHIM = f"{E2E}/bin/claude"
 STATE_FILE = f"{E2E}/config/collins/state.json"
+MODELS = f"{E2E}/pty/{os.environ['COLLINS_APP_ID']}"  # the saved models, by app id
+WINCH_LOG = f"{E2E}/winch.log"  # the stubs' SIGWINCH sizes (S8: the repaint proven)
 TYPED = "typed before the restart"
 AFTER = "typed after the restart"
 
@@ -119,7 +122,7 @@ with open(STATE_FILE, "w", encoding="utf-8") as fh:
 # and a line editor that echoes what it is typed, so the screen holds the
 # first service's typing for the second one to show.
 _SHIM = r"""#!/usr/bin/env python3
-import json, os, sys, time, tty, uuid
+import json, os, signal, sys, time, tty, uuid
 projects = os.environ["COLLINS_PROJECTS_DIR"]
 cwd = os.getcwd()
 encoded = "".join(c if c.isalnum() else "-" for c in cwd)
@@ -134,10 +137,22 @@ text = ""
 def draw():
     sys.stdout.write("\r\x1b[K❯ " + text)
     sys.stdout.flush()
+# The CLI repaints on SIGWINCH (F6/F12); so does this stub, logging each
+# size it saw (S8: the adoption's repaint, a resize of one row and back,
+# is proven by the sizes the stub was shown, in order).
+def winch(*_a):
+    size = os.get_terminal_size(0)
+    with open(os.environ["RESTART_WINCH_LOG"], "a") as fh:
+        fh.write(f"{os.getcwd()} {size.columns} {size.lines}\n")
+    draw()
+signal.signal(signal.SIGWINCH, winch)
 sys.stdout.write("session " + sid + "\r\n")
 draw()
 while True:
-    chunk = os.read(0, 4096)
+    try:
+        chunk = os.read(0, 4096)
+    except InterruptedError:
+        continue
     if not chunk:
         break
     for b in chunk:
@@ -185,12 +200,14 @@ FAILED = 0
 
 def check(label: str, ok: bool, detail: object = "") -> None:
     global PASSED, FAILED
+    # Flushed: a check that dies on its deadline (os._exit) would otherwise
+    # take every buffered result line with it.
     if ok:
         PASSED += 1
-        print(f"  ok  {label}")
+        print(f"  ok  {label}", flush=True)
     else:
         FAILED += 1
-        print(f"FAIL  {label}  {detail!r}")
+        print(f"FAIL  {label}  {detail!r}", flush=True)
 
 
 def watchdog() -> None:
@@ -314,7 +331,7 @@ def steps():
     check("…and registered with the live grants", probe("grants", "registered", box) is True)
     check("…its lease is the first service's pid", read_lease(box).get("pid") == first_pid, read_lease(box))
 
-    rows_before = state_json().get("ptys") or {}
+    rows_before = (state_json().get("ptys") or {}).get(os.environ["COLLINS_APP_ID"]) or {}
     plain_pty, boxed_pty = plain._view.pty, boxed._view.pty
     both = {str(plain_pty), str(boxed_pty)}
     check("the pty table holds both", both <= set(rows_before), sorted(rows_before))
@@ -327,12 +344,13 @@ def steps():
     check("the keeper lives on", alive(keeper_pid))
     check("both agents live on under it", all(alive(pid) for pid in pids.values()), pids)
     after = state_json()
-    check("the pty table kept both rows", {str(plain_pty), str(boxed_pty)} <= set(after.get("ptys") or {}))
+    kept_rows = (after.get("ptys") or {}).get(os.environ["COLLINS_APP_ID"]) or {}
+    check("the pty table kept both rows", both <= set(kept_rows), sorted(kept_rows))
     check("nothing is recorded to resume", after.get("resume_on_start", []) == [])
     check(
         "both saved models are on disk",
-        all(os.path.isfile(f"{E2E}/pty/{pty}.model") for pty in (plain_pty, boxed_pty)),
-        sorted(os.listdir(f"{E2E}/pty")) if os.path.isdir(f"{E2E}/pty") else None,
+        all(os.path.isfile(f"{MODELS}/{pty}.model") for pty in (plain_pty, boxed_pty)),
+        sorted(os.listdir(MODELS)) if os.path.isdir(MODELS) else None,
     )
     check("the plan file survived the stop", bool(plan_path) and os.path.isfile(plan_path), plan_path)
 
@@ -370,6 +388,22 @@ def steps():
             (vte_lines(tab)[-3:], model_lines(tab, pty)[-3:]),
         )
     check("the first service's typing is on the plain tab", any(TYPED in line for line in vte_lines(plain)))
+    # The repaint (S8): each stub saw a resize of one row and back, in that
+    # order, and the pty's size now equals the tab's grid.
+    try:
+        with open(WINCH_LOG, encoding="utf-8") as fh:
+            winches = [line.split() for line in fh if line.strip()]
+    except OSError:
+        winches = []
+    for name, tab, pty, cwd in (("plain", plain, plain_pty, PLAIN), ("boxed", boxed, boxed_pty, BOXED)):
+        info = tab._client.request({"t": "pty.info", "pty": pty})
+        seen = [(int(c), int(r)) for where, c, r in winches if where == cwd]  # the stub logs its cwd
+        cols, rows = info.get("cols"), info.get("rows")
+        step = (cols, rows + 1) if rows < 500 else (cols, rows - 1)
+        repainted = any(seen[i] == step and seen[i + 1] == (cols, rows) for i in range(len(seen) - 1))
+        check(f"the {name} agent was shown one row more, then its size again (the repaint)", repainted, seen)
+        grid = (tab.terminal.get_column_count(), tab.terminal.get_row_count())
+        check(f"the {name} pty's size is the tab's grid", (cols, rows) == grid, ((cols, rows), grid))
     plain.feed_child_text(AFTER + "\r")
     for _ in range(50):
         if any(("you said: " + AFTER) in line for line in vte_lines(plain)):
@@ -387,8 +421,12 @@ def steps():
     check("…its lease rewritten under its pid", read_lease(box).get("pid") == second_pid, read_lease(box))
     check("…and registered with the live grants again", probe("grants", "registered", box) is True)
     check("the plan file was kept from the sweep", os.path.isfile(plan_path), plan_path)
+    rows = {}
     for _ in range(50):
-        grants = app._service_link.call({"t": "sandbox.grants", "box": box})
+        try:
+            grants = app._service_link.call({"t": "sandbox.grants", "box": box})
+        except Exception as exc:  # noqa: BLE001 - reported below, never raised through the tick
+            grants = {"error": repr(exc)}
         rows = {row["path"]: row for row in grants.get("grants", [])}
         if rows.get(GRANT, {}).get("status") == status_before:
             break
@@ -398,6 +436,16 @@ def steps():
         rows.get(GRANT, {}).get("status") == status_before,
         (rows.get(GRANT), status_before),
     )
+    # Where this machine delivers grants live (bindfs, fusermount3, FUSE,
+    # a shared mount holding the sandbox root) the grant must be live again
+    # (mounted again by the new service); where it cannot (CI) both readings
+    # are "pending", and the lines above prove the registration alone.
+    capable = probe("grants", "capable")
+    if capable == "":
+        live_again = rows.get(GRANT, {}).get("status") == "live"
+        check("…live again where the machine delivers grants live", live_again, rows.get(GRANT))
+    else:
+        print(f"      (grants are not delivered live here: {capable!r}; registration proven, not the mount)")
     check("the boxed tab's mirror still names its box", boxed.sandbox_box == box, boxed.sandbox_box)
     app.quit()
 

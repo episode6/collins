@@ -16,6 +16,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 
+def _die_with_parent() -> None:
+    """PR_SET_PDEATHSIG SIGTERM, in the child before its exec."""
+    import ctypes
+
+    try:
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM, 0, 0, 0)
+    except OSError:
+        pass
+
+
 class LiveService:
     def __init__(
         self, tmp_path: Path, app_id: str = "com.example.Live", debug: bool = True, keeper: bool = False
@@ -60,6 +70,7 @@ class LiveService:
             '{"settings": {"welcome_seen": true, "title_model": "none"}}'
         )
         self.proc: subprocess.Popen | None = None
+        self.keeper_proc: subprocess.Popen | None = None
 
     @property
     def socket(self) -> str:
@@ -71,6 +82,24 @@ class LiveService:
     def start(self, wait_s: float = 20.0) -> subprocess.Popen:
         from collins.api import server as api_server
 
+        if self.env.get("COLLINS_KEEPER") != "none" and self.keeper_pid() is None:
+            # The keeper as the test's own child, dying with it (S7 of the
+            # review of PR 629): a pytest run killed in CI leaves none.
+            self.keeper_proc = subprocess.Popen(
+                [sys.executable, "-m", "collins.service.keeper", "--app-id", self.app_id, "--socket",
+                 api_server.keeper_socket_path(self.app_id)],
+                env=self.env,
+                cwd=REPO,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=_die_with_parent,
+            )  # fmt: skip
+            deadline = time.monotonic() + wait_s
+            while self.keeper_pid() is None:
+                if time.monotonic() >= deadline or self.keeper_proc.poll() is not None:
+                    raise RuntimeError("collins-keeper did not come up")
+                time.sleep(0.05)
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "collins.service.main", "--app-id", self.app_id],
             env=self.env,
@@ -113,9 +142,11 @@ class LiveService:
         return keeper.read_pid(api_server.keeper_socket_path(self.app_id))
 
     def stop_keeper(self, wait_s: float = 10.0) -> None:
-        """SIGTERM the keeper the service started (it ends its children) and
-        wait for it; a no-op with none."""
+        """SIGTERM the keeper (it ends its children) and wait for it; a
+        no-op with none."""
         pid = self.keeper_pid()
+        if pid is None and self.keeper_proc is not None and self.keeper_proc.poll() is None:
+            pid = self.keeper_proc.pid
         if pid is None:
             return
         try:
