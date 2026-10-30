@@ -390,8 +390,13 @@ the link is down (tabs whose ptys went with the service close as their
 reattach fails; that must not shrink the record) and after the last
 window's quit. `MainWindow.reopen_tabs()` (the launch, from
 `do_activate`) and `App._on_connected` after a reconnect (after
-`reattach_tabs`: every tab re-`attach`es its pty for a redraw, and one whose
-pty is gone is marked ended and offers resume) reopen each entry not shown: attached when the service
+`reattach_tabs`: every tab re-`attach`es its pty for a redraw, one whose
+pty is gone is marked ended and offers resume, and then
+`_resync_statuses` says again which rows the window's tabs show — a row's
+`status` is the client's word kept on the service's items in memory, D29,
+so a service that restarted under the tabs starts every row blank and
+would lose the sidebar's open rows and the footer's "N open" without it;
+to the same service the mirror sends nothing, since nothing differs) reopen each entry not shown: attached when the service
 runs it, resumed when not (a `pty:` entry that no longer runs is dropped);
 a session the store has not scanned yet waits for its first refresh. With
 `open_tabs` empty the launch falls back to `restore_last_session`.

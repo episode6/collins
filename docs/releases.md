@@ -99,7 +99,8 @@ downloads of each version, see the
   terminals over, loads the screen it had saved for each, makes every
   program repaint, holds each sandbox again with its live grants mounted
   again, and every open tab shows its session where it was, mid-turn
-  included. The *Restart service* dialog says so instead of counting the
+  included, its row still an open row in the sidebar and in the footer's
+  count. The *Restart service* dialog says so instead of counting the
   sessions that would end, and *Restart Now* is no longer destructive. A
   crash of the service ends nothing either. To stop every session for
   good, stop the keeper (`systemctl --user stop collins-keeper.service`).

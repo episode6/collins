@@ -1193,6 +1193,23 @@ class MainWindow(Adw.ApplicationWindow):
                     shell.reattach()
                 except Exception:
                     log.exception("a panel shell failed to reattach")
+        self._resync_statuses()
+
+    def _resync_statuses(self) -> None:
+        """Say again what this window shows (D29: a row's `status` is what a
+        person did at a client's screen, kept on the service's items in
+        memory). A service that restarted under the tabs (PR-3.6) starts
+        every row blank and knows nothing of the tabs it adopted the ptys
+        of, so the sidebar's "open" rows and the footer's count would stay
+        lost; a reconnect to the same service finds nothing to change (the
+        mirror sends only what differs)."""
+        rows = set(self._pages)
+        rows.update(sid for sid in self.store.row_ids() if self._is_detached(sid))
+        for row_id in rows:
+            try:
+                self._sync_status(row_id)
+            except Exception:
+                log.exception("a row's status did not resync")
 
     def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):

@@ -211,7 +211,9 @@ badge) and builds the connection. `collins/connection.py` is the GTK-free
 `ConnectionManager`: find → start (`systemctl --user start
 collins-service.service` for the default app id, else a detached spawn of
 `collins-service`) → wait → connect → connected; on lost, backoff 1, 2, 5,
-10, 30 s, the mirrors `reset()` and resubscribed, every tab re-attached, the
+10, 30 s, the mirrors `reset()` and resubscribed, every tab re-attached and
+its row's in-tab `status` said again (a restarted service starts every row
+blank), the
 window's "Reconnecting" banner meanwhile; a protocol mismatch is its own
 state. **Remote** (§3.24, D2, D10): `collins/connections.py` (GTK-free) is
 the reader and validator of `ui-state.json`'s `connections` list and

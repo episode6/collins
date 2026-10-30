@@ -8,8 +8,9 @@ record's timestamp and never binds an id another live pty holds), N-N1
 is held only while its child and the unread keeper live), V2-S2 (the
 hand-over by duplicates, a non-master refused), V2-N1 (`read_pid` names
 the keeper of this socket), and its round 3: V3-N1 (a master is a device,
-never a name), V3-N2 (a bare cmdline is the default socket's keeper only).
-GTK-free."""
+never a name), V3-N2 (a bare cmdline is the default socket's keeper only),
+and the by-hand run's finding (a restarted service starts every row's
+status blank; the client says it again). GTK-free."""
 
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from pathlib import Path
 
 import inproc
 import pytest
-from test_keeper import ENV, KeeperProcess, pump
+from test_keeper import ENV, KeeperProcess, kill_child, pump, settle
 
 from collins import sandboxplan
 from collins.api import protocol
@@ -457,3 +458,47 @@ def test_a_bare_keeper_cmdline_serves_only_the_default_socket(tmp_path, monkeypa
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_a_restarted_service_starts_every_row_status_blank(kept, tmp_path, app_state, projects_dir):
+    """The by-hand run's finding (PR 629): a row's `status` ("open",
+    "attention") is what a person did at a client's screen (D29), kept on
+    the service's items in memory and nowhere else. The service that
+    restarts under the tabs adopts their ptys and sessions but starts every
+    row blank, so the client must say it again (`MainWindow._resync_statuses`
+    after `reattach_tabs`); this pins the premise on the service side."""
+    from collins.sessions import discover_sessions
+    from collins.store import SessionStore
+
+    _root, ids = projects_dir
+    alpha = ids["alpha1"]
+    state = app_state.AppState()
+    app = "com.example.Status"
+
+    def core_with_rows() -> ServiceCore:
+        core = ServiceCore(state=state, state_dir=tmp_path / "pty", app_id=app)
+        store = SessionStore(state)
+        core.start_store(store)
+        store._last_sessions = discover_sessions()
+        store._apply()
+        core.attach_keeper(kept.client())
+        return core
+
+    first = core_with_rows()
+    pty_id = first.ptys.spawn("agent", ["sleep", "60"], str(tmp_path), ENV, 80, 24, session=alpha)
+    child = first.ptys.get(pty_id).pid
+    try:
+        first.store.set_status(alpha, "open")  # what a client's `store.flags` does
+        assert first.store.get_item(alpha).status == "open"
+        first.ptys.suspend()
+        again = core_with_rows()
+        assert again.adopt_ptys() == [pty_id]
+        assert again.ptys.get(pty_id).session == alpha and again.ptys.get(pty_id).pid == child
+        # Adopted, with its session, and blank: nothing on the service knows
+        # a tab shows it until a client says so.
+        assert again.store.get_item(alpha).status == ""
+        again.store.set_status(alpha, "open")
+        assert again.store.get_item(alpha).status == "open"
+    finally:
+        kill_child(child)
+        settle(0.1)

@@ -278,6 +278,18 @@ def model_lines(tab, pty: int) -> list[str]:
     return [line.rstrip() for line in screen["capture"].splitlines() if line.strip()]
 
 
+IN_TAB = ("open", "attention")  # sidebar._IN_TAB_STATUSES: a tab shows the row, selected or not
+
+
+def row_status(session_id: str | None) -> str | None:
+    item = app.store.get_item(session_id) if session_id else None
+    return None if item is None else item.status
+
+
+def footer_text(win) -> str:
+    return win.sidebar.footer.get_label() or ""
+
+
 def steps():
     global service
     win = app.get_active_window()
@@ -300,6 +312,15 @@ def steps():
     ids = (plain.session_id, boxed.session_id)
     check("both sessions resolved", all(ids), ids)
     check("the second session launched sandboxed", boxed.sandboxed and bool(boxed.sandbox_box), ids)
+    # The rows' in-tab status (D29: the client's word) and the footer's count
+    # of them, to survive the restart below.
+    for _ in range(50):
+        if all(row_status(sid) in IN_TAB for sid in ids) and "2 open" in footer_text(win):
+            break
+        yield 100
+    check("both rows are open rows before the restart", all(row_status(sid) in IN_TAB for sid in ids),
+          [row_status(sid) for sid in ids])
+    check("…and the footer counts the two open tabs", "2 open" in footer_text(win), footer_text(win))
     box = boxed.sandbox_box
     plan_path = boxed.sandbox_plan_path
     check("…with a plan file", bool(plan_path) and os.path.isfile(plan_path), plan_path)
@@ -415,6 +436,16 @@ def steps():
     items = [model.get_item(i) for i in range(model.get_n_items())]
     item = next((i for i in items if getattr(i, "session_id", None) == plain.session_id), None)
     check("the plain session is a running row", item is not None and bool(item.running), item)
+    # The restarted service started every row blank; the window said again
+    # what it shows (MainWindow._resync_statuses), so the rows are open rows
+    # and the footer counts them as before.
+    for _ in range(50):
+        if all(row_status(sid) in IN_TAB for sid in ids) and "2 open" in footer_text(win):
+            break
+        yield 100
+    check("both rows are open rows after the restart", all(row_status(sid) in IN_TAB for sid in ids),
+          [row_status(sid) for sid in ids])
+    check("…and the footer counts the two open tabs again", "2 open" in footer_text(win), footer_text(win))
 
     # -- the sandbox: re-held, re-mounted, in §3.9's order ------------------------------
     check("the box is held by the new service", probe("host", "held", box) is True)
