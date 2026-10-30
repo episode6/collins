@@ -5929,10 +5929,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _ask_restart_service(self) -> None:
         """*Restart service* (§3.21): the blast radius first — the sessions
         the service runs, how many of them are working, and the /bg agents
-        that outlive it — then a restart now, or once none is busy. Every
-        foreground session ends with the service and each open tab resumes
-        its own once it is back, as a quit and a relaunch did before the
-        service; the CLI's background daemon and its agents run on (D52)."""
+        that outlive it — then a restart now, or once none is busy. With
+        a keeper (`service.status`'s `keeper`, PR-3.6) every session runs
+        on through the restart and each open tab shows its own again;
+        without one every foreground session ends with the service and
+        each open tab resumes its own once it is back, as a quit and a
+        relaunch did before the service. The CLI's background daemon and
+        its agents run on either way (D52)."""
         app = self.get_application()
         link = getattr(app, "_service_link", None)
         try:
@@ -5950,11 +5953,15 @@ class MainWindow(Adw.ApplicationWindow):
         background = sum(
             1 for i in range(model.get_n_items()) if (model.get_item(i).background or "")
         )
-        body = quitrules.restart_body(sessions=sessions, busy=busy, background=background)
+        # With a keeper (PR-3.6) the sessions run on through the restart:
+        # the dialog says so, and *Restart Now* is no longer destructive.
+        keeper = bool(status.get("keeper"))
+        body = quitrules.restart_body(sessions=sessions, busy=busy, background=background, keeper=keeper)
         choices = []
         if busy:
             choices.append(("idle", _("Restart When Idle"), ""))
-        choices.append(("now", _("Restart Now"), "destructive" if sessions else "suggested"))
+        destructive = bool(sessions) and not keeper
+        choices.append(("now", _("Restart Now"), "destructive" if destructive else "suggested"))
 
         def answered(response: str) -> None:
             if response in ("now", "idle") and hasattr(app, "restart_service"):

@@ -76,16 +76,19 @@ def exec_command() -> str:
 
 
 UNIT = "collins-service.service"
+# The keeper's unit (PR-3.6), installed beside the service's.
+KEEPER_UNIT = "collins-keeper.service"
 
 
-def service_launcher_path() -> Path | None:
-    """The installed `collins-service` command: beside the `collins`
-    launcher when there is one (a pip or pipx install puts both in the
-    same bin directory), else whatever is on this shell's PATH."""
+def service_launcher_path(command: str = "collins-service") -> Path | None:
+    """The installed `collins-service` command (or another of the
+    package's, *command*: `collins-keeper`): beside the `collins` launcher
+    when there is one (a pip or pipx install puts them all in the same bin
+    directory), else whatever is on this shell's PATH."""
     launcher = launcher_path()
-    if launcher is not None and (sibling := launcher.with_name("collins-service")).is_file():
+    if launcher is not None and (sibling := launcher.with_name(command)).is_file():
         return sibling
-    if found := shutil.which("collins-service"):
+    if found := shutil.which(command):
         return Path(found).resolve()
     return None
 
@@ -110,11 +113,11 @@ def service_unit(template: str, command: str, app_id: str | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def service_exec_command() -> str:
-    """The unit's ExecStart: an absolute path when there is one to give."""
-    if (launcher := service_launcher_path()) is not None:
+def service_exec_command(command: str = "collins-service") -> str:
+    """A unit's ExecStart: an absolute path when there is one to give."""
+    if (launcher := service_launcher_path(command)) is not None:
         return _quote_exec(str(launcher))
-    return "collins-service"
+    return command
 
 
 def entry_locations() -> list[Path]:
@@ -190,7 +193,8 @@ def install(root: Path | None = None) -> list[Path]:
     icon = _PACKAGE / "icons" / f"{APP_ID}.svg"
     appdata = _PACKAGE / f"{APP_ID}.metainfo.xml"
     unit = _PACKAGE / UNIT
-    if missing := [p for p in (template, icon, appdata, unit) if not p.is_file()]:
+    keeper_unit = _PACKAGE / KEEPER_UNIT
+    if missing := [p for p in (template, icon, appdata, unit, keeper_unit) if not p.is_file()]:
         raise FileNotFoundError(
             "these files are missing from the installed package: "
             + ", ".join(str(p) for p in missing)
@@ -209,9 +213,12 @@ def install(root: Path | None = None) -> list[Path]:
     units.mkdir(parents=True, exist_ok=True)
     unit_path = units / UNIT
     unit_path.write_text(service_unit(unit.read_text(), service_exec_command()))
+    # The keeper's unit beside it (PR-3.6): the service starts it on demand.
+    keeper_path = units / KEEPER_UNIT
+    keeper_path.write_text(service_unit(keeper_unit.read_text(), service_exec_command("collins-keeper")))
     _refresh(applications, root / "icons" / "hicolor")
     _reload_units()
-    return [entry, icons / icon.name, metainfo / appdata.name, unit_path]
+    return [entry, icons / icon.name, metainfo / appdata.name, unit_path, keeper_path]
 
 
 def _reload_units() -> None:

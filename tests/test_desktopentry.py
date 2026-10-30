@@ -162,11 +162,13 @@ def test_install_writes_the_three_files(monkeypatch, tmp_path):
     icon = tmp_path / "icons" / "hicolor" / "scalable" / "apps" / f"{APP_ID}.svg"
     appdata = tmp_path / "metainfo" / f"{APP_ID}.metainfo.xml"
     unit = tmp_path / "systemd" / "user" / desktopentry.UNIT
-    assert written == [entry, icon, appdata, unit]
+    keeper = tmp_path / "systemd" / "user" / desktopentry.KEEPER_UNIT
+    assert written == [entry, icon, appdata, unit, keeper]
     assert all(p.is_file() for p in written)
-    # The service's unit (PR-1.12b): ExecStart resolved like Exec, nothing
-    # enabled.
+    # The service's unit (PR-1.12b) and the keeper's beside it (PR-3.6):
+    # ExecStart resolved like Exec, nothing enabled.
     assert "ExecStart=" in unit.read_text()
+    assert "ExecStart=" in keeper.read_text() and "collins-keeper" in keeper.read_text()
 
     text = entry.read_text()
     assert "Exec=collins" in text
@@ -218,6 +220,31 @@ def test_the_shipped_unit_is_the_specs_text():
         "[Install]",
         "WantedBy=default.target",
     ]
+
+
+def test_the_shipped_keeper_unit_is_the_specs_text():
+    """§3.10 item 2 (PR-3.6): the keeper's own unit, `KillMode=process` so
+    a stop signals the keeper alone (it ends its children itself); a plain
+    service (no READY=1 to send); restarted on a failure only; never
+    enabled by the package."""
+    from pathlib import Path
+
+    unit = (Path(__file__).resolve().parent.parent / "data" / desktopentry.KEEPER_UNIT).read_text()
+    lines = [line for line in unit.splitlines() if line and not line.startswith("#")]
+    assert lines == [
+        "[Unit]",
+        "Description=Collins pty keeper",
+        "[Service]",
+        "Type=simple",
+        "ExecStart=/usr/bin/collins-keeper",
+        "Restart=on-failure",
+        "KillMode=process",
+        "[Install]",
+        "WantedBy=default.target",
+    ]
+    # The package carries it beside the service's unit, so
+    # `collins --install-desktop` finds both.
+    assert (desktopentry._PACKAGE / desktopentry.KEEPER_UNIT).is_file()
 
 
 def test_the_service_unit_resolves_execstart_and_names_a_non_default_id():
