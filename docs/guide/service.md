@@ -217,9 +217,16 @@ service:      0.1.5, app id com.episode6.Collins
 lingering:    off (the service ends at logout on a headless box; `loginctl enable-linger` keeps it)
 runtime dir:  /run/user/1000
 socket:       /run/user/1000/collins/com.episode6.Collins/api.sock (none)
+shell:        /bin/bash (login profile and interactive rc read)
 claude:       /home/you/.local/bin/claude
 bwrap:        /usr/bin/bwrap
 ```
+
+`shell:` names the shell the capture used and what it read: *login profile
+and interactive rc read*; *login profile read; the interactive rc handed the
+shell on* (with the fix, `~/.profile` or `~/.zprofile`); *interactive rc
+read; the login profile did not answer*; or *no answer within 5 s* (the
+service then runs on its own environment). It never makes `--check` exit 1.
 
 It exits 1 when `$XDG_RUNTIME_DIR` is unset or `claude` is not on the
 login shell's `PATH`.
@@ -228,10 +235,19 @@ login shell's `PATH`.
   service and `$XDG_RUNTIME_DIR` go away at logout and do not exist at
   boot. On a headless box, `loginctl enable-linger` is the first step.
 - **The CLI on `PATH`.** Shells spawn with the service's environment
-  overlaid by a login-shell capture (`$SHELL -lic 'env -0'`, once at start,
-  5 s, failing soft), which is what finds `~/.local/bin/claude` and your
-  `PATH` on a box with no desktop. The capture wins (your `PATH` order
-  too), except `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and
+  overlaid by a login-shell capture, which is what finds
+  `~/.local/bin/claude` and your `PATH` on a box with no desktop. Once at
+  start the service runs two shells at once, `$SHELL -lc 'env -0'` (the
+  login profile: `~/.profile`, `~/.bash_profile`, `~/.zprofile`) and
+  `$SHELL -lic 'env -0'` (that and the interactive rc: a `PATH` that
+  `pipx ensurepath` put in `~/.bashrc` behind Debian's non-interactive
+  guard), to one 5 s deadline, and fails soft to its own environment. A
+  shell counts only when what it printed holds a `PATH`; the interactive
+  one's variables overlay the login one's. An rc that hands the shell on
+  (`exec zsh`, `exec fish`, auto-tmux) prints nothing under `-i`, so the
+  login profile's answer stands, but a `PATH` set only in such an rc is
+  not seen: put it in `~/.profile` or `~/.zprofile`. `--check`'s `shell:`
+  line says which answered. The capture wins (your `PATH` order too), except `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and
   systemd's own variables, which stay as the service was started with,
   and the service's own leading `PATH` entries stay first. `SSH_AUTH_SOCK` is yours to provide there, as
   it is over ssh. Every `claude` the service itself looks up (what the

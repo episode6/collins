@@ -119,7 +119,13 @@ the service's screen when the link is back.
   first step on a box with no desktop.
 - **`claude` on the login shell's `PATH`.** The service starts terminals
   with your login shell's environment, so `~/.local/bin/claude` is found
-  the way your shell finds it. `SSH_AUTH_SOCK` for the sessions' own git
+  the way your shell finds it: the login profile is read first
+  (`~/.profile`, `~/.bash_profile`, `~/.zprofile`), then the interactive rc
+  as well (a `PATH` in `~/.bashrc` behind the non-interactive guard). A
+  `PATH` set only in an rc that hands the shell on (`exec zsh`, auto-tmux)
+  is not seen, as over ssh: put it in `~/.profile` or `~/.zprofile`.
+  `collins-service --check` on the box has a `shell:` line saying which
+  was read. `SSH_AUTH_SOCK` for the sessions' own git
   pushes is yours to provide there, as it is over any ssh login.
 
 The claude login on the box is the box's: log in once there

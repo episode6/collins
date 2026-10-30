@@ -79,7 +79,11 @@ Several windows, and several clients, can share one service.
 
 **The service process.** `service/main.py` takes the `flock` on
 `service.lock` first (a second service for the app id exits 0), captures the
-login shell's environment once (`$SHELL -lic 'env -0'`, fail-soft) and
+login shell's environment once (two shells at once to one 5 s deadline,
+`$SHELL -lc 'env -0'` and `$SHELL -lic 'env -0'`, a round counting only
+when its output holds a `PATH` and the interactive round overlaying the
+login round, so an rc that hands the shell on costs only its own round;
+fail-soft, `--check`'s `shell:` line says which answered) and
 **overlays** it on the service's own (the user's variables and `PATH` order
 win; `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and the systemd
 variables are protected, and the service's own leading `PATH` entries stay
