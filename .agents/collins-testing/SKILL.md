@@ -253,7 +253,11 @@ shims never outlive the check; `stop_service(proc)` followed by
 `start_service()` on the same app id is a service restart under the
 check's sessions (`check_service_restart.py`), and `keeper_pid()` says
 who holds them. A check that wants the keeperless stop sets
-`COLLINS_KEEPER=none` before `start_service()`.
+`COLLINS_KEEPER=none` before `start_service()`. A check that dies on its
+deadline through `os._exit` skips the `atexit`, and with a keeper that
+leaves the keeper and the check's shims running, not just a `cr-*`
+directory: call `e2e_service._stop_all()` in the watchdog first, as
+`check_service_restart.py` does.
 
 **A patch over a service-side module does not reach the service.** What a
 check used to monkeypatch in its own process (`claudemodels.*`,

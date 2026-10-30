@@ -196,6 +196,9 @@ def check(label: str, ok: bool, detail: object = "") -> None:
 def watchdog() -> None:
     time.sleep(240)
     print("timed out", file=sys.stderr)
+    # os._exit skips the atexit handlers: the services, the keeper (and
+    # its children, the check's shims) and the tree are ended here first.
+    e2e_service._stop_all()
     clear_tree()
     os._exit(3)
 

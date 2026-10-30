@@ -120,6 +120,10 @@ def _stop_keepers() -> None:
 
 
 def _stop_all() -> None:
+    """Every service this check started, then the keeper (the `atexit`;
+    a check's own deadline handler calls it too before `os._exit`, since
+    that exit skips the `atexit` and would leave the keeper and its
+    children behind)."""
     for proc in list(_services):
         _stop(proc)
     _stop_keepers()
