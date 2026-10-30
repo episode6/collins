@@ -122,6 +122,9 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 %doc README.md
 %{_bindir}/collins
 %{_bindir}/collins-service
+# The keeper's command (PR-3.6); its unit's install line is PR-3.7's, with
+# the split collins-service subpackage.
+%{_bindir}/collins-keeper
 %{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-service.service
 %{_datadir}/applications/com.episode6.Collins.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
