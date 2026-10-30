@@ -277,8 +277,9 @@ never pressed, nothing reaches a network), `sized-for` (a second bare
 `SocketLink` on another device attaches to the tab's pty and takes the size,
 so the tab is pinned under its *Sized for* banner; the shim clears
 scrollback too, or the redraw shows the typed command above it) and
-`path-picker` (the service-side folder picker on `~/dev`; its entry shows
-the scratch HOME's absolute path) — the remote guide's three, `welcome` and `welcome-cli`
+`path-picker` (the service-side folder picker on `~/dev`, titled as the
+sites title it; the entry is put back to `~/dev/` through the picker's quiet
+setter once the listing has landed) — the remote guide's three, `welcome` and `welcome-cli`
 (the first-launch dialog with the CLI found, and with it not found — the
 shot runs with `welcome_seen` set back to false, and the not-found one
 hides the service's `claude` from remotecli and seeds `~/.local/bin/claude`

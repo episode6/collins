@@ -502,20 +502,24 @@ def stage(win) -> list[tuple[int, callable]]:
 
         def fill_form() -> None:
             dialog = win.get_visible_dialog()
+            # Nothing of this machine's login or hostname in frame.
             dialog.name_row.set_text("workstation")
-            dialog.target_row.set_text("ghackett@workstation.lan")
+            dialog.target_row.set_text("collins@workstation.example.net")
 
         return [(800, fill_form)]
     elif scene == "path-picker":
         from collins import pathpicker
 
-        picker = pathpicker.pick_folder(win, "~/dev", lambda _path: None)
+        picker = pathpicker.pick_folder(
+            win, "~/dev", lambda _path: None, title="Choose project directory",
+        )
 
         def tilde_path() -> None:
-            # The service answers with the scratch HOME's absolute path;
-            # the entry takes the typed form, as it does for a person.
-            picker.entry.set_text("~/dev/")
-            picker.entry.set_position(-1)
+            # The listing landed and the entry shows the service's answer,
+            # the scratch HOME's absolute path. The quiet setter puts the
+            # typed form back without a relist: nothing rewrites it, so the
+            # rows stay and the entry reads ~/dev/ as it would for a person.
+            picker._set_text("~/dev/")
 
         return [(1500, tilde_path)]
     elif scene == "sized-for":

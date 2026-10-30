@@ -144,8 +144,9 @@ Enter opens, Esc closes.
   *close* mean: see *Detach*, *Quit* and *Restart service* below.
 - **Connect to…** (the app menu) picks which service the window shows:
   *This computer*, or a box reached over ssh. **Add ssh connection** takes
-  a name and `user@host[:port]`, **Test** runs `ssh -o BatchMode=yes TARGET
-  collins-service --print-socket` and shows the socket's path or ssh's
+  a name and `user@host[:port]`, **Test** runs, in short, `ssh -o BatchMode=yes TARGET
+  collins-service --print-socket` (through the box's login shell: the full
+  command is in the guide) and shows the socket's path or ssh's
   last line, **Connect** forwards the box's socket over `ssh -L` and
   switches: every tab detaches with no question, the sidebar refills with
   the box's sessions, and the tabs you last had open there come back. A

@@ -39,7 +39,7 @@ computer* selected.
 
 **Add ssh connection** takes a name and the host as `user@host`,
 `user@host:port` or a bare host (a name or an IPv4 address; an IPv6
-literal is not taken). **Test** runs
+literal is not taken). **Test** runs, in short (the full command is [below](#what-ssh-does-for-you)),
 
 ```
 ssh -o BatchMode=yes user@host collins-service --print-socket
@@ -209,29 +209,13 @@ copied over.
 When the box's Collins and yours are too far apart to talk (the window
 speaks the service's protocol or the one before it), the dialog names
 the box and the side to upgrade, and offers **Connect to This Computer**;
-it never offers *Restart service* for a box, since a window cannot stop a
-process on another machine. Upgrade Collins on the side it names and
+it never offers *Restart service* for a box, since a service this window
+cannot speak to cannot be sent one. Upgrade Collins on the side it names and
 connect again.
 
 ## Restarting the service on the box
 
-A small companion program, `collins-keeper`, forks every agent and panel
-shell on the service's behalf and keeps their terminals, so the service
-can stop without taking the sessions with it. **Restart service** in the
-main menu (the package restarts nothing on an upgrade, so this is how a
-box runs new code) and `systemctl --user restart collins-service` end no
-session: the next service takes the terminals
-over, loads the screen it saved for each and makes every program repaint,
-and the window reconnects through the forward and shows each open tab where
-it was, mid-turn included. A crash of the service ends nothing either. To
-end every session on the box for good, stop the keeper too
-(`systemctl --user stop collins-keeper.service`). Where the keeper could
-not be started (or `COLLINS_KEEPER=none` is set in the service's
-environment), a restart ends every foreground session gracefully and each
-tab resumes its own; the restart dialog says which one it is. The CLI's
-`/bg` daemon and its agents run through any of it. Both units are
-`KillMode=process`, never enabled by a package. The details are in [Restarting and
-stopping](./service#restarting-and-stopping).
+**Restart service** in the main menu works on the box the window shows: it asks that service to restart over the link in use, and the package restarts nothing on an upgrade, so this is how a box runs new code. The sessions on the box run through the restart under their keeper, and the window reconnects through the forward and shows each open tab where it was. To end every session on the box for good, stop the keeper there (`systemctl --user stop collins-keeper.service`, over ssh). What the keeper holds, when it is missing and what the dialog says are in [Restarting and stopping](./service#restarting-and-stopping).
 
 ## Notifications while you are away
 
@@ -258,8 +242,8 @@ checkouts. A few things hand a path to a program on *your* computer, and
 those stay hidden when your computer is not the service's machine — they
 would open the wrong file on the wrong machine:
 
-- *Open in Ghostty*, *Open in File Manager*, *Open in Terminal*, every
-  *Open In…* app and *Reveal transcript*.
+- *Open in Ghostty*, *Reveal transcript* and every *Open In…* row (your
+  footer apps, *File Manager*, *Terminal*, the default app).
 - `file:` URIs on the clipboard (the editor's file clipboard still works
   within Collins; other apps get the paths as text).
 - A dropped file mentioned by its own path (it is uploaded instead).
