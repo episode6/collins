@@ -114,12 +114,17 @@ that dies is started again (off the main loop) and handed every live
 master (`adopt`), the kept ones' statuses unknown from then on and the
 ptys forked meanwhile kept from then on. Every fd received is
 close-on-exec; the keeper's `list` pages (`LIST_PAGE`); its clients are
-non-blocking. The rulings of the review of PR 629: a list that cannot be
-read adopts nothing and touches no row or model (`keeper_unread`); a
-keeper of another protocol holding ptys is left alone, the service
-running without one and `service.status` carrying `keeper_mismatch`; a
-kept pty with no row is adopted as an anonymous shell and never
-signalled. Stopping the keeper (`systemctl --user stop
+non-blocking. The rulings of the review of PR 629 and its verification: a
+keeper that exists but cannot be read or spoken to (an unreadable list,
+another protocol, one that does not answer) adopts nothing and touches
+no row, model, plan or box (`keeper_unread`, the sandbox sweeps skipped;
+`service.status` carries `keeper_unread`, `keeper_held` and, for another
+protocol, `keeper_mismatch`; a session a kept row names is refused a
+second spawn, `HELD_BY_KEEPER_MSGID`), while no keeper process at all
+drops the rows (dead ptys); a kept pty with no row is adopted as an
+anonymous shell and never signalled; an adopted session with no id
+judges a transcript by its first record's timestamp and never binds an
+id another live pty holds (`SessionHost.running_session_ids`). Stopping the keeper (`systemctl --user stop
 collins-keeper.service`) is what ends every session for good;
 `COLLINS_KEEPER=none` runs a service without one (the unit suite's live
 services). `service/core.py` is `ServiceCore`, the request

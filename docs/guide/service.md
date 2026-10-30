@@ -206,10 +206,14 @@ keeper that was killed can name any process by now, which is what the
 `cmdline` check is for. Only one keeper runs per app id: a second one
 started on the same socket (by hand, by a stall, by an upgrade) exits 0
 on the first one's lock and changes nothing. A keeper that speaks an
-older protocol than the service and still holds sessions is left alone:
-the service runs without a keeper, says so in the *Restart service*
-dialog ("held by an older keeper"), and stopping that keeper is the way
-on.
+older protocol than the service and still holds sessions is left alone,
+and so is one that is there but does not answer: the service runs
+without a keeper, touches none of those sessions' rows, saved screens,
+sandbox plans or boxes, refuses to start a second copy of any of them
+("running in a keeper this Collins service cannot read"), says so in the
+*Restart service* dialog ("held by a keeper this service cannot take
+over"), and stopping that keeper is the way on. Without any keeper
+process at all the rows name sessions that are gone, and are dropped.
 
 The keeper ends each child it holds (SIGHUP, then SIGKILL) and exits. A
 service stopped with no keeper ends every foreground session the way
@@ -285,6 +289,12 @@ login shell's `PATH`.
 - **Lingering.** Without `loginctl enable-linger`, the user manager, the
   service and `$XDG_RUNTIME_DIR` go away at logout and do not exist at
   boot. On a headless box, `loginctl enable-linger` is the first step.
+  Without a runtime directory the keeper's lock falls back under
+  `~/.local/state/collins/<app id>/` with the rest; on a home directory
+  shared over NFS by two machines, Linux's NFS `flock` emulation can make
+  one machine's keeper exit on the other's lock, which leaves that
+  machine keeperless (its service then forks its own ptys and a restart
+  ends them). A runtime directory, which every login session has, avoids it.
 - **The CLI on `PATH`.** Shells spawn with the service's environment
   overlaid by a login-shell capture, which is what finds
   `~/.local/bin/claude` and your `PATH` on a box with no desktop. Once at

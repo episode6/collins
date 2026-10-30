@@ -220,6 +220,9 @@ SPAWN_ENV_STRIPPED = (
     "JOURNAL_STREAM",
 )
 ALREADY_RUNNING_MSGID = protocol.ALREADY_RUNNING_MSGID
+# A session whose pty a keeper holds that this service could not read or
+# speak to (`keeper_unread`): a second CLI on its transcript is refused.
+HELD_BY_KEEPER_MSGID = N_("This session is running in a keeper this Collins service cannot read")
 # How long stop_sessions waits for every close flow (the agent's exit
 # budget, the shell's, the SIGKILL grace) before shutting what is left.
 STOP_BOUND_S = 30.0
@@ -385,10 +388,14 @@ class ServiceCore:
         # an older keeper): how many it holds; the service runs without one
         # and `service.status` says so (`keeper_mismatch`).
         self.keeper_mismatch = 0
-        # Whether the keeper was there and its list could not be read at
-        # start (M3 of the review of PR 629): nothing was adopted, dropped
-        # or pruned; the rows wait for a service that can read it.
+        # Whether a keeper exists for this app id that the service could not
+        # read or speak to at start (M3 of the review of PR 629, and its
+        # verification's N-M1: an unreadable list, another protocol, one
+        # that does not answer): nothing is adopted, dropped, pruned or
+        # swept, the rows wait for a service that can read it, and a
+        # session they name is refused a second spawn (`keeper_held`).
         self.keeper_unread = False
+        self.keeper_unread_reason = ""
 
     # -- the keeper and the adoption (PR-3.6, §3.10 item 2)
 
@@ -420,6 +427,15 @@ class ServiceCore:
         log.info("adoption: %d row(s) in the pty table for %s: %s", len(rows), self.app_id, sorted(rows))
         adopted: list[int] = []
         entries: list[dict] = []
+        if self.keeper_unread:
+            # A keeper exists that this service cannot read or speak to
+            # (`mark_keeper_unread`): its ptys live, so every row and model
+            # stays for a service that can (N-M1).
+            log.error(
+                "a keeper holds this app id's ptys and cannot be read (%s): %d row(s) left as they are",
+                self.keeper_unread_reason, len(rows),
+            )
+            return []
         if keeper is not None:
             try:
                 entries = keeper.list(with_fds=True)
@@ -428,7 +444,7 @@ class ServiceCore:
                     "the keeper's list could not be read (%s): %d row(s) left as they are, nothing adopted",
                     exc, len(rows),
                 )
-                self.keeper_unread = True
+                self.mark_keeper_unread("its list could not be read")
                 return []
         seen: set[int] = set()
         for entry in entries:
@@ -488,6 +504,24 @@ class ServiceCore:
         if adopted:
             log.info("adopted %d pty(s) from the keeper: %s", len(adopted), adopted)
         return adopted
+
+    def mark_keeper_unread(self, reason: str) -> None:
+        """A keeper exists for this app id but this service cannot read it
+        or speak its protocol (*reason*): the adoption touches nothing, the
+        sandbox sweeps are skipped, `service.status` says so and a session
+        a kept row names is refused a second spawn."""
+        self.keeper_unread = True
+        self.keeper_unread_reason = reason
+
+    def held_session_ids(self) -> set[str]:
+        """The sessions the kept rows name while the keeper is unread: each
+        has a CLI running somewhere this service cannot see."""
+        if not self.keeper_unread or self.state is None:
+            return set()
+        return {
+            str(row.get("session")) for row in self.state.get_ptys(self.app_id).values()
+            if isinstance(row.get("session"), str) and row.get("session")
+        }
 
     def _finish_adopted_dead(self, pty: ptyserver.Pty) -> bool:
         if pty.id in self.ptys.ptys and not pty._finished:
@@ -770,6 +804,10 @@ class ServiceCore:
         if options is not None and message.get("sandbox") and not options.sandbox_plan:
             options = self._box_for_launch(message, options)
         wanted = message.get("session")
+        if wanted and not message.get("fork") and wanted in self.held_session_ids():
+            # Its CLI runs in a keeper this service cannot read (N-S2): a
+            # second CLI on the transcript is refused, as for a running pty.
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, HELD_BY_KEEPER_MSGID)
         # A fork starts its own conversation: no running pty of its origin
         # stands in for it, and none is closed for it (PR-1.12c review).
         if wanted and not message.get("fork"):
@@ -1291,6 +1329,11 @@ class ServiceCore:
             # An older keeper holds sessions this service cannot adopt
             # (PR-3.6's ruling): stop it to go on with a keeper.
             fields["keeper_mismatch"] = self.keeper_mismatch
+        if self.keeper_unread:
+            # A keeper this service could not read or speak to holds the
+            # rows left in the table (N-S2): how many sessions that is.
+            fields["keeper_unread"] = True
+            fields["keeper_held"] = len(self.held_session_ids())
         return protocol.reply(message.id, **fields)
 
     @property
@@ -2067,6 +2110,16 @@ class ServiceCore:
             return
         host = sandboxplan.SandboxHost(app_id, state, state.state_file())
         self.sandbox_host = host
+        if self.keeper_unread:
+            # The sessions left in a keeper this service cannot read still
+            # run in their boxes with their plans (N-S1): no plan is
+            # unlinked, no box or mount swept; the grants' worker serves
+            # what this service spawns, and the sweeps are the next
+            # service's that can read the keeper.
+            log.warning("sandbox: the keeper is unread; the plan, box and mount sweeps are skipped")
+            self.sandbox_grants = sandboxgrants.GrantMounts(host)
+            sandboxplan.probe_async(self._on_probe)
+            return
         # The adopted sessions first (PR-3.6, §3.9's order: adopt, re-hold,
         # re-mount, then sweep): each box held again under this pid (its
         # lease rewritten), its plan file kept from the sweep below.

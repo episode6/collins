@@ -105,7 +105,10 @@ def start_keeper(app_id: str, env: dict, wait_s: float = WAIT_S) -> subprocess.P
     keeper with it (SIGTERM, so it still ends its children) instead of
     leaving it and the check's shims behind, where a keeper the service
     spawns detached would outlive everything. The service then finds it on
-    its socket. None when the keeper is off (`COLLINS_KEEPER=none`)."""
+    its socket. None when the keeper is off (`COLLINS_KEEPER=none`).
+    **Call this from the main thread**: Linux ties `PR_SET_PDEATHSIG` to
+    the thread that forked, so a keeper started from a worker thread is
+    SIGTERMed, and every session with it, when that thread exits."""
     from collins.service import keeper
     from collins.service import main as service_main
 

@@ -1022,6 +1022,8 @@ REPLIES = {
         "keeper": 4243,
         "unkept": 1,
         "keeper_mismatch": 0,
+        "keeper_unread": False,
+        "keeper_held": 0,
     },
     "cli.check": {"found": "", "detected": "/home/u/.local/bin/claude", "status": "versioned"},
 }

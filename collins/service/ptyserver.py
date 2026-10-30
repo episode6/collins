@@ -882,34 +882,55 @@ class PtyServer:
             return
         self._keeper_restarting = True
         restart = self._keeper_restart
+        # The masters to hand over, snapshotted here: the worker adopts them
+        # off the main loop (N-N4), and whatever is spawned meanwhile is
+        # handed over when the result lands.
+        masters = [(pty.id, pty.pid, pty.master) for pty in self._adoptable()]
 
         def work() -> None:
             fresh = None
+            handed: set[int] = set()
             try:
                 fresh = restart()
+                if fresh is not None:
+                    handed = self._hand_over(fresh, masters)
             except Exception:
                 log.exception("restarting the keeper failed")
-            GLib.idle_add(self._keeper_restarted, fresh, priority=GLib.PRIORITY_DEFAULT)
+            GLib.idle_add(self._keeper_restarted, fresh, handed, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, name="keeper-restart", daemon=True).start()
 
-    def _keeper_restarted(self, fresh) -> bool:
+    def _adoptable(self) -> list[Pty]:
+        return [
+            pty for pty in self.ptys.values()
+            if not pty._finished and pty.pid is not None and not pty._reaped and pty.master >= 0
+        ]
+
+    @staticmethod
+    def _hand_over(fresh, masters: list[tuple[int, int, int]]) -> set[int]:
+        """`adopt` each of *masters* into *fresh*; the ids it took."""
+        handed: set[int] = set()
+        for pty_id, pid, master in masters:
+            try:
+                fresh.adopt(pty_id, pid, master)
+                handed.add(pty_id)
+            except keeper_mod.KeeperError as err:
+                log.warning("pty %d: the new keeper refused to adopt it: %s", pty_id, err)
+                if not fresh.connected:
+                    break
+        return handed
+
+    def _keeper_restarted(self, fresh, handed: set[int]) -> bool:
         self._keeper_restarting = False
-        if fresh is None or self.keeper is not None:
+        if fresh is None or self.keeper is not None or not fresh.connected:
             if fresh is not None:
                 fresh.close()
             return GLib.SOURCE_REMOVE
-        for pty in list(self.ptys.values()):
-            if pty._finished or pty.pid is None or pty._reaped or pty.master < 0:
-                continue
-            try:
-                fresh.adopt(pty.id, pty.pid, pty.master)
-            except keeper_mod.KeeperError as err:
-                log.warning("pty %d: the new keeper refused to adopt it: %s", pty.id, err)
-                if not fresh.connected:
-                    return GLib.SOURCE_REMOVE
-                continue
-            if not pty.kept:
+        # The ptys spawned while the worker ran, handed over now (few, fast).
+        late = [(pty.id, pty.pid, pty.master) for pty in self._adoptable() if pty.id not in handed]
+        handed |= self._hand_over(fresh, late)
+        for pty in self._adoptable():
+            if pty.id in handed and not pty.kept:
                 # Forked here while no keeper was there: the keeper holds
                 # its master now, so it outlives this process (S1); its
                 # exit stays this process's to reap (the child watch).
@@ -1750,24 +1771,27 @@ class PtyServer:
 
     def prune_models(self) -> int:
         """At service start: every ``*.model`` whose pty is not in the
-        table (a service that died before the exit landed) is removed;
-        how many were."""
+        table (a service that died before the exit landed) is removed, and
+        so is every ``*.model`` right under the models' root, the layout
+        before the models were kept per app id (no pty of that service
+        survived its stop); how many were."""
         removed = 0
-        try:
-            names = list(self.state_dir.iterdir())
-        except OSError:
-            return 0
-        for path in names:
-            if path.suffix != MODEL_SUFFIX:
-                continue
-            stem = path.stem
-            if stem.isdigit() and int(stem) in self.ptys:
-                continue
+        for directory, own in ((self.state_dir, True), (self.state_dir.parent, False)):
             try:
-                path.unlink()
-                removed += 1
-            except OSError as exc:
-                log.warning("%s: pruning failed: %s", path, exc)
+                names = list(directory.iterdir())
+            except OSError:
+                continue
+            for path in names:
+                if path.suffix != MODEL_SUFFIX or not path.is_file():
+                    continue
+                stem = path.stem
+                if own and stem.isdigit() and int(stem) in self.ptys:
+                    continue
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError as exc:
+                    log.warning("%s: pruning failed: %s", path, exc)
         return removed
 
     def load_model(self, path: Path) -> termscreen.Screen | None:

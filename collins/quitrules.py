@@ -109,8 +109,9 @@ def restart_body(
     restart, blocked on their output for the moment it takes, and each
     open tab shows its own again, except the *unkept* ones (started while
     the keeper was away), which end and resume. *mismatch* is how many
-    sessions an older keeper holds that this service cannot take over
-    (the status's `keeper_mismatch`): stopping that keeper is the way on.
+    sessions a keeper holds that this service cannot take over, an older
+    one or one it could not read (the status's `keeper_mismatch` or
+    `keeper_held`): stopping that keeper is the way on.
     *background* are the rows running as `/bg` agents: the CLI's
     background daemon is no child of the service's stop (the unit is
     `KillMode=process`, D52), so they are counted as surviving, never as
@@ -133,9 +134,9 @@ def restart_body(
         parts.append(_("The {n} background (/bg) agents keep running: they are not "
                        "the service's.").format(n=background))
     if mismatch:
-        parts.append(_("{n} sessions are held by an older keeper this service cannot take over: "
-                       "stop it (systemctl --user stop collins-keeper.service) to go on with a "
-                       "keeper.").format(n=mismatch))
+        parts.append(_("{n} sessions are held by a keeper this service cannot take over (an older "
+                       "one, or one it could not read): stop it (systemctl --user stop "
+                       "collins-keeper.service) to go on with a keeper.").format(n=mismatch))
     parts.append(_("Collins and its status icon stay while the service restarts."))
     return " ".join(parts)
 

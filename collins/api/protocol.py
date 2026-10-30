@@ -2679,6 +2679,12 @@ _TABLE: tuple[MessageType, ...] = (
                 "keeper": _i(1, PID_MAX),
                 "unkept": _COUNT,
                 "keeper_mismatch": _COUNT,
+                # `keeper_unread`: a keeper exists that the service could not
+                # read or speak to at start, so nothing was adopted and the
+                # pty table's rows wait; `keeper_held` how many sessions those
+                # rows name (each refused a second spawn meanwhile).
+                "keeper_unread": _BOOL,
+                "keeper_held": _COUNT,
                 # Where the service's `claude` lookup lands ("" when it
                 # finds none): what the welcome gate asks (welcomegate).
                 # Absent from an older service, which the client reads as

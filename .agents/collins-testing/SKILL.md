@@ -250,7 +250,9 @@ itself before the service (`e2e_service.start_keeper`, as the check's own
 child with `PR_SET_PDEATHSIG`, so a check killed on its deadline, a
 segfault or a SIGKILL takes the keeper and the check's shims with it; the
 service finds it on its socket rather than spawning one detached, and
-`LiveService(keeper=True)` does the same). A service's SIGTERM leaves its
+`LiveService(keeper=True)` does the same; both from the main thread only,
+since Linux ties `PR_SET_PDEATHSIG` to the forking thread and a worker
+thread's exit would SIGTERM the keeper and every session with it). A service's SIGTERM leaves its
 ptys to the keeper rather than ending them: `e2e_service`'s `atexit` stops
 the keeper too (`_stop_keepers`, by the pid file beside its socket, a
 SIGKILL after a bounded wait), so a check's shims never outlive the

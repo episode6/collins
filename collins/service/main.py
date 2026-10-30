@@ -549,6 +549,16 @@ class Service:
         if self.keeper is not None:
             self.core.attach_keeper(self.keeper, restart=lambda: self._find_keeper(app_id))
             log.info("the keeper is pid %s", self.keeper.pid)
+        elif keeper_wanted():
+            # No client, yet a keeper may be there: one of another protocol
+            # holding ptys (`keeper_mismatch`), or one alive that did not
+            # answer. Its ptys live, so the adoption must touch no row
+            # (N-M1); with no keeper process at all the rows name dead ptys
+            # and are dropped as before.
+            if self.core.keeper_mismatch:
+                self.core.mark_keeper_unread("it speaks another protocol")
+            elif keeper_mod.read_pid(api_server.keeper_socket_path(app_id)) is not None:
+                self.core.mark_keeper_unread("it did not answer")
         self._load_stubs()
         self.server = api_server.ApiServer(
             self.core,

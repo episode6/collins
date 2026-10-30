@@ -5958,7 +5958,8 @@ class MainWindow(Adw.ApplicationWindow):
         keeper = bool(status.get("keeper"))
         body = quitrules.restart_body(
             sessions=sessions, busy=busy, background=background, keeper=keeper,
-            unkept=int(status.get("unkept") or 0), mismatch=int(status.get("keeper_mismatch") or 0),
+            unkept=int(status.get("unkept") or 0),
+            mismatch=max(int(status.get("keeper_mismatch") or 0), int(status.get("keeper_held") or 0)),
         )
         choices = []
         if busy:
