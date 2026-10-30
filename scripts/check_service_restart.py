@@ -95,6 +95,7 @@ GRANT = f"{HOME}/dev/granted"  # allowed to the boxed session while it runs
 SHIM = f"{E2E}/bin/claude"
 STATE_FILE = f"{E2E}/config/collins/state.json"
 MODELS = f"{E2E}/pty/{os.environ['COLLINS_APP_ID']}"  # the saved models, by app id
+SCAN_GATE = f"{E2E}/scan-gate"  # the restarted service's scans wait for this file (V5-S1)
 WINCH_LOG = f"{E2E}/winch.log"  # the stubs' SIGWINCH sizes (S8: the repaint proven)
 TYPED = "typed before the restart"
 AFTER = "typed after the restart"
@@ -376,7 +377,10 @@ def steps():
     check("the plan file survived the stop", bool(plan_path) and os.path.isfile(plan_path), plan_path)
 
     # -- the next service: the window reconnects, the tabs attach again --------------
-    service = e2e_service.start_service()
+    # Its scans wait for SCAN_GATE (a large projects directory): the window
+    # reconnects and re-attaches its tabs before any row has landed, the
+    # order V5-S1 is about, and the rows land when the check opens the gate.
+    service = e2e_service.start_service(stubs={"scan_gate": SCAN_GATE})
     for _ in range(300):
         if app._connection.state == CONNECTED and app._service_link is not None:
             try:
@@ -390,6 +394,10 @@ def steps():
         app.quit()
         return
     check("the window reconnected to the new service", status.get("pid") != first_pid, status)
+    # The mirror keeps the old items until the new snapshot's rows reconcile
+    # them (RemoteStore.reset); `known_sessions` is what the new service said.
+    check("…before any row of its had landed (the scan waits at the gate)", not app.store.known_sessions,
+          sorted(app.store.known_sessions))
     check("the new service adopted both ptys", status.get("ptys") == 2, status)
     check("…and found the same keeper", status.get("keeper") == keeper_pid, status)
     second_pid = status.get("pid")
@@ -432,13 +440,25 @@ def steps():
         yield 100
     answered = any(("you said: " + AFTER) in line for line in vte_lines(plain))
     check("typing reaches the adopted agent", answered)
+    # The tabs are attached and repainted with no row in the mirror: now the
+    # scan may read, and the rows land on a window whose reattach is over.
+    check("no row had landed before the gate opened", not app.store.known_sessions,
+          sorted(app.store.known_sessions))
+    with open(SCAN_GATE, "w", encoding="utf-8") as fh:
+        fh.write("go\n")
+    for _ in range(100):
+        if app.store.known_sessions:
+            break
+        yield 100
+    check("the rows landed after the tabs had re-attached", bool(app.store.known_sessions))
     model = app.store.model
     items = [model.get_item(i) for i in range(model.get_n_items())]
     item = next((i for i in items if getattr(i, "session_id", None) == plain.session_id), None)
     check("the plain session is a running row", item is not None and bool(item.running), item)
-    # The restarted service started every row blank; the window said again
-    # what it shows (MainWindow._resync_statuses), so the rows are open rows
-    # and the footer counts them as before.
+    # The restarted service started every row blank, and its rows landed
+    # after the reattach; the window said again what it shows
+    # (MainWindow._resync_statuses, from the reattach and from every store
+    # refresh), so the rows are open rows and the footer counts them as before.
     for _ in range(50):
         if all(row_status(sid) in IN_TAB for sid in ids) and "2 open" in footer_text(win):
             break

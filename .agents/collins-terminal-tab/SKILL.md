@@ -396,7 +396,10 @@ pty is gone is marked ended and offers resume, and then
 `status` is the client's word kept on the service's items in memory, D29,
 so a service that restarted under the tabs starts every row blank and
 would lose the sidebar's open rows and the footer's "N open" without it;
-to the same service the mirror sends nothing, since nothing differs) reopen each entry not shown: attached when the service
+differences only, and run again from `_on_store_refreshed`, because the
+restarted service sends no rows until its first scan has landed and a
+large projects directory lands them after the reattach — the e2e stub
+`scan_gate` forces that order in `check_service_restart.py`) reopen each entry not shown: attached when the service
 runs it, resumed when not (a `pty:` entry that no longer runs is dropped);
 a session the store has not scanned yet waits for its first refresh. With
 `open_tabs` empty the launch falls back to `restore_last_session`.

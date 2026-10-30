@@ -1201,11 +1201,18 @@ class MainWindow(Adw.ApplicationWindow):
         memory). A service that restarted under the tabs (PR-3.6) starts
         every row blank and knows nothing of the tabs it adopted the ptys
         of, so the sidebar's "open" rows and the footer's count would stay
-        lost; a reconnect to the same service finds nothing to change (the
-        mirror sends only what differs)."""
+        lost; a reconnect to the same service finds nothing to change.
+        Differences only, so it runs on every store refresh too: the
+        restarted service sends no rows until its first scan has landed
+        (storefeed.subscribe), and the window reconnects as soon as it
+        listens, so on a large projects directory the reattach finds an
+        empty mirror and the rows come later (V5-S1)."""
         rows = set(self._pages)
         rows.update(sid for sid in self.store.row_ids() if self._is_detached(sid))
         for row_id in rows:
+            item = self.store.get_item(row_id)
+            if item is None or item.status == self._row_status(row_id):
+                continue
             try:
                 self._sync_status(row_id)
             except Exception:
@@ -3496,18 +3503,12 @@ class MainWindow(Adw.ApplicationWindow):
         # A transcript that moved under a session on worktree entry is the
         # service's to follow (ServiceCore.sync_transcript_paths, PR-1.12d).
         self._refresh_tab_titles()
-        # Freshly discovered rows start with no status; re-assert yellow lines
-        # for the rows the service says run detached (no-op when unchanged):
-        # a row made by this refresh took its `background` without a signal.
-        for row_id in self.store.row_ids():
-            item = self.store.get_item(row_id)
-            if (
-                item is not None
-                and item.background
-                and item.status != "background"
-                and self._page_for(row_id) is None
-            ):
-                self._sync_status(row_id)
+        # Freshly discovered rows start with no status; re-assert the yellow
+        # lines of the rows the service says run detached (a row made by
+        # this refresh took its `background` without a signal) and the
+        # in-tab status of the rows this window's tabs show (the rows of a
+        # restarted service land after the reattach: V5-S1). Differences only.
+        self._resync_statuses()
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
         # A handoff's in-flight state as the rows now have it: a row made

@@ -26,6 +26,11 @@ The data (every key optional)::
     gh_bytes    a map of a gh api endpoint ("repos/o/r/contents/a.png?ref=<sha>")
                 -> a file whose bytes prstatus.gh_bytes answers for it (a
                 missing key answers None): a PR file's blob, `kind=pr`
+    scan_gate   a path the store's every scan (store.discover_sessions)
+                waits for before it reads (30 s at most): a large projects
+                directory, whose rows land only once the check says so,
+                after a reconnecting window has re-attached its tabs
+                (check_service_restart.py, V5-S1)
 
 Every stubbed call is appended as a JSON line to ``<data>.calls.jsonl``
 (``{"stub": name, "args": [...]}``), which `e2e_service.stub_calls()`
@@ -148,6 +153,26 @@ def apply() -> None:
             return gitops.GitResult(True, "", "")
 
         files.trash_paths = trash_paths
+    if "scan_gate" in data:
+        # A slow first scan: the service listens long before its store has
+        # projected one (storefeed.subscribe sends no rows until `applied`),
+        # as a large projects directory does; here the scan waits for the
+        # check's word (the gate file), so the order is the check's to set.
+        import time
+
+        from collins import store as store_mod
+
+        real_discover = store_mod.discover_sessions
+
+        def discover_sessions(*args, **kwargs):
+            gate = _data().get("scan_gate") or ""
+            _record("scan_gate", [gate])
+            deadline = time.monotonic() + 30
+            while gate and not os.path.exists(gate) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            return real_discover(*args, **kwargs)
+
+        store_mod.discover_sessions = discover_sessions
 
 
 apply()
