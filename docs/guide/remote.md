@@ -220,8 +220,8 @@ banner goes, the terminal fills the pane again, and the session is redrawn
 at that size. The other window is pinned in turn. Moving the mouse over
 a pinned terminal, scrolling it or switching away from it takes nothing.
 When the window that has the size lets go of the session (it detaches,
-quits or loses its connection), the other one takes the size at once. Within one window none
-of this shows: a session has one tab there.
+quits or loses its connection), the other one takes the size at once.
+Within one window none of this shows: a session has one tab there.
 
 A picture or file you drop into a composer before its session has started
 (the new-chat screen) is uploaded to the box and shown back only to the

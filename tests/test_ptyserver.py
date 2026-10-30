@@ -349,6 +349,12 @@ def test_takes_role_reads_only_whole_frames_of_reports_as_passive():
     passives = (b"", b"\x1b[I", b"\x1b[O\x1b[I", b"\x1b[<35;120;40M", b"\x1b[<65;1;1m", b"\x1b[M\xff\xff\xff")
     for passive in passives:
         assert not takes_role(passive), passive
+    # The URXVT (?1015h) and UTF-8 (?1005h) mouse encodings: passive too
+    # (the Fable verification of PR 627, V2).
+    for passive in (b"\x1b[35;120;40M", b"\x1b[96;1;1M", b"\x1b[M \xc2\x80!", b"\x1b[M#\xc4\x80\xc3\xbf"):
+        assert not takes_role(passive), passive
+    for typing in (b"\x1b[35;120;40Mx", b"\x1b[35;120M", b"\x1b[M \xc2"):
+        assert takes_role(typing), typing
 
 
 def test_sinks_are_told_of_size_and_active_changes(server):

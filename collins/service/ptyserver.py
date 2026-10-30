@@ -227,22 +227,6 @@ log = logging.getLogger(__name__)
 # are not counted.
 INPUT_QUEUE_BYTES = 4 * 1024 * 1024
 
-# What a client's VTE commits on its own rather than a person typing: focus
-# reports (``ESC [ I`` / ``ESC [ O``, with ?1004h on) and mouse reports (SGR
-# ``ESC [ < b;x;y M|m`` and X10 ``ESC [ M bxy``: motion, wheel, the press
-# and release of a click). A frame made of nothing else takes no role
-# (§3.3, the Fable review of PR 627, M1): a pinned client re-attaching (its
-# focus state is sent when the redraw guard drops), losing focus, hovering
-# or wheeling must not take the size from the device that is using it. A
-# click takes it through the client's own `focus {focused: true}` event,
-# and focus does through that event too; a wheel does not.
-_PASSIVE_INPUT = re.compile(rb"(?:\x1b\[(?:[IO]|<\d+;\d+;\d+[Mm]|M[\x20-\xff]{3}))*")
-
-
-def takes_role(data: bytes) -> bool:
-    """Whether an input frame is a person typing, which makes its sink the
-    active client: anything but focus and mouse reports (and nothing)."""
-    return bool(data) and _PASSIVE_INPUT.fullmatch(data) is None
 # A redraw is bounded at attach time: the oldest scrollback rows are left
 # out until the snapshot fits (§3.2's "the screen as it is now").
 REDRAW_MAX = QUEUE_BYTES // 2
@@ -267,6 +251,35 @@ MODEL_SUFFIX = ".model"
 _AGENT = "agent"
 _SHELL = "shell"
 KINDS = frozenset({_AGENT, _SHELL})
+
+
+# What a client's VTE commits on its own rather than a person typing: focus
+# reports (``ESC [ I`` / ``ESC [ O``, with ?1004h on) and mouse reports
+# (motion, wheel, the press and release of a click) in every encoding a
+# program can ask for: SGR ``ESC [ < b;x;y M|m`` (?1006h, the CLI's), URXVT
+# ``ESC [ b;x;y M`` (?1015h), X10 ``ESC [ M bxy`` and its UTF-8 form, a
+# coordinate past 95 as two bytes (?1005h). A frame made of nothing else
+# takes no role (§3.3, the Fable review of PR 627, M1; V2 for the URXVT and
+# UTF-8 forms): a pinned client re-attaching (its focus state is sent when
+# the redraw guard drops), losing focus, hovering or wheeling must not take
+# the size from the device that is using it. A click takes it through the
+# client's own `focus {focused: true}` event, and focus does through that
+# event too; a wheel does not.
+_PASSIVE_INPUT = re.compile(
+    rb"(?:\x1b\[(?:"
+    rb"[IO]"
+    rb"|<\d+;\d+;\d+[Mm]"
+    rb"|\d+;\d+;\d+M"
+    rb"|M(?:[\x20-\x7f]|[\xc2-\xdf][\x80-\xbf]){3}"
+    rb"|M[\x20-\xff]{3}"
+    rb"))*"
+)
+
+
+def takes_role(data: bytes) -> bool:
+    """Whether an input frame is a person typing, which makes its sink the
+    active client: anything but focus and mouse reports (and nothing)."""
+    return bool(data) and _PASSIVE_INPUT.fullmatch(data) is None
 
 
 class SpawnError(OSError):
