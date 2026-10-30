@@ -59,6 +59,7 @@ import argparse
 import errno
 import logging
 import os
+import pwd
 import shutil
 import signal
 import socket
@@ -456,6 +457,15 @@ def lingering() -> bool | None:
     return None
 
 
+def linger_user() -> str:
+    """The name `loginctl enable-linger` takes for this user, or the shell's
+    ``$USER`` when the password database has no entry for the uid."""
+    try:
+        return pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        return "$USER"
+
+
 def check(app_id: str, out=sys.stdout) -> int:
     """`--check`: what a headless box needs, one line each; 1 when a
     requirement is missing (no ``$XDG_RUNTIME_DIR``, no ``claude`` on the
@@ -465,13 +475,17 @@ def check(app_id: str, out=sys.stdout) -> int:
     linger = lingering()
     print(f"service:      {__version__}, app id {app_id}", file=out)
     if linger is None:
-        print("lingering:    unknown (no loginctl)", file=out)
+        why = "no loginctl" if shutil.which("loginctl") is None else "loginctl did not say"
+        print(f"lingering:    unknown ({why})", file=out)
     elif linger:
         print("lingering:    on", file=out)
     else:
+        # A note, not a missing requirement (D52): on a desktop the login
+        # session keeps the user manager; on a headless box the service
+        # and every session end with the last logout unless it lingers.
         print(
-            "lingering:    off (the service ends at logout on a headless box; "
-            "`loginctl enable-linger` keeps it)",
+            "lingering:    off (on a headless box the service and its sessions end at "
+            f"the last logout; to keep them: loginctl enable-linger {linger_user()})",
             file=out,
         )
     if runtime:
