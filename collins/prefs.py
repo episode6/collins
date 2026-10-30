@@ -321,7 +321,9 @@ class PreferencesDialog(Adw.Dialog):
             title=_("Service"),
             icon_name="network-server-symbolic",
             description=(
-                _("The Collins service on {host}").format(host=host)
+                # The page's description is Pango markup, and the hello's
+                # host is the service's word (a remote machine's): escaped.
+                _("The Collins service on {host}").format(host=GLib.markup_escape_text(host))
                 if host
                 else _("The Collins service")
             ),
@@ -401,10 +403,12 @@ class PreferencesDialog(Adw.Dialog):
         )
         toolbar_view.add_top_bar(header)
         toolbar_view.add_top_bar(search_bar)
-        # The search box is the first focusable widget in the dialog, so
-        # Adw.Dialog hands it the focus on open: preferences opens ready to
-        # type into. _on_search_stopped keeps Escape closing anyway.
+        # Preferences opens ready to type into: the box is named as the
+        # focus, because the view switcher's buttons come first in the focus
+        # chain now and Adw.Dialog would hand one of them the focus.
+        # _on_search_stopped keeps Escape closing anyway.
         self.set_child(toolbar_view)
+        self.set_focus(self._search_entry)
 
     def _build_cli_group(self, state: AppState) -> _SearchableGroup:
         # Above everything on the Service page, under no heading: the CLI is

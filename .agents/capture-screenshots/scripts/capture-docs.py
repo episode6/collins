@@ -87,18 +87,37 @@ if args.scene not in SCENES:
 
 
 def edit_settings() -> None:
-    path = os.path.join(os.environ["XDG_CONFIG_HOME"], "collins", "state.json")
+    # A setting lives in one of two files since the state split: the
+    # service's in state.json, this device's (the window's size among them)
+    # in ui-state.json. --size and --set write each where the app reads it.
+    sys.path.insert(0, args.repo_root)
+    from collins.state import DEVICE_SETTINGS
+
+    config = os.path.join(os.environ["XDG_CONFIG_HOME"], "collins")
+    path = os.path.join(config, "state.json")
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     settings = data.setdefault("settings", {})
+    ui_path = os.path.join(config, "ui-state.json")
+    try:
+        with open(ui_path, encoding="utf-8") as fh:
+            ui = json.load(fh)
+    except (OSError, ValueError):
+        ui = {}
+    device = ui.setdefault("device", {}).setdefault("settings", {})
+    edits: dict = {}
     if args.size:
         w, h = args.size.lower().split("x")
-        settings["window_width"], settings["window_height"] = int(w), int(h)
+        edits["window_width"], edits["window_height"] = int(w), int(h)
     for item in args.set:
         key, _, value = item.partition("=")
-        settings[key] = json.loads(value)
+        edits[key] = json.loads(value)
+    for key, value in edits.items():
+        (device if key in DEVICE_SETTINGS else settings)[key] = value
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
+    with open(ui_path, "w", encoding="utf-8") as fh:
+        json.dump(ui, fh, indent=2)
 
 
 edit_settings()

@@ -77,9 +77,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 import e2e_service  # noqa: E402
-from gi.repository import Adw, GLib  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from collins import claudemodels, i18n, mcptools, prefslayout  # noqa: E402
+from collins import apilink, claudemodels, i18n, mcptools, prefslayout  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.prefs import PreferencesDialog  # noqa: E402
 from collins.state import SERVICE_SETTINGS, AppState  # noqa: E402
@@ -184,10 +184,49 @@ def stage() -> bool:
     return later(step_layout)
 
 
+def labels_under(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, Gtk.Label):
+            yield child
+        yield from labels_under(child)
+        child = child.get_next_sibling()
+
+
+def step_host_markup(win) -> None:
+    """The hello's host is a remote machine's word and the page's
+    description is Pango markup (rule 5): a host with markup characters is
+    shown as it is, not parsed. Patched here, in the client's own process."""
+    real = apilink.service_host
+    apilink.service_host = lambda: "a&b<c>"
+    try:
+        other = PreferencesDialog(win.state, lambda: None)
+    finally:
+        apilink.service_host = real
+    page = other._service_page
+    check(
+        "the service page's description carries the host escaped",
+        page.get_description() == "The Collins service on a&amp;b&lt;c&gt;",
+        page.get_description(),
+    )
+    shown = [lb.get_text() for lb in labels_under(page) if lb.get_text().startswith("The Collins service")]
+    check("and its label shows the host verbatim", shown == ["The Collins service on a&b<c>"], shown)
+
+
 def step_layout() -> bool:
     dialog = state["dialog"]
     device, service = dialog._device_page, dialog._service_page
     check("the dialog opens on This device", dialog._view_stack.get_visible_child() is device)
+    # The view switcher's buttons come first in the focus chain: the dialog
+    # names the search box as its focus, so typing after opening searches.
+    # (The focus sits on the entry's inner text widget, its editable.)
+    focus = dialog.get_focus()
+    check(
+        "the search box has the focus",
+        focus is not None and (focus is dialog._search_entry or focus.is_ancestor(dialog._search_entry)),
+        focus,
+    )
+    step_host_markup(state["win"])
     for side, page in (("device", device), ("service", service)):
         headings = [g.get_title() or "" for g in page.groups]
         check(
@@ -257,6 +296,8 @@ def step_pin() -> bool:
                 continue
             for row in group.rows:
                 settings = getattr(row, "settings", None)
+                # _SearchableGroup.add is the only way onto a page, so this
+                # cannot fire today; it guards a future bypass of it.
                 if settings is None:
                     problems.append(f"{name}/{half_side}: a row with no settings tag")
                     continue

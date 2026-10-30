@@ -111,6 +111,7 @@ GROUP_SETTINGS: dict[str, tuple[str, ...]] = {
                "editor_show_hidden_files", "editor_narrow_width", "editor_pop_out_screen_width"),
 }
 
+
 def page_groups(side: str) -> tuple[str, ...]:
     """The groups of one page of the dialog, in GROUPS order: "device" (This
     device) or "service" (Service). A side's own groups and every mixed one,

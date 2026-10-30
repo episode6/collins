@@ -401,7 +401,7 @@ downloads of each version, see the
   the page without any gives way to the one with. A window on a service on
   another machine now shows which of its settings are that machine's.
 - **Which sidebar groups are expanded is this device's.** The fold state
-  used to be kept by the service, so a laptop and a phone's window sharing
+  used to be kept by the service, so a laptop and a desktop window sharing
   one service folded each other's sidebars. It is now kept in this
   device's own file, per service; the first time a device meets a service
   it takes the service's old value, once, so nothing refolds.

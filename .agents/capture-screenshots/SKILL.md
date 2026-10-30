@@ -160,7 +160,11 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
     welcome dialog — collins/welcome.py — opens over every shot; leave it
     unset only to shoot that dialog), `"title_model": "none"` (otherwise
     the app spawns headless `claude` runs to title your fake sessions);
-    `window_width`/`window_height` size the shot (1100×720 reads well).
+    `window_width`/`window_height` size the shot (1100×720 reads well) —
+    but they are this device's settings, which live in `ui-state.json`
+    (`device.settings`), not here: `capture-docs.py`'s `--size` / `--set`
+    write each key to the file its side reads (a size left in
+    `state.json` gives the default window, 1280×800).
 - Saved panel-terminal history is plain text at
   `state/collins/panel_history/<uuid>.txt`; a session with a file there
   replays it when its tab's panel opens.
