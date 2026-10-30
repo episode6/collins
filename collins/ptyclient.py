@@ -105,12 +105,23 @@ class ClientVte(Vte.Terminal):
 class PinBox(Gtk.Widget):
     """The fixed-size box (§3.24 "Two clients", F2): holds the terminal's
     scrolled window and, while *pinned*, allocates it exactly the room the
-    terminal's grid takes (the terminal's natural size, which `set_size`
-    made the pty's grid, plus what the scrolled window wraps around it),
-    at the top left, clipped: a pane smaller than the grid cuts the view
-    off, a larger one leaves the rest empty, and neither regrids the VTE.
-    Unpinned it is a plain bin. Its own size request is always the
-    child's, so pinning never moves the layout around it."""
+    terminal's grid takes, at the top left, clipped: a pane smaller than
+    the grid cuts the view off, a larger one leaves the rest empty, and
+    neither regrids the VTE. Unpinned it is a plain bin. Its own size
+    request is always the child's, so pinning never moves the layout
+    around it.
+
+    The room is the grid in cells plus everything around the cells, which
+    the last unpinned allocation measured: the scrolled window's width
+    less the cells the terminal fitted into it is the window's frame, the
+    terminal's margins, border and padding and the remainder short of a
+    cell, all of it, whatever a theme puts there. So the pinned terminal
+    gets its cells plus that, and its grid is the pty's (the Fable review
+    of PR 627, S1: learning it against the content box counted the
+    margins and padding twice, and a 60x15 pin with 12 px margins came
+    out 62x16). The terminal's natural size is not read for it: GTK's
+    measure cache still holds the grid from before the allocation that
+    just regridded the terminal."""
 
     __gtype_name__ = "CollinsPinBox"
 
@@ -119,10 +130,9 @@ class PinBox(Gtk.Widget):
         self._child = child
         self._terminal = terminal
         self._pinned = False
-        # What the scrolled window takes around the terminal (borders, a
-        # scrollbar that is not an overlay, the terminal's own margins),
-        # learned from the last unpinned allocation.
-        self._chrome = (0, 0)
+        # Everything around the cells (see the class docstring), from the
+        # last unpinned allocation; None until there was one.
+        self._chrome: tuple[int, int] | None = None
         self.set_overflow(Gtk.Overflow.HIDDEN)
         child.set_parent(self)
 
@@ -143,21 +153,36 @@ class PinBox(Gtk.Widget):
         minimum, natural, min_baseline, nat_baseline = self._child.measure(orientation, for_size)
         return (minimum, natural, min_baseline, nat_baseline)
 
+    def _cells(self) -> tuple[int, int]:
+        terminal = self._terminal
+        return (
+            terminal.get_column_count() * terminal.get_char_width(),
+            terminal.get_row_count() * terminal.get_char_height(),
+        )
+
     def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
         if not self._pinned:
             self._child.allocate(width, height, baseline, None)
+            # The terminal set its grid inside that allocation.
+            cells_w, cells_h = self._cells()
             self._chrome = (
-                max(0, self._child.get_width() - self._terminal.get_width()),
-                max(0, self._child.get_height() - self._terminal.get_height()),
+                max(0, self._child.get_width() - cells_w),
+                max(0, self._child.get_height() - cells_h),
             )
             return
-        # The terminal's natural size is its grid in cells plus its
-        # padding (and its margins, which the chrome counts again: a few
-        # pixels over, never under, and short of a cell either way).
-        _min_w, natural_w, _b, _c = self._terminal.measure(Gtk.Orientation.HORIZONTAL, -1)
-        _min_h, natural_h, _d, _e = self._terminal.measure(Gtk.Orientation.VERTICAL, natural_w)
+        if self._chrome is None:
+            # Pinned before it was ever shown unpinned (a tab opened on a
+            # session another device owns): the terminal's natural size,
+            # its grid plus its own margins and padding, and nothing for
+            # the scrolled window (overlay scrollbars take no room).
+            _min_w, natural_w, _b, _c = self._terminal.measure(Gtk.Orientation.HORIZONTAL, -1)
+            _min_h, natural_h, _d, _e = self._terminal.measure(Gtk.Orientation.VERTICAL, natural_w)
+            self._child.allocate(natural_w, natural_h, -1, None)
+            return
+        # `set_size` made the grid the pty's before the pin was asked for.
+        cells_w, cells_h = self._cells()
         chrome_w, chrome_h = self._chrome
-        self._child.allocate(natural_w + chrome_w, natural_h + chrome_h, -1, None)
+        self._child.allocate(cells_w + chrome_w, cells_h + chrome_h, -1, None)
 
     def do_dispose(self) -> None:
         if self._child is not None and self._child.get_parent() is self:
@@ -330,6 +355,12 @@ class ClientTerminal:
             self.frame.show_role(self.role)
         self.guard.raise_for_attach()
         self.terminal.reset(True, True)
+        # A pinned client attaching again (a reconnect) reads the grid it
+        # was pinned to, not its pane's: the reset above unpinned the box,
+        # so the next allocation regrids the VTE and `_on_allocated` sends
+        # the pane's grid once the reply says this client is active (and
+        # the service files it away while it is not). The Fable review of
+        # PR 627, N4.
         cols, rows = self.grid()
         try:
             reply = self.client.request({"t": "attach", "pty": pty, "cols": cols, "rows": rows})
