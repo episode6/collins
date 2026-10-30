@@ -112,6 +112,13 @@ def edit_settings() -> None:
     for item in args.set:
         key, _, value = item.partition("=")
         edits[key] = json.loads(value)
+    # A device key left in state.json's settings would be migrated over
+    # ui-state.json's on the service's first start (a staged state.json has
+    # no service_id), so the first scene's size would depend on a race: pop
+    # every one, whoever staged it.
+    for key in [k for k in settings if k in DEVICE_SETTINGS]:
+        device.setdefault(key, settings[key])
+        del settings[key]
     for key, value in edits.items():
         (device if key in DEVICE_SETTINGS else settings)[key] = value
     with open(path, "w", encoding="utf-8") as fh:

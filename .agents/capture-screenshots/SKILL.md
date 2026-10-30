@@ -162,9 +162,12 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
     the app spawns headless `claude` runs to title your fake sessions);
     `window_width`/`window_height` size the shot (1100×720 reads well) —
     but they are this device's settings, which live in `ui-state.json`
-    (`device.settings`), not here: `capture-docs.py`'s `--size` / `--set`
-    write each key to the file its side reads (a size left in
-    `state.json` gives the default window, 1280×800).
+    (`device.settings`), not here: stage them there. A device key left in
+    `state.json`'s `settings` is migrated over `ui-state.json`'s on the
+    service's first start (a staged `state.json` has no `service_id`), so
+    which size a shot gets would depend on a race; `capture-docs.py` moves
+    any it finds into `ui-state.json` and its `--size` / `--set` write each
+    key to the file its side reads.
 - Saved panel-terminal history is plain text at
   `state/collins/panel_history/<uuid>.txt`; a session with a file there
   replays it when its tab's panel opens.
