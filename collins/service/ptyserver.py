@@ -882,10 +882,19 @@ class PtyServer:
             return
         self._keeper_restarting = True
         restart = self._keeper_restart
-        # The masters to hand over, snapshotted here: the worker adopts them
-        # off the main loop (N-N4), and whatever is spawned meanwhile is
-        # handed over when the result lands.
-        masters = [(pty.id, pty.pid, pty.master) for pty in self._adoptable()]
+        # The masters to hand over, as duplicates made here on the main
+        # loop (V2-S2 of the verification of PR 629): the worker takes
+        # seconds, and a pty that ends meanwhile closes its master, whose
+        # number the next open takes, so a raw number could reach the new
+        # keeper as another file or as EBADF. The duplicates are the
+        # worker's to close; whatever is spawned meanwhile is handed over
+        # when the result lands.
+        masters: list[tuple[int, int, int]] = []
+        for pty in self._adoptable():
+            try:
+                masters.append((pty.id, pty.pid, os.dup(pty.master)))
+            except OSError as exc:
+                log.warning("pty %d: its master could not be duplicated for the hand-over: %s", pty.id, exc)
 
         def work() -> None:
             fresh = None
@@ -896,6 +905,12 @@ class PtyServer:
                     handed = self._hand_over(fresh, masters)
             except Exception:
                 log.exception("restarting the keeper failed")
+            finally:
+                for _pty_id, _pid, dup in masters:
+                    try:
+                        os.close(dup)
+                    except OSError:
+                        pass
             GLib.idle_add(self._keeper_restarted, fresh, handed, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, name="keeper-restart", daemon=True).start()

@@ -396,6 +396,7 @@ class ServiceCore:
         # session they name is refused a second spawn (`keeper_held`).
         self.keeper_unread = False
         self.keeper_unread_reason = ""
+        self.keeper_unread_pid: int | None = None  # the unread keeper's pid, when known
 
     # -- the keeper and the adoption (PR-3.6, §3.10 item 2)
 
@@ -505,23 +506,54 @@ class ServiceCore:
             log.info("adopted %d pty(s) from the keeper: %s", len(adopted), adopted)
         return adopted
 
-    def mark_keeper_unread(self, reason: str) -> None:
+    def mark_keeper_unread(self, reason: str, pid: int | None = None) -> None:
         """A keeper exists for this app id but this service cannot read it
-        or speak its protocol (*reason*): the adoption touches nothing, the
-        sandbox sweeps are skipped, `service.status` says so and a session
-        a kept row names is refused a second spawn."""
+        or speak its protocol (*reason*; *pid* when known): the adoption
+        touches nothing, the sandbox sweeps are skipped, `service.status`
+        says so and a session a kept row names is refused a second spawn,
+        for as long as that keeper and the row's child live
+        (`held_session_ids`)."""
         self.keeper_unread = True
         self.keeper_unread_reason = reason
+        self.keeper_unread_pid = pid
 
     def held_session_ids(self) -> set[str]:
         """The sessions the kept rows name while the keeper is unread: each
-        has a CLI running somewhere this service cannot see."""
+        has a CLI running somewhere this service cannot see. A row counts
+        only while its child (`pid`) and the unread keeper are alive (V2-S1
+        of the verification of PR 629): once the user has stopped that
+        keeper, as the dialog advises, its rows are dropped, their models
+        pruned, and with none left the service is no longer unread, so the
+        sessions resume as any ended session does."""
         if not self.keeper_unread or self.state is None:
             return set()
-        return {
-            str(row.get("session")) for row in self.state.get_ptys(self.app_id).values()
-            if isinstance(row.get("session"), str) and row.get("session")
-        }
+        keeper_alive = self.keeper_unread_pid is None or keeper_mod.pid_alive(self.keeper_unread_pid)
+        held: set[str] = set()
+        live_rows = 0
+        for pty_id, row in self.state.get_ptys(self.app_id).items():
+            pid = row.get("pid")
+            whole = isinstance(pid, int) and not isinstance(pid, bool)
+            alive = keeper_alive and whole and keeper_mod.pid_alive(pid)
+            if not alive:
+                log.info("pty %d: its child or its keeper is gone; the row and its model are dropped", pty_id)
+                self.state.remove_pty(self.app_id, pty_id)
+                try:
+                    (self.ptys.state_dir / f"{pty_id}{ptyserver.MODEL_SUFFIX}").unlink()
+                except OSError:
+                    pass
+                continue
+            live_rows += 1
+            session = row.get("session")
+            if isinstance(session, str) and session:
+                held.add(session)
+        if not live_rows:
+            log.info("nothing is held by the unread keeper any more (%s)", self.keeper_unread_reason)
+            self.keeper_unread = False
+            self.keeper_unread_reason = ""
+            self.keeper_unread_pid = None
+            self.keeper_mismatch = 0
+            self.ptys.prune_models()
+        return held
 
     def _finish_adopted_dead(self, pty: ptyserver.Pty) -> bool:
         if pty.id in self.ptys.ptys and not pty._finished:

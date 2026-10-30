@@ -275,15 +275,43 @@ def process_start_wall(pid: int) -> float | None:
     return _boot_time + start / float(ticks or 100)
 
 
-def is_keeper_process(pid: int) -> bool:
+def is_pty_master(fd: int) -> bool:
+    """Whether *fd* is a pty master (``/dev/ptmx`` behind it)."""
+    try:
+        return os.readlink(f"/proc/self/fd/{fd}") == "/dev/ptmx"
+    except OSError:
+        return False
+
+
+def is_keeper_process(pid: int, socket_path: str | None = None) -> bool:
     """Whether *pid* runs this program (its cmdline names the module or the
-    command): what `read_pid` requires before it names a pid to kill."""
+    command) **for *socket_path***, when given (V2-N1 of the verification
+    of PR 629): a cmdline naming ``--socket`` must name that path, one
+    naming ``--app-id`` that path's app id, and one naming neither (the
+    unit's bare ``collins-keeper``) serves the default app id's socket, so
+    it passes. What `read_pid` requires before it names a pid to kill."""
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
             cmdline = fh.read(4096)
     except OSError:
         return False
-    return b"collins.service.keeper" in cmdline or b"collins-keeper" in cmdline
+    if b"collins.service.keeper" not in cmdline and b"collins-keeper" not in cmdline:
+        return False
+    if socket_path is None:
+        return True
+    args = cmdline.split(b"\0")
+    if b"--socket" in args:
+        try:
+            return args[args.index(b"--socket") + 1] == os.fsencode(socket_path)
+        except IndexError:
+            return False
+    if b"--app-id" in args:
+        try:
+            wanted = os.path.basename(os.path.dirname(socket_path))
+            return args[args.index(b"--app-id") + 1] == os.fsencode(wanted)
+        except IndexError:
+            return False
+    return True
 
 
 # -- the wire ---------------------------------------------------------------------------
@@ -659,6 +687,11 @@ class Keeper:
             raise ValueError("adopt takes one fd")
         if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
             raise ValueError("pid")
+        if not is_pty_master(fds[0]):
+            # Only a pty master is ever held (V2-S2): a number reused for
+            # another file between the service's snapshot and its hand-over
+            # is refused rather than kept under a pty's id.
+            raise ValueError("not a pty master")
         if pty_id in self.ptys:
             return {"ok": False, "error": "duplicate"}
         kept.append(fds[0])
@@ -947,7 +980,7 @@ def read_pid(socket_path: str) -> int | None:
     a pid file a SIGKILLed keeper left behind can name any process by
     now; only a `collins-keeper` is answered)."""
     pid = read_pid_file(socket_path)
-    if pid is None or not pid_alive(pid) or not is_keeper_process(pid):
+    if pid is None or not pid_alive(pid) or not is_keeper_process(pid, socket_path):
         return None
     return pid
 

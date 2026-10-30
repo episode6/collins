@@ -95,10 +95,14 @@ def keeper_wanted() -> bool:
     return (os.environ.get("COLLINS_KEEPER") or "").strip().lower() not in KEEPER_OFF
 
 
-def start_keeper_process(app_id: str, path: str) -> bool:
+def start_keeper_process(app_id: str, path: str) -> str | None:
     """Bring a keeper up for *app_id* on *path*: the user unit where it
     applies (the default id, `systemctl` present), else a detached
-    process of this interpreter. True when something was started."""
+    process of this interpreter. ``"unit"`` or ``"spawned"`` for what was
+    started, None for nothing. A `Type=simple` unit's start exits 0 even
+    when its `ExecStart` fails (V2-N2 of the verification of PR 629), so
+    the caller waits for the keeper to answer and spawns one itself when
+    the unit's does not."""
     if app_id == APP_ID and shutil.which("systemctl") and not os.environ.get("COLLINS_KEEPER"):
         try:
             result = subprocess.run(
@@ -114,8 +118,14 @@ def start_keeper_process(app_id: str, path: str) -> bool:
         else:
             if result.returncode == 0:
                 log.info("started %s", KEEPER_UNIT)
-                return True
+                return "unit"
             log.info("%s did not start (%s); spawning a keeper", KEEPER_UNIT, result.stderr.strip())
+    return "spawned" if spawn_keeper_process(app_id, path) else None
+
+
+def spawn_keeper_process(app_id: str, path: str) -> bool:
+    """A detached `collins-keeper` of this interpreter for *app_id* on
+    *path*; True when it was started."""
     env = dict(os.environ)
     env.pop("NOTIFY_SOCKET", None)
     env["COLLINS_APP_ID"] = app_id
@@ -205,9 +215,16 @@ def find_or_start_keeper(app_id: str) -> keeper_mod.KeeperClient | None:
     client = connect_keeper(path)
     if client is not None:
         return client
-    if not start_keeper_process(app_id, path):
+    how = start_keeper_process(app_id, path)
+    if how is None:
         return None
     client = connect_keeper(path, wait_s=KEEPER_WAIT_S)
+    if client is None and how == "unit":
+        # The unit "started" and nothing answers (its ExecStart failed, a
+        # removed venv): a keeper of this interpreter instead (V2-N2).
+        log.warning("%s started but no keeper answered on %s; spawning one", KEEPER_UNIT, path)
+        if spawn_keeper_process(app_id, path):
+            client = connect_keeper(path, wait_s=KEEPER_WAIT_S)
     if client is None:
         log.warning("no keeper answered on %s within %.0f s; running without one", path, KEEPER_WAIT_S)
     return client
@@ -555,10 +572,11 @@ class Service:
             # answer. Its ptys live, so the adoption must touch no row
             # (N-M1); with no keeper process at all the rows name dead ptys
             # and are dropped as before.
+            pid = keeper_mod.read_pid(api_server.keeper_socket_path(app_id))
             if self.core.keeper_mismatch:
-                self.core.mark_keeper_unread("it speaks another protocol")
-            elif keeper_mod.read_pid(api_server.keeper_socket_path(app_id)) is not None:
-                self.core.mark_keeper_unread("it did not answer")
+                self.core.mark_keeper_unread("it speaks another protocol", pid)
+            elif pid is not None:
+                self.core.mark_keeper_unread("it did not answer", pid)
         self._load_stubs()
         self.server = api_server.ApiServer(
             self.core,

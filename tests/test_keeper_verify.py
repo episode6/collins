@@ -4,23 +4,46 @@ that exists but cannot be read or spoken to leaves every row, model, plan
 and box, and a session it holds is refused a second spawn), N-M2 (an
 adopted id-less session's resolver judges a transcript by its first
 record's timestamp and never binds an id another live pty holds), N-N1
-(the flat pre-3.6 model files are pruned). GTK-free."""
+(the flat pre-3.6 model files are pruned), and its round 2: V2-S1 (a row
+is held only while its child and the unread keeper live), V2-S2 (the
+hand-over by duplicates, a non-master refused), V2-N1 (`read_pid` names
+the keeper of this socket). GTK-free."""
 
 from __future__ import annotations
 
 import json
 import os
+import signal
 import time
 from pathlib import Path
 
 import inproc
-from test_keeper import pump
+import pytest
+from test_keeper import ENV, KeeperProcess, pump
 
 from collins import sandboxplan
 from collins.api import protocol
 from collins.service import keeper
 from collins.service.core import HELD_BY_KEEPER_MSGID, ServiceCore
 from collins.service.session import Session
+
+
+@pytest.fixture
+def runtime():
+    import shutil
+    import tempfile
+
+    directory = tempfile.mkdtemp(prefix="ck-")
+    yield directory
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+@pytest.fixture
+def kept(runtime):
+    proc = KeeperProcess(runtime)
+    yield proc
+    proc.stop()
+
 
 # -- N-M1 ------------------------------------------------------------------------------------
 
@@ -30,9 +53,12 @@ def test_an_unread_keeper_leaves_everything_and_refuses_a_second_spawn(tmp_path,
     that did not answer) the adoption touches nothing, the sandbox sweeps
     are skipped, `service.status` says so, and a spawn of a session a kept
     row names is refused."""
+    import subprocess
+
     state = app_state.AppState()
     app = "com.example.Held"
-    row = {"kind": "agent", "cwd": "/tmp", "cols": 80, "rows": 24, "session": "s5"}
+    child = subprocess.Popen(["sleep", "60"], stdin=subprocess.DEVNULL)  # the held session's shell
+    row = {"kind": "agent", "cwd": "/tmp", "cols": 80, "rows": 24, "session": "s5", "pid": child.pid}
     state.set_pty(app, 5, row)
     models = tmp_path / "pty" / app
     models.mkdir(parents=True)
@@ -67,6 +93,8 @@ def test_an_unread_keeper_leaves_everything_and_refuses_a_second_spawn(tmp_path,
     finally:
         srv.shutdown()
         pump(lambda: not core.ptys.ptys, timeout=8, what="the shell to end")
+        child.kill()
+        child.wait()
 
 
 def test_no_keeper_process_at_all_drops_the_rows(tmp_path, app_state):
@@ -220,3 +248,142 @@ def test_the_flat_pre36_model_files_are_pruned_once(tmp_path):
     assert not (root / "7.model").exists()
     assert (root / "com.example.Other" / "3.model").exists() and (root / "notes.txt").exists()
     assert keeper.pid_alive(os.getpid())
+
+
+# -- V2-S1 -----------------------------------------------------------------------------------
+
+
+def test_a_held_row_is_dropped_once_its_child_or_keeper_is_gone(tmp_path, app_state):
+    """V2-S1: a row counts as held only while its child and the unread
+    keeper live; with the keeper stopped as the dialog advises, the rows
+    are dropped, their models pruned, `keeper_unread` cleared and the
+    session resumes as any ended one does."""
+    import subprocess
+    import sys
+
+    state = app_state.AppState()
+    app = "com.example.Stale"
+    live = subprocess.Popen(["sleep", "60"], stdin=subprocess.DEVNULL)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    try:
+        state.set_pty(app, 1, {"kind": "agent", "cwd": "/tmp", "pid": live.pid, "session": "s-live"})
+        state.set_pty(app, 2, {"kind": "agent", "cwd": "/tmp", "pid": dead.pid, "session": "s-dead"})
+        models = tmp_path / "pty" / app
+        models.mkdir(parents=True)
+        for n in (1, 2):
+            (models / f"{n}.model").write_text("{}")
+        keeper_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        core = ServiceCore(state=state, state_dir=tmp_path / "pty", app_id=app)
+        core.mark_keeper_unread("it did not answer", pid=keeper_proc.pid)
+        # The dead child's row goes at once; the live one is held.
+        assert core.held_session_ids() == {"s-live"}
+        assert set(state.get_ptys(app)) == {1} and core.keeper_unread
+        assert not (models / "2.model").exists() and (models / "1.model").exists()
+        # The keeper stopped: nothing is held any more, the service is no
+        # longer unread, and the last row and model go.
+        keeper_proc.kill()
+        keeper_proc.wait()
+        assert core.held_session_ids() == set()
+        assert core.keeper_unread is False and core.keeper_mismatch == 0
+        assert state.get_ptys(app) == {} and not (models / "1.model").exists()
+    finally:
+        live.kill()
+        live.wait()
+
+
+# -- V2-S2 -----------------------------------------------------------------------------------
+
+
+def test_the_keeper_refuses_to_adopt_what_is_not_a_pty_master(kept):
+    """V2-S2: an `adopt` whose fd is not a pty master (a number the service
+    closed and the next open took) is refused `invalid`, the fd closed."""
+    client = kept.client()
+    r, w = os.pipe()
+    try:
+        before = len(_fds(kept.pid))
+        try:
+            client.adopt(9, os.getpid(), r)
+        except keeper.KeeperError as refused:
+            assert refused.reply["error"] == "invalid" and "pty master" in refused.reply["detail"]
+        else:
+            raise AssertionError("a pipe was adopted as a master")
+        assert client.list(with_fds=False) == []
+        assert len(_fds(kept.pid)) <= before
+    finally:
+        os.close(r)
+        os.close(w)
+
+
+def _fds(pid: int) -> list[str]:
+    try:
+        return os.listdir(f"/proc/{pid}/fd")
+    except OSError:
+        return []
+
+
+def test_the_hand_over_uses_duplicates_it_closes_after(kept, runtime, tmp_path):
+    """V2-S2: `_keeper_lost` duplicates each master for the worker, so a
+    master closed and its number reused on the main loop meanwhile is never
+    what reaches the new keeper; the duplicates are closed once handed."""
+    from test_keeper import KeeperProcess, Recorder, Sink, kill_child, make_server, settle
+
+    recorder = Recorder()
+    second: list[KeeperProcess] = []
+    gate = {"go": False}
+
+    def restart():
+        while not gate["go"]:
+            time.sleep(0.02)
+        proc = KeeperProcess(runtime)
+        second.append(proc)
+        return proc.client()
+
+    server = make_server(tmp_path, kept.client(), recorder, keeper_restart=restart)
+    sink = Sink()
+    first = server.spawn("shell", ["cat"], "/tmp", ENV, 80, 24)
+    master = server.get(first).master
+    try:
+        kept.stop(signal.SIGKILL)
+        server.attach(first, sink, 80, 24)
+        server.write(first, b"x", sink)  # the write fails on the dead keeper's absence? no: the pty lives
+        server._keeper_lost(keeper.KeeperError(32, "gone"))  # the worker now waits at the gate
+        pump(lambda: server._keeper_restarting, timeout=2, what="the restart to begin")
+        # Meanwhile the original master's number is closed and reused by
+        # another file on the main loop.
+        server._close_master(server.get(first))
+        reused = os.open("/dev/null", os.O_RDONLY)
+        assert reused == master  # the lowest free number: the one just closed
+        gate["go"] = True
+        pump(lambda: bool(second) and server.keeper is not None and server.keeper.pid == second[0].pid,
+             timeout=8, what="the replacement keeper")  # fmt: skip
+        listed = server.keeper.list(with_fds=True)
+        try:
+            assert [e["id"] for e in listed] == [first] and listed[0]["adopted"]
+            assert keeper.is_pty_master(listed[0]["fd"])  # the duplicate, not /dev/null
+        finally:
+            for e in listed:
+                os.close(e["fd"])
+        os.close(reused)
+    finally:
+        pty = server.ptys.get(first)
+        if pty is not None and pty.pid:
+            kill_child(pty.pid)
+        server.shutdown()
+        pump(lambda: not server.ptys, timeout=8, what="the ptys to end")
+        for proc in second:
+            proc.stop()
+        settle(0.1)
+
+
+# -- V2-N1 -----------------------------------------------------------------------------------
+
+
+def test_read_pid_names_only_the_keeper_of_this_socket(kept):
+    """V2-N1: a pid file whose pid is another socket's keeper (a recycled
+    pid) is not this socket's keeper."""
+    assert keeper.read_pid(kept.socket) == kept.pid
+    assert keeper.is_keeper_process(kept.pid, kept.socket) is True
+    assert keeper.is_keeper_process(kept.pid, "/elsewhere/k.sock") is False
+    assert keeper.is_keeper_process(kept.pid) is True
+    assert keeper.is_keeper_process(os.getpid(), kept.socket) is False
