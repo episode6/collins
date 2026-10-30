@@ -2129,6 +2129,29 @@ class Session:
         self._settle_launch(cwd, session_id)
         self.shell_spawned()
 
+    def adopt(self, cwd: str, box: str = "", plan: str | None = None) -> None:
+        """The session of a pty a restarted service took over from the
+        keeper (PR-3.6, §3.10 item 2): the shell is up and the agent most
+        likely running, so nothing is typed and no launch is settled. What
+        the launch would have left on this object is set from the pty's
+        row: where the shell runs, and for a sandboxed session its box and
+        the plan file it launched from (the box is held again and its
+        grants registered by the core, in §3.9's order, once the sandbox
+        host is up; the plan is this session's to release at its exit, as
+        one it wrote itself). Nothing of the transcript resolver runs: a
+        session whose id the row did not carry stays unresolved."""
+        self.cwd = cwd
+        self.initial_command = None
+        self.worktree_launch = False
+        if plan and box and os.path.isfile(plan):
+            self.sandbox_plan_path = plan
+            self.sandbox_plan_adopted = False
+            self.sandbox_box = box
+        elif box:
+            # The plan file is gone (swept, or never ours): the box id is
+            # kept so the chip's restart rebuilds in the same home.
+            self.sandbox_box = box
+
     def shell_spawned(self) -> None:
         """The shell is up on the pty (its pid is the pty's now): type the
         agent command, and start watching a worktree launch. With a

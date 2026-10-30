@@ -249,7 +249,8 @@ each taken from the code the message replaces:
   loaded, and the result sent; the service's echo is the event.
 - `service.restart` takes a required `when`, ``now`` or ``idle`` (§3.10's
   *Restart when idle*); `service.status` answers with the version, the protocol and
-  the counts of ptys, busy sessions and clients.
+  the counts of ptys, busy sessions and clients, and `keeper` (the keeper's
+  pid, PR-3.6) when a restart keeps every pty.
 - The session on the service (PR-1.12a, §3.19). `spawn` for an agent
   carries what `service.session.Session` is built from (`fork`,
   `continue_recent`, `jsonl_path`, `sandbox_plan`, `fork_resolve`, the
@@ -2668,6 +2669,10 @@ _TABLE: tuple[MessageType, ...] = (
                 # word: "ready", "missing", "logged-out"); absent until the
                 # service has asked (PR-1.12d).
                 "gh": _SHORT,
+                # The keeper's pid (PR-3.6, §3.10 item 2): present when a
+                # keeper holds the ptys, so a restart of the service keeps
+                # every session running; absent when a restart ends them.
+                "keeper": _i(1, PID_MAX),
                 # Where the service's `claude` lookup lands ("" when it
                 # finds none): what the welcome gate asks (welcomegate).
                 # Absent from an older service, which the client reads as

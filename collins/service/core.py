@@ -147,6 +147,7 @@ import json
 import logging
 import os
 import shlex
+import signal
 import threading
 import time
 from collections.abc import Callable
@@ -161,6 +162,7 @@ from .. import (
     clisetup,
     notifycenter,
     panelhistory,
+    projectfiles,
     providers,
     sandboxgrants,
     sandboxplan,
@@ -188,6 +190,7 @@ from . import (
 from . import blobs as blobs_mod
 from . import diffs as diffs_mod
 from . import files as files_mod
+from . import keeper as keeper_mod
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
@@ -327,6 +330,9 @@ class ServiceCore:
         # The device each pending upload came from (PR-3.5): a drop made
         # before its session had an id is served back to that device only.
         self.pending_owners = uploads_mod.PendingOwners()
+        # The tree copies fs.paste has in flight, as rows of state.json
+        # (PR-3.6, §8): what `remove_inflight_copies` reads at start.
+        self.inflight_copies = InflightCopies(self)
         self.file_blobs = blobs_mod.FileBlobs(self)
         self.remote_blobs = blobs_mod.RemoteBlobs(self)
         self.icon_blobs = blobs_mod.IconBlobs(self)
@@ -365,9 +371,173 @@ class ServiceCore:
         # hosting.SessionRecord._send_changed): a session counts as running
         # only while it does (cli_changed).
         self._cli_running: dict[int, bool] = {}
+        # The plan files the adopted ptys launched from (PR-3.6): what the
+        # start-up sweep of plan files keeps.
+        self._adopted_plans: set[str] = set()
+
+    # -- the keeper and the adoption (PR-3.6, §3.10 item 2)
+
+    def attach_keeper(self, client, restart: Callable[[], object] | None = None) -> None:
+        """Every spawn goes through *client* (a connected
+        `keeper.KeeperClient`) from here on; *restart* brings a new keeper
+        when it is lost (`PtyServer._keeper_lost`)."""
+        self.ptys.keeper = client
+        self.ptys._keeper_restart = restart
+
+    def adopt_ptys(self) -> list[int]:
+        """At start, before the store: every pty the keeper lists whose row
+        the state kept is adopted (`PtyServer.adopt`), an agent's with a
+        `SessionRecord` over it (`adopt_session`); a row the keeper has no
+        pty for is dropped (the pty died with the service that had no
+        keeper, or the keeper was restarted and lost it); a pty the keeper
+        holds with no row is hung up (nothing is known of it). Then every
+        adopted program is made to repaint, and the model files of ptys not
+        in the table are pruned. Returns the adopted ids."""
+        keeper = self.ptys.keeper
+        rows = self.state.get_ptys() if self.state is not None else {}
+        adopted: list[int] = []
+        entries: list[dict] = []
+        if keeper is not None:
+            try:
+                entries = keeper.list(with_fds=True)
+            except keeper_mod.KeeperError as exc:
+                log.warning("the keeper's list could not be read: %s", exc)
+                entries = []
+        seen: set[int] = set()
+        for entry in entries:
+            try:
+                pty_id, pid, fd = int(entry["id"]), int(entry["pid"]), int(entry["fd"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            seen.add(pty_id)
+            row = rows.get(pty_id)
+            alive = bool(entry.get("alive"))
+            if row is None:
+                log.warning("pty %d: the keeper holds it but the state has no row; hanging it up", pty_id)
+                self._hang_up_unknown(keeper, pty_id, pid, fd)
+                continue
+            try:
+                pty = self.ptys.adopt(pty_id, fd, pid, row, alive=alive)
+            except Exception:
+                log.exception("pty %d: adopting it failed; hanging it up", pty_id)
+                self._hang_up_unknown(keeper, pty_id, pid, fd)
+                continue
+            if not alive:
+                status = entry.get("status")
+                if isinstance(status, int):
+                    try:
+                        pty.exit_status = os.waitstatus_to_exitcode(status)
+                    except ValueError:
+                        pty.exit_status = None
+            adopted.append(pty_id)
+            if pty.plan:
+                self._adopted_plans.add(pty.plan)
+            if pty.kind != "shell" and alive:
+                try:
+                    self.adopt_session(pty)
+                except Exception:
+                    log.exception("pty %d: no session could be built over the adopted pty", pty_id)
+        for pty_id in rows:
+            if pty_id not in seen and self.state is not None:
+                self.state.remove_pty(pty_id)
+        if rows and not seen:
+            log.info("no pty of the %d in the table survived; the rows are dropped", len(rows))
+        for pty_id in adopted:
+            pty = self.ptys.ptys.get(pty_id)
+            if pty is None:
+                continue
+            if not pty._reaped:
+                self.ptys.repaint(pty_id)
+            else:
+                # Already gone: the EOF its master reads finishes it
+                # (`_maybe_finish`); a shell's history is written there.
+                GLib.idle_add(self._finish_adopted_dead, pty, priority=GLib.PRIORITY_DEFAULT)
         pruned = self.ptys.prune_models()
         if pruned:
             log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
+        if adopted:
+            log.info("adopted %d pty(s) from the keeper: %s", len(adopted), adopted)
+        return adopted
+
+    def _finish_adopted_dead(self, pty: ptyserver.Pty) -> bool:
+        if pty.id in self.ptys.ptys and not pty._finished:
+            self.ptys._drain(pty)
+            self.ptys._finish(pty)
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _hang_up_unknown(keeper, pty_id: int, pid: int, fd: int) -> None:
+        try:
+            os.killpg(pid, signal.SIGHUP)
+        except (ProcessLookupError, PermissionError):
+            try:
+                os.kill(pid, signal.SIGHUP)
+            except (ProcessLookupError, PermissionError):
+                pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        if keeper is not None:
+            try:
+                keeper.reap(pty_id, wait=1.0)
+            except keeper_mod.KeeperError:
+                pass
+
+    def adopt_session(self, pty: ptyserver.Pty) -> hosting.SessionRecord:
+        """The `SessionRecord` of an adopted agent pty: built from the row
+        (its session id, cwd, options, box and plan) with nothing typed,
+        the transcript found by the id, and registered as a running
+        session when its CLI owns the terminal."""
+        provider = providers.get_provider("claude")
+        options = providers.options_from_record(pty.options)
+        transcript = self._transcript_for(provider, pty.session, pty.cwd)
+        record = hosting.SessionRecord(
+            self,
+            provider=provider,
+            session_id=pty.session,
+            options=options,
+            cwd=pty.cwd,
+            jsonl_path=transcript,
+            progress=True,
+            progress_env=self._get_setting("progress_termprop") in (None, True),
+        )
+        record.grid = (pty.cols, pty.rows)
+        record.pty_id = pty.id
+        pty.handle = record.handle
+        self.sessions[pty.id] = record
+        record.session.adopt(pty.cwd, box=pty.box or "", plan=pty.plan)
+        record.cli_ever_ran = True
+        running = False
+        try:
+            running = bool(record.session.has_running_command())
+        except Exception:
+            log.exception("session %s: the adopted pty's foreground could not be read", record.handle)
+        if running:
+            self._cli_running[pty.id] = True
+        log.info(
+            "pty %d: adopted as session %s (%s)", pty.id, pty.session or "unresolved",
+            "the CLI runs" if running else "a shell alone",
+        )
+        return record
+
+    @staticmethod
+    def _transcript_for(provider, session_id: str | None, cwd: str) -> str | None:
+        """The transcript of *session_id*: the one in *cwd*'s project
+        directory, else the newest anywhere under the projects directory;
+        None with no id or no file."""
+        if not session_id or not sessions._UUID_RE.match(session_id):
+            return None
+        for path in provider.transcripts_for_cwd(cwd):
+            if path.stem == session_id and transcript_path_allowed(str(path)):
+                return str(path)
+        try:
+            candidates = list(provider.projects_dir.glob(f"*/{session_id}.jsonl"))
+            allowed = [p for p in candidates if transcript_path_allowed(str(p))]
+            found = sorted(allowed, key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return None
+        return str(found[0]) if found else None
 
     @classmethod
     def with_state(cls, **kwargs) -> ServiceCore:
@@ -1090,7 +1260,18 @@ class ServiceCore:
             fields["live"] = (self.sandbox_grants.capable() or "")[: protocol.ARG_TEXT_MAX]
         if self.gh_status is not None:
             fields["gh"] = self.gh_status[: protocol.SHORT_MAX]
+        keeper = self.ptys.keeper
+        if keeper is not None and keeper.connected and isinstance(keeper.pid, int) and keeper.pid > 0:
+            # The keeper's pid (PR-3.6): with one, a restart keeps every pty.
+            fields["keeper"] = keeper.pid
         return protocol.reply(message.id, **fields)
+
+    @property
+    def keeper_holds(self) -> bool:
+        """Whether a keeper is connected to hand the ptys to the next
+        service: what makes a stop a `suspend` rather than an end."""
+        keeper = self.ptys.keeper
+        return keeper is not None and keeper.connected
 
     def cli_search_path(self) -> str:
         """The PATH the service looks the claude CLI up on: its session
@@ -1853,7 +2034,16 @@ class ServiceCore:
             return
         host = sandboxplan.SandboxHost(app_id, state, state.state_file())
         self.sandbox_host = host
-        swept = sandboxplan.sweep_plans(app_id)
+        # The adopted sessions first (PR-3.6, §3.9's order: adopt, re-hold,
+        # re-mount, then sweep): each box held again under this pid (its
+        # lease rewritten), its plan file kept from the sweep below.
+        adopted = [
+            record for record in self._records()
+            if record.session.sandbox_box and record.session.sandbox_plan_path
+        ]
+        for record in adopted:
+            host.hold(record.session.sandbox_box)
+        swept = sandboxplan.sweep_plans(app_id, keep=self._adopted_plans)
         if swept:
             log.info("sandbox: swept %d stale plan file(s)", swept)
         # Here, on the main loop, before the sweep's thread: it writes the state.
@@ -1872,7 +2062,28 @@ class ServiceCore:
             if gone:
                 log.info("sandbox: removed %d unused box(es)", gone)
 
-        threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
+        # The live grants of every adopted box mounted again (`register`
+        # delivers what the state holds that the plan lacks; a dead
+        # instance's stale mount at the point is unmounted first), and only
+        # once the last registration has landed do the sweeps run: the
+        # mounts made here carry this pid and are nobody's to sweep.
+        plans = [sandboxplan.load_plan(record.session.sandbox_plan_path) for record in adopted]
+        plans = [plan for plan in plans if plan]
+        remaining = [len(plans)]
+        lock = threading.Lock()
+
+        def registered(_deliveries) -> None:
+            with lock:
+                remaining[0] -= 1
+                last = remaining[0] <= 0
+            if last:
+                threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
+
+        if plans:
+            for plan in plans:
+                grants.register(plan, done=registered)
+        else:
+            threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
         sandboxplan.probe_async(self._on_probe)
 
     def _on_probe(self, reason: str) -> None:
@@ -1897,6 +2108,11 @@ class ServiceCore:
             get_setting=lambda key: self._get_setting(key) in (None, True),
             announce=self._announce_finished,
         )
+        # The sessions adopted before the tracker existed (PR-3.6): each
+        # registered as a spawn with an id is, never as fresh (its
+        # plumbing baseline was captured by the service that spawned it).
+        for record in self._records():
+            self.activity.started(record, fresh=False)
         return self.activity
 
     def start_background(self, **kwargs) -> bgagents.BackgroundAgents:
@@ -2027,6 +2243,31 @@ class ServiceCore:
                 session.relocate_transcript(moved)
             except Exception:
                 log.exception("session %s: following the moved transcript failed", record.handle)
+
+    def remove_inflight_copies(self) -> None:
+        """At start (PR-3.6, §8): every tree a dead service left building
+        under a temporary name (`inflight_copies`) is removed off the main
+        loop, exactly those and nothing else (`projectfiles.remove_inflight`
+        takes only a `.collins-<hex>` directory), and the rows cleared."""
+        state = self.state
+        if state is None:
+            return
+        rows = state.get_inflight_copies()
+        if not rows:
+            return
+
+        def work() -> None:
+            removed = sum(1 for row in rows if projectfiles.remove_inflight(row["dest"], row["name"]))
+            log.info("removed %d of %d unfinished tree copies a dead service left", removed, len(rows))
+
+            def landed() -> bool:
+                for row in rows:
+                    state.remove_inflight_copy(row["dest"], row["name"])
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(landed, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="inflight-copies", daemon=True).start()
 
     def start_housekeeping(self) -> None:
         """The service's own timers (PR-1.12d): the archive sweep at start
@@ -2733,25 +2974,93 @@ class ServiceCore:
         return lambda: self.force_close(pty_id)
 
     def shutdown(self) -> None:
+        self._stop_services()
+        self.ptys.shutdown()
+        self._stop_grants()
+
+    def suspend(self) -> int:
+        """§3.10 item 2: the keeper holds every pty, so a stopping service
+        ends no session. Every model is saved and every master closed with
+        no signal to any child (`PtyServer.suspend`); the rows stay in the
+        pty table and the plan files and leases on disk for the next
+        service's adoption; `resume_on_start` is emptied (nothing is to be
+        resumed: the sessions run on). The live grants are unmounted
+        cleanly (the bindfs servers die with this process anyway; the next
+        service mounts them again). Returns how many ptys were left to the
+        keeper."""
+        self._stop_services()
+        if self.state is not None:
+            try:
+                self.state.set_resume_on_start([])
+            except Exception:
+                log.exception("could not clear the sessions to resume")
+        kept = len(self.ptys.ptys)
+        self.ptys.suspend()
+        self.sessions.clear()
+        self._cli_running.clear()
+        self._stop_grants()
+        return kept
+
+    def _stop_services(self) -> None:
         self.cancel_restart()
         self.git.shutdown()
         self.files.shutdown()
         if self.background is not None:
             self.background.stop()
         if self._sweep_source:
-            from gi.repository import GLib
-
             GLib.source_remove(self._sweep_source)
             self._sweep_source = 0
         if self.activity is not None:
             self.activity.stop()
-        self.ptys.shutdown()
+
+    def _stop_grants(self) -> None:
         if self.sandbox_grants is not None:
             # Every directory mounted into a running box, unmounted; the
             # bindfs servers would go with the process anyway
             # (PR_SET_PDEATHSIG), this leaves nothing to chance.
             self.sandbox_grants.shutdown()
             self.sandbox_grants = None
+
+
+class InflightCopies:
+    """`projectfiles.InflightRecorder` over the core's state (PR-3.6, §8):
+    `begin` lands the row on the main loop (the state is written there)
+    and waits for it, bounded, so the row is on disk before the tree is
+    built; `end` clears it the same way. Called on a paste's worker."""
+
+    WAIT_S = 2.0
+
+    def __init__(self, core: ServiceCore) -> None:
+        self.core = core
+
+    def _land(self, call: Callable[[], None]) -> None:
+        done = threading.Event()
+
+        def landed() -> bool:
+            try:
+                call()
+            except Exception:
+                log.exception("the copies-in-flight row could not be written")
+            finally:
+                done.set()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(landed, priority=GLib.PRIORITY_DEFAULT)
+        done.wait(self.WAIT_S)
+
+    def begin(self, dest: str, name: str) -> tuple[str, str] | None:
+        state = self.core.state
+        if state is None:
+            return None
+        self._land(lambda: state.add_inflight_copy(dest, name))
+        return (dest, name)
+
+    def end(self, token: tuple[str, str] | None) -> None:
+        state = self.core.state
+        if token is None or state is None:
+            return
+        dest, name = token
+        self._land(lambda: state.remove_inflight_copy(dest, name))
 
 
 def _spawn_refusal(message: protocol.Message, exc: ptyserver.SpawnError) -> dict:

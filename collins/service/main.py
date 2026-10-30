@@ -33,6 +33,24 @@ saying which rounds answered.
 A second ``collins-service`` for the same app id finds the live socket and
 exits 0 after printing its path. ``sd_notify`` is a datagram to
 ``$NOTIFY_SOCKET`` (D32: no dependency). Nothing here imports GTK.
+
+**The keeper** (§3.10 item 2, PR-3.6). Before anything is spawned the
+service finds or starts the keeper (`service/keeper.py`): a connect to
+``keeper.sock`` beside the API socket; failing that, ``systemctl --user
+start collins-keeper.service`` for the default app id where ``systemctl``
+exists, else ``python -m collins.service.keeper --socket <path>`` spawned
+detached in a session of its own; then the connect again, bounded. Every
+pty is forked by the keeper from then on, and at start the ptys the
+keeper still holds from the last service are adopted
+(`ServiceCore.adopt_ptys`), before the store scans and before the sandbox
+host sweeps (§3.9's order: adopt, re-hold, re-mount, then sweep). With a
+keeper the stop sequence ends no session: `ServiceCore.suspend` saves
+every model and closes the service's masters, the children run on,
+blocked on their output until the next service adopts them, and
+``resume_on_start`` is left empty. Without one (no keeper could be
+started, or ``COLLINS_KEEPER=none``) the stop sequence is §3.10 item 1's,
+as before. A keeper lost mid-run is started again and handed every kept
+master (`PtyServer._keeper_lost`).
 """
 
 from __future__ import annotations
@@ -54,11 +72,101 @@ from gi.repository import GLib
 
 from .. import APP_ID, __version__, i18n, providers
 from ..api import server as api_server
+from . import keeper as keeper_mod
 
 log = logging.getLogger(__name__)
 
 CAPTURE_TIMEOUT_S = 5.0
 START_WAIT_S = 10.0
+# How long the service waits for a keeper it started to listen.
+KEEPER_WAIT_S = 5.0
+KEEPER_UNIT = "collins-keeper.service"
+# `COLLINS_KEEPER=none` (or 0, off): no keeper; the service forks its
+# ptys itself and a stop ends every session (§3.10 item 1), as before
+# PR-3.6. The unit suite's live services and a check that wants the old
+# ending set it; the product never does.
+KEEPER_OFF = frozenset({"none", "0", "off", "no"})
+
+
+# ---- the keeper -----------------------------------------------------------------------
+
+
+def keeper_wanted() -> bool:
+    return (os.environ.get("COLLINS_KEEPER") or "").strip().lower() not in KEEPER_OFF
+
+
+def connect_keeper(path: str, wait_s: float = 0.0) -> keeper_mod.KeeperClient | None:
+    """A connected client of the keeper at *path*, or None when none
+    answers within *wait_s*."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        client = keeper_mod.KeeperClient(path)
+        try:
+            client.connect()
+            return client
+        except keeper_mod.KeeperError:
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.05)
+
+
+def start_keeper_process(app_id: str, path: str) -> bool:
+    """Bring a keeper up for *app_id* on *path*: the user unit where it
+    applies (the default id, `systemctl` present), else a detached
+    process of this interpreter. True when something was started."""
+    if app_id == APP_ID and shutil.which("systemctl") and not os.environ.get("COLLINS_KEEPER"):
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "start", KEEPER_UNIT],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.info("systemctl --user start %s failed: %s", KEEPER_UNIT, exc)
+        else:
+            if result.returncode == 0:
+                log.info("started %s", KEEPER_UNIT)
+                return True
+            log.info("%s did not start (%s); spawning a keeper", KEEPER_UNIT, result.stderr.strip())
+    env = dict(os.environ)
+    env.pop("NOTIFY_SOCKET", None)
+    env["COLLINS_APP_ID"] = app_id
+    quiet = not os.environ.get("COLLINS_LOG")
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "collins.service.keeper", "--app-id", app_id, "--socket", path],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.DEVNULL if quiet else None,
+            start_new_session=True,  # outlives this service: a session of its own
+            close_fds=True,
+        )
+    except OSError as exc:
+        log.warning("could not spawn a keeper: %s", exc)
+        return False
+    return True
+
+
+def find_or_start_keeper(app_id: str) -> keeper_mod.KeeperClient | None:
+    """The keeper for *app_id*, connected: the one running, else one
+    started here; None when none can be had (the service then forks its
+    ptys itself, and a stop ends every session), or when it is off."""
+    if not keeper_wanted():
+        return None
+    path = api_server.keeper_socket_path(app_id)
+    client = connect_keeper(path)
+    if client is not None:
+        return client
+    if not start_keeper_process(app_id, path):
+        return None
+    client = connect_keeper(path, wait_s=KEEPER_WAIT_S)
+    if client is None:
+        log.warning("no keeper answered on %s within %.0f s; running without one", path, KEEPER_WAIT_S)
+    return client
 
 
 # ---- helpers ------------------------------------------------------------------------
@@ -392,6 +500,12 @@ class Service:
         self.environment = merge_environment(dict(os.environ), login_shell_environment())
         self.core = ServiceCore.with_state(environment=lambda: dict(self.environment))
         self.core.app_id = app_id
+        # The keeper, before anything is spawned (PR-3.6); its loss mid-run
+        # brings another (`PtyServer._keeper_lost`).
+        self.keeper = find_or_start_keeper(app_id)
+        if self.keeper is not None:
+            self.core.attach_keeper(self.keeper, restart=lambda: find_or_start_keeper(app_id))
+            log.info("the keeper is pid %s", self.keeper.pid)
         self._load_stubs()
         self.server = api_server.ApiServer(
             self.core,
@@ -438,6 +552,10 @@ class Service:
         # `~/.local/bin` (PR-3.0 item 10).
         clisetup.set_search_base(lambda: self.environment.get("PATH"))
         clisetup.apply_saved(core.state)
+        # The ptys the keeper held across the last service's stop, adopted
+        # first (PR-3.6): the store's running rows and the sandbox host's
+        # re-hold read them.
+        core.adopt_ptys()
         core.start_store()
         core.start_activity()
         core.start_sandbox_host(self.app_id)
@@ -445,6 +563,7 @@ class Service:
         # replay) and the service's own timers (the archive sweep, gh).
         core.start_background()
         core.start_housekeeping()
+        core.remove_inflight_copies()
         core.start_tools()
         core.start_sandbox()
         config = core.start_mcp(self.app_id)
@@ -475,9 +594,12 @@ class Service:
         self.stop()
 
     def stop(self) -> None:
-        """§3.10 item 1: stop accepting, end every session as *Stop
-        sessions and quit* does (ids recorded as ``resume_on_start``), the
-        grants and the ptys with the core, the socket gone, exit 0."""
+        """Stop accepting, disconnect the clients, then: with a keeper
+        holding the ptys (§3.10 item 2), `suspend` (every model saved, the
+        masters closed, every session left running for the next service);
+        without one (§3.10 item 1) end every session as *Stop sessions and
+        quit* does (ids recorded as ``resume_on_start``). The grants and
+        the socket go either way; exit 0."""
         if self.stopping:
             return
         self.stopping = True
@@ -490,6 +612,12 @@ class Service:
             # resumes each on the service that starts next (§3.21) instead
             # of closing them one by one as their sessions end.
             self.server.stop()
+            if self.core.keeper_holds:
+                kept = self.core.suspend()
+                keeper_pid = self.keeper.pid if self.keeper else "?"
+                log.info("leaving %d pty(s) to the keeper (pid %s)", kept, keeper_pid)
+                self._stopped()
+                return
             ended = self.core.stop_sessions(done=self._stopped)
             if ended:
                 log.info("ending %d session(s), recorded to resume", len(ended))

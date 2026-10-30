@@ -786,6 +786,20 @@ def _clean_settings(raw: object) -> dict:
     return {k: v for k, v in raw.items() if isinstance(k, str) and k}
 
 
+def _clean_inflight_copies(raw: object) -> list[dict]:
+    """``[{"dest": <directory>, "name": <temporary name>}, ...]``: an entry
+    is kept only with both as non-empty strings."""
+    if not isinstance(raw, list):
+        return []
+    return [
+        {"dest": e["dest"], "name": e["name"]}
+        for e in raw
+        if isinstance(e, dict)
+        and isinstance(e.get("dest"), str) and e["dest"]
+        and isinstance(e.get("name"), str) and e["name"]
+    ]
+
+
 def _clean_service_id(raw: object) -> str:
     return raw if uistate._is_id(raw) else ""
 
@@ -849,6 +863,10 @@ SHARED_KEYS: dict[str, SharedKey] = {
         SharedKey("resume_on_start", LIST, _clean_set, writable=False),
         SharedKey("ptys", MAP, _clean_ptys, writable=False),
         SharedKey("pty_next_id", SCALAR, _clean_next_id, writable=False),
+        # The tree copies the service has in flight (PR-3.6, §8): written by
+        # fs.paste around each top temporary directory and read at the next
+        # start to remove exactly those trees.
+        SharedKey("inflight_copies", LIST, _clean_inflight_copies, writable=False),
         # The service's own since PR-1.11: the history is written through
         # its notification center (notify.* and seen), the diffs' marks
         # through diff.set-notes, the pending show_diffs by the tools.
@@ -1055,6 +1073,11 @@ class AppState:
         # persisted so a saved model file never names two ptys.
         self.ptys: dict[str, dict] = {}
         self.pty_next_id: int = 1
+        # The tree copies in flight (PR-3.6, §8): {"dest", "name"} each, a
+        # top temporary directory an fs.paste is building a tree under,
+        # recorded until the tree lands or its undo removes it; the
+        # service that starts next removes what is left and clears it.
+        self.inflight_copies: list[dict] = []
         # The notification history, newest first, as notifycenter records
         # ({id, session_id, title, project, kind, body, when, read, count}).
         # Messages and bells only — a finished run's synthetic row stands for
@@ -1210,6 +1233,7 @@ class AppState:
         }
         next_id = data.get("pty_next_id")
         self.pty_next_id = next_id if isinstance(next_id, int) and 1 <= next_id < 2**32 else 1
+        self.inflight_copies = _clean_inflight_copies(data.get("inflight_copies"))
         self.notifications = notifycenter.clean_records(data.get("notifications"))
         settings = dict(data.get("settings") or {})
         # Read-time, one-way migration of the auto_title_sessions switch the
@@ -1342,6 +1366,7 @@ class AppState:
             "pending_diffs": self.pending_diffs,
             "ptys": self.ptys,
             "pty_next_id": self.pty_next_id,
+            "inflight_copies": self.inflight_copies,
             "notifications": self.notifications,  # newest first; never sort
             "settings": {
                 k: v for k, v in self.settings.items()
@@ -1988,6 +2013,34 @@ class AppState:
         if not 1 <= next_id < 2**32 or next_id == self.pty_next_id:
             return
         self.pty_next_id = next_id
+        self.save()
+
+    # -- the tree copies in flight (PR-3.6, §8)
+
+    def add_inflight_copy(self, dest: str, name: str) -> None:
+        """A tree copy is building under *name* in *dest* (fs.paste's top
+        temporary directory). Saved at once: the row has to be on disk
+        before the copy is, or a crash between leaves the tree unknown."""
+        entry = {"dest": str(dest), "name": str(name)}
+        if entry in self.inflight_copies:
+            return
+        self.inflight_copies = [*self.inflight_copies, entry]
+        self.save()
+
+    def remove_inflight_copy(self, dest: str, name: str) -> None:
+        entry = {"dest": str(dest), "name": str(name)}
+        if entry not in self.inflight_copies:
+            return
+        self.inflight_copies = [e for e in self.inflight_copies if e != entry]
+        self.save()
+
+    def get_inflight_copies(self) -> list[dict]:
+        return [dict(e) for e in self.inflight_copies]
+
+    def clear_inflight_copies(self) -> None:
+        if not self.inflight_copies:
+            return
+        self.inflight_copies = []
         self.save()
 
     def get_process_baseline(self, session_id: str) -> set[str]:

@@ -600,6 +600,28 @@ def _default(table: dict[int, int], mode: int) -> bool:
     return table.get(mode) in (1, 3)
 
 
+def _bounded_int(value: object, low: int, high: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        raise ValueError("int")
+    return value
+
+
+def _mode_key(value: object) -> int:
+    return _bounded_int(int(value) if isinstance(value, str) and value.isdigit() else value, 0, MODE_MAX)
+
+
+def _dict(value: object) -> dict:
+    if not isinstance(value, dict) or len(value) > UNKNOWN_MODES_MAX + 64:
+        raise ValueError("dict")
+    return value
+
+
+def _list(value: object) -> list:
+    if not isinstance(value, list) or len(value) > 256:
+        raise ValueError("list")
+    return value
+
+
 # ------------------------------------------------------------ mode tracker
 
 
@@ -731,6 +753,61 @@ class ModeTracker:
         self.scroll_region = None
         self.charsets = [b"B", b"B", b"B", b"B"]
         self.shift = 0
+
+    # -- the saved model (PR-3.6)
+
+    def dump(self) -> dict:
+        """The tracked state as JSON data, saved beside the screen model so
+        a restarted service's attach re-asserts what the program set
+        (`restore` reads it back)."""
+        return {
+            "private": {str(mode): value for mode, value in self.private.items()},
+            "ansi": {str(mode): value for mode, value in self.ansi.items()},
+            "kitty_base": self.kitty_base,
+            "kitty_stack": list(self.kitty_stack),
+            "modify_other_keys": self.modify_other_keys,
+            "scroll_region": list(self.scroll_region) if self.scroll_region else None,
+            "charsets": [c.decode("latin-1") for c in self.charsets],
+            "shift": self.shift,
+            "alt_screen": self.alt_screen,
+            "alt_mode": self.alt_mode,
+        }
+
+    def restore(self, data: object) -> bool:
+        """Take `dump`'s data (rule 5: every field checked, anything off
+        leaves the tracker as it was and answers False)."""
+        if not isinstance(data, dict):
+            return False
+        try:
+            private = {_mode_key(k): bool(v) for k, v in _dict(data.get("private")).items()}
+            ansi = {_mode_key(k): bool(v) for k, v in _dict(data.get("ansi")).items()}
+            base = _bounded_int(data.get("kitty_base"), 0, 255)
+            stack = [_bounded_int(v, 0, 255) for v in _list(data.get("kitty_stack"))][-KITTY_STACK_MAX:]
+            other = data.get("modify_other_keys")
+            other = None if other is None else _bounded_int(other, 0, 2)
+            region = data.get("scroll_region")
+            if region is not None:
+                region = _list(region)
+                if len(region) != 2:
+                    raise ValueError("scroll_region")
+                region = (_bounded_int(region[0], 0, 10000), _bounded_int(region[1], 0, 10000))
+            charsets = [str(c).encode("latin-1")[:1] or b"B" for c in _list(data.get("charsets"))]
+            if len(charsets) != 4:
+                raise ValueError("charsets")
+            shift = _bounded_int(data.get("shift"), 0, 3)
+            alt_screen = bool(data.get("alt_screen"))
+            alt_mode = _bounded_int(data.get("alt_mode"), 0, MODE_MAX)
+            if alt_mode not in ALT_SCREEN_MODES:
+                alt_mode = 1049
+        except (TypeError, ValueError, UnicodeEncodeError):
+            return False
+        self.private, self.ansi = private, ansi
+        self.kitty_base, self.kitty_stack = base, stack
+        self.modify_other_keys = other
+        self.scroll_region = region
+        self.charsets, self.shift = charsets, shift
+        self.alt_screen, self.alt_mode = alt_screen, alt_mode
+        return True
 
     # -- the attach
 

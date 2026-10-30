@@ -2470,13 +2470,16 @@ class SandboxHost:
         return path, box, ""
 
 
-def sweep_plans(app_id: str) -> int:
+def sweep_plans(app_id: str, keep: Iterable[str] = ()) -> int:
     """Unlink every plan file left in this instance's plan directory — a
     tab destroyed before its shell's exit was observed (a quit, a force
     close) never released its plan. All of them are this app id's, and
-    bwrap reads a plan once at exec, so nothing running misses it. Returns
-    how many went."""
+    bwrap reads a plan once at exec, so nothing running misses it. *keep*
+    are the plan paths of the sessions a restarted service adopted from
+    the keeper (PR-3.6): theirs stay, the chip and a sibling's derivation
+    still read them. Returns how many went."""
     directory = plan_dir(app_id)
+    kept = {os.path.realpath(path) for path in keep if path}
     try:
         names = os.listdir(directory)
     except OSError:
@@ -2485,6 +2488,8 @@ def sweep_plans(app_id: str) -> int:
     for name in names:
         if name.endswith(".json"):
             path = os.path.join(directory, name)
+            if os.path.realpath(path) in kept:
+                continue
             try:
                 os.unlink(path)
                 swept += 1

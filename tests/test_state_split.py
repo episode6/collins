@@ -45,11 +45,12 @@ SERVICE_RECORDS = {
     "virtual_projects", "expanded_groups", "session_prs", "session_attachments",
     "session_drafts", "new_chat_drafts", "process_baselines", "session_forwards",
     "pending_detaches", "ptys", "pty_next_id", "notifications", "settings",
-    "diff_notes", "pending_diffs", "resume_on_start",
+    "diff_notes", "pending_diffs", "resume_on_start", "inflight_copies",
 }
 # Not in a v0.1.4 file.
 NEW_SERVICE_RECORDS = {
     "service_id", "ptys", "pty_next_id", "diff_notes", "pending_diffs", "resume_on_start",
+    "inflight_copies",
 }
 
 # Device settings added since v0.1.4 (not in its file): the quit dialog's

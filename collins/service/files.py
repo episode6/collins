@@ -1131,7 +1131,10 @@ class Files:
                 _confine(conf, root)
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
-            outcomes = paste_entries(root, target, list(entries), cut, source_allowed)
+            outcomes = paste_entries(
+                root, target, list(entries), cut, source_allowed,
+                inflight=getattr(self.core, "inflight_copies", None),
+            )
             return protocol.reply(message.id, results=[_paste_result(o) for o in outcomes])
 
         return self._later(message, "fs-paste", work)

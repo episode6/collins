@@ -17,7 +17,12 @@ REPO = Path(__file__).resolve().parent.parent
 
 
 class LiveService:
-    def __init__(self, tmp_path: Path, app_id: str = "com.example.Live", debug: bool = True) -> None:
+    def __init__(
+        self, tmp_path: Path, app_id: str = "com.example.Live", debug: bool = True, keeper: bool = False
+    ) -> None:
+        """*keeper* lets the service find or start a keeper (PR-3.6), which
+        `stop` then ends too; off, the service forks its ptys itself and a
+        stop ends every session (`COLLINS_KEEPER=none`)."""
         self.app_id = app_id
         # A short runtime directory: the socket path is bounded at 107 bytes.
         self.runtime = tempfile.mkdtemp(prefix="cr-")
@@ -39,6 +44,10 @@ class LiveService:
             "SHELL": "/bin/cat",
         }
         self.env.pop("COLLINS_E2E_STUBS", None)
+        if keeper:
+            self.env.pop("COLLINS_KEEPER", None)
+        else:
+            self.env["COLLINS_KEEPER"] = "none"
         if debug:
             self.env["COLLINS_DEBUG_API"] = "1"
         else:
@@ -94,6 +103,38 @@ class LiveService:
         except subprocess.TimeoutExpired:
             self.proc.kill()
             return self.proc.wait(5)
+
+    def keeper_pid(self) -> int | None:
+        """The keeper's pid, from the pid file it wrote beside its socket."""
+        from collins.api import server as api_server
+        from collins.service import keeper
+
+        os.environ["XDG_RUNTIME_DIR"] = self.runtime
+        return keeper.read_pid(api_server.keeper_socket_path(self.app_id))
+
+    def stop_keeper(self, wait_s: float = 10.0) -> None:
+        """SIGTERM the keeper the service started (it ends its children) and
+        wait for it; a no-op with none."""
+        pid = self.keeper_pid()
+        if pid is None:
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline and os.path.exists(f"/proc/{pid}"):
+            time.sleep(0.05)
+        if os.path.exists(f"/proc/{pid}"):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def close(self) -> None:
+        """Everything down: the service, then the keeper."""
+        self.stop()
+        self.stop_keeper()
 
     def state(self) -> dict:
         import json
