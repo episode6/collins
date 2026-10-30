@@ -6,7 +6,8 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
 editor-picker, attachments-panel, notifications, notification-card,
-preferences-notifications, welcome, welcome-cli, git-page, git-page-notes.
+preferences-notifications, preferences-notify-command, welcome, welcome-cli,
+git-page, git-page-notes.
 
 git-page opens a session's git page on its working tree (stage-docs-data.sh
 leaves alpha-widgets with an unstaged edit, a staged one and an untracked
@@ -78,7 +79,7 @@ SCENES = (
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
     "editor-panel", "editor-picker", "attachments-panel", "notifications",
     "notification-card", "preferences-notifications", "preferences-service",
-    "preferences-search", "welcome", "welcome-cli",
+    "preferences-search", "preferences-notify-command", "welcome", "welcome-cli",
     "git-page", "git-page-notes", "git-page-commit", "git-page-commit-folded",
     "git-page-gap-note",
 )
@@ -316,6 +317,24 @@ def stage(win) -> list[tuple[int, callable]]:
                 dialog._search_entry.set_text("parent branch")
 
         return [(1200, second_view)]
+    elif scene == "preferences-notify-command":
+        # The Service page filtered to the Notifications group, the
+        # command box holding `true` and Send test already clicked (a PR
+        # shot: the caption reads Exit status 0).
+        win.activate_action("win.preferences")
+
+        def service_view() -> None:
+            dialog = win.get_visible_dialog()
+            dialog._view_stack.set_visible_child(dialog._service_page)
+            dialog._search_entry.set_text("notification")
+
+        def send_test() -> None:
+            dialog = win.get_visible_dialog()
+            row = dialog._group("notifications", "service").rows[0]
+            row.set_text("true")
+            dialog._notify_test_button.emit("clicked")
+
+        return [(1200, service_view), (600, send_test)]
     elif scene == "preferences-notifications":
         # The dialog filtered to the Notifications group, the way the
         # sheet's Preferences… link opens it (not a docs shot: a PR's).
