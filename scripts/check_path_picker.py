@@ -113,7 +113,7 @@ from collins import apilink  # noqa: E402
 from collins.api import protocol  # noqa: E402
 from collins.api.protocol import RequestRefused  # noqa: E402
 from collins.app import App  # noqa: E402
-from collins.pathpicker import PathPicker  # noqa: E402
+from collins.pathpicker import LINK_ICON, PathPicker  # noqa: E402
 from collins.pathpickermodel import Folder  # noqa: E402
 from collins.service import files as service_files  # noqa: E402
 
@@ -158,6 +158,17 @@ def row_named(picker: PathPicker, name: str):
             return child
         child = child.get_next_sibling()
     return None
+
+
+def row_icons(row) -> list[str]:
+    """The icon names a listing row's box shows, left to right."""
+    names = []
+    child = row.get_child().get_first_child() if row is not None else None
+    while child is not None:
+        if isinstance(child, Gtk.Image):
+            names.append(child.get_icon_name())
+        child = child.get_next_sibling()
+    return names
 
 
 def place_paths(picker: PathPicker) -> list[str]:
@@ -219,6 +230,14 @@ def picker_opened() -> bool:
           names == ["linked", "work"], names)
     rows = picker._listing.rows
     check("…the link marked as one", Folder("linked", link=True) in rows, rows)
+    # The mark is the icon Collins ships, and the theme finds it (no theme
+    # has the name: a missing one would draw the broken-image glyph).
+    marks = row_icons(row_named(picker, "linked"))
+    theme = Gtk.IconTheme.get_for_display(picker.get_display())
+    check("…with Collins' own link icon, which the theme resolves",
+          marks[-1:] == [LINK_ICON] and theme.has_icon(LINK_ICON), marks)
+    check("…and a plain folder has no mark", row_icons(row_named(picker, "work")) == ["folder-symbolic"],
+          row_icons(row_named(picker, "work")))
     picker.hidden_btn.set_active(True)
     shown = wait(lambda: ".secret" in row_names(picker))
     check("Show hidden lists the dotted folder", shown, row_names(picker))

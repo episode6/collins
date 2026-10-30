@@ -95,8 +95,11 @@ then shows the folder as the service listed it. Typing re-lists after
 *Up*, *Show hidden* (a toggle, off per open, never saved) list at once;
 `Listing` numbers the asks and drops a stale answer; Tab completes against
 the rows of the folder typed (asking first when they are another
-folder's). A link row carries `emblem-symbolic-link-symbolic` (the tree
-has no link marker to borrow) and opens like any folder; a cut listing
+folder's). A link row carries `pathpicker.LINK_ICON`,
+`collins-symlink-symbolic`, a filled-path icon of Collins' own (the tree
+has no link marker to borrow, and the desktop's
+`emblem-symbolic-link-symbolic` is missing from Adwaita, which draws the
+broken-image glyph for it), and opens like any folder; a cut listing
 ends in an inert row; a refusal's words replace the list. *Open* is the
 service's `fs.stat` of the entry's text and hands on the path it echoes
 (`~` expanded, normalised, never resolved). Shortcuts: the service's home

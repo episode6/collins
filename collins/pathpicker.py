@@ -47,6 +47,12 @@ from .sessions import worktree_project_root  # noqa: E402
 
 log = logging.getLogger(__name__)
 
+# The mark on a row that is a symlink to a folder: Collins' own icon
+# (data/icons/hicolor/scalable/actions/), since the desktop's
+# `emblem-symbolic-link-symbolic` is missing from Adwaita, where it would
+# draw the broken-image glyph (the Fable verification of PR 624, S3).
+LINK_ICON = "collins-symlink-symbolic"
+
 
 def project_roots() -> list[str]:
     """The project folders of the sessions the store lists (the app's
@@ -288,9 +294,7 @@ class PathPicker(Adw.Dialog):
         for folder in shown:
             row = Gtk.ListBoxRow()
             row.folder = folder.name
-            row.set_child(
-                _row("folder-symbolic", folder.name, "emblem-symbolic-link-symbolic" if folder.link else None)
-            )
+            row.set_child(_row("folder-symbolic", folder.name, LINK_ICON if folder.link else None))
             if folder.link:
                 row.set_tooltip_text(_("A link to a folder"))
             self.rows.append(row)
