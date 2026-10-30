@@ -7,7 +7,9 @@ record's timestamp and never binds an id another live pty holds), N-N1
 (the flat pre-3.6 model files are pruned), and its round 2: V2-S1 (a row
 is held only while its child and the unread keeper live), V2-S2 (the
 hand-over by duplicates, a non-master refused), V2-N1 (`read_pid` names
-the keeper of this socket). GTK-free."""
+the keeper of this socket), and its round 3: V3-N1 (a master is a device,
+never a name), V3-N2 (a bare cmdline is the default socket's keeper only).
+GTK-free."""
 
 from __future__ import annotations
 
@@ -387,3 +389,71 @@ def test_read_pid_names_only_the_keeper_of_this_socket(kept):
     assert keeper.is_keeper_process(kept.pid, "/elsewhere/k.sock") is False
     assert keeper.is_keeper_process(kept.pid) is True
     assert keeper.is_keeper_process(os.getpid(), kept.socket) is False
+
+
+def test_a_regular_file_named_ptmx_is_no_master(tmp_path, monkeypatch):
+    """V3-N1: `is_pty_master` never decides by a name. A regular file named
+    ``ptmx`` is refused outright (ENOTTY), and where the ioctl is unknown
+    to the kernel the fallback reads the device (character 5:2), so the
+    same file is refused there too while a real master still passes."""
+    import fcntl
+    import pty
+
+    fake = tmp_path / "ptmx"
+    fake.write_bytes(b"not a tty")
+    master, slave = pty.openpty()
+    regular = os.open(fake, os.O_RDWR)
+    try:
+        assert keeper.is_pty_master(master) is True
+        assert keeper.is_pty_master(slave) is False
+        assert keeper.is_pty_master(regular) is False
+
+        def unknown_ioctl(*_args, **_kwargs):
+            raise OSError(22, "Invalid argument")
+
+        monkeypatch.setattr(fcntl, "ioctl", unknown_ioctl)
+        assert keeper.is_pty_master(master) is True
+        assert keeper.is_pty_master(regular) is False
+        assert keeper.is_pty_master(slave) is False
+    finally:
+        os.close(master)
+        os.close(slave)
+        os.close(regular)
+
+
+def test_a_bare_keeper_cmdline_serves_only_the_default_socket(tmp_path, monkeypatch):
+    """V3-N2: a cmdline naming neither ``--socket`` nor ``--app-id`` (the
+    unit's bare ``collins-keeper``) is the default app id's keeper and no
+    other socket's."""
+    import subprocess
+    import sys
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    proc = subprocess.Popen(
+        ["collins-keeper", "-c", "import time; time.sleep(60)"],
+        executable=sys.executable,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        # Popen returns when the exec succeeded, a beat before the kernel
+        # publishes the new argv: /proc/<pid>/cmdline reads empty meanwhile.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with open(f"/proc/{proc.pid}/cmdline", "rb") as fh:
+                if fh.read():
+                    break
+            time.sleep(0.01)
+        default = keeper.default_socket_path(keeper.DEFAULT_APP_ID)
+        assert default == str(tmp_path / "collins" / keeper.DEFAULT_APP_ID / "keeper.sock")
+        assert keeper.is_keeper_process(proc.pid) is True
+        assert keeper.is_keeper_process(proc.pid, default) is True
+        other = keeper.default_socket_path("com.episode6.Collins.Capture")
+        assert keeper.is_keeper_process(proc.pid, other) is False
+        assert keeper.is_keeper_process(proc.pid, str(tmp_path / "k.sock")) is False
+        monkeypatch.delenv("XDG_RUNTIME_DIR")
+        assert keeper.is_keeper_process(proc.pid, default) is False
+    finally:
+        proc.kill()
+        proc.wait()

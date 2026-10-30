@@ -81,6 +81,7 @@ import os
 import selectors
 import signal
 import socket
+import stat
 import struct
 import sys
 import termios
@@ -93,6 +94,11 @@ MIN_KEEPER_PROTOCOL = 1
 SOCKET_NAME = "keeper.sock"
 PID_NAME = "keeper.pid"
 LOCK_NAME = "keeper.lock"
+# The app id a bare `collins-keeper` (the unit's) serves, and the pty
+# master's device: `/dev/ptmx` and a container's `/dev/pts/ptmx` are both
+# character device 5:2 (V3-N1).
+DEFAULT_APP_ID = "com.episode6.Collins"
+PTMX_DEVICE = (5, 2)
 # A request or a reply is one line; a spawn carries an environment.
 LINE_MAX = 1024 * 1024
 # How many entries (and masters) one `list` reply carries at most: a control
@@ -277,24 +283,26 @@ def process_start_wall(pid: int) -> float | None:
 
 def is_pty_master(fd: int) -> bool:
     """Whether *fd* is a pty master: it answers ``TIOCGPTN`` (its slave's
-    number), which no other file does. The link under ``/proc/self/fd``
-    is the fallback where the ioctl's constant is missing: ``/dev/ptmx``
-    on a host, ``/dev/pts/ptmx`` inside a container (CI), so either
-    ``ptmx`` name passes."""
+    number), which no other file does. ``ENOTTY`` is the answer of every
+    non-master (a slave, a pipe, a regular file) and settles it. Only an
+    ioctl the kernel refuses for another reason (a constant it does not
+    know) falls back to the device itself: a master is the character
+    device 5:2, ``/dev/ptmx`` on a host and ``/dev/pts/ptmx`` inside a
+    container alike; a name is never consulted (V3-N1)."""
     # Linux's TIOCGPTN (_IOR('T', 0x30, unsigned int)); `termios` lacks the
     # name on some builds, so the number is spelled out.
     number = getattr(termios, "TIOCGPTN", 0x80045430)
     try:
         fcntl.ioctl(fd, number, b"\0" * 4)
         return True
-    except OSError:
-        pass
-    # Every non-master (a slave, a pipe, /dev/null) answers ENOTTY; the
-    # link settles a master on a kernel that lacks the ioctl.
+    except OSError as exc:
+        if exc.errno in (errno.ENOTTY, errno.EBADF):
+            return False
     try:
-        return os.path.basename(os.readlink(f"/proc/self/fd/{fd}")) == "ptmx"
+        st = os.fstat(fd)
     except OSError:
         return False
+    return stat.S_ISCHR(st.st_mode) and (os.major(st.st_rdev), os.minor(st.st_rdev)) == PTMX_DEVICE
 
 
 def is_keeper_process(pid: int, socket_path: str | None = None) -> bool:
@@ -303,7 +311,8 @@ def is_keeper_process(pid: int, socket_path: str | None = None) -> bool:
     of PR 629): a cmdline naming ``--socket`` must name that path, one
     naming ``--app-id`` that path's app id, and one naming neither (the
     unit's bare ``collins-keeper``) serves the default app id's socket, so
-    it passes. What `read_pid` requires before it names a pid to kill."""
+    it passes for that socket alone (V3-N2). What `read_pid` requires
+    before it names a pid to kill."""
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
             cmdline = fh.read(4096)
@@ -325,7 +334,8 @@ def is_keeper_process(pid: int, socket_path: str | None = None) -> bool:
             return args[args.index(b"--app-id") + 1] == os.fsencode(wanted)
         except IndexError:
             return False
-    return True
+    default = default_socket_path(DEFAULT_APP_ID)
+    return default is not None and os.path.abspath(socket_path) == default
 
 
 # -- the wire ---------------------------------------------------------------------------
@@ -1001,7 +1011,7 @@ def read_pid(socket_path: str) -> int | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="collins-keeper", description="The Collins pty keeper.")
-    parser.add_argument("--app-id", default=os.environ.get("COLLINS_APP_ID") or "com.episode6.Collins")
+    parser.add_argument("--app-id", default=os.environ.get("COLLINS_APP_ID") or DEFAULT_APP_ID)
     parser.add_argument("--socket", help="the socket to serve on (default: beside the API socket)")
     args = parser.parse_args(argv)
     logging.basicConfig(
