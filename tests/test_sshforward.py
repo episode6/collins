@@ -779,3 +779,29 @@ def test_signal_forward_falls_back_when_pidfd_open_is_refused(tmp_path, monkeypa
 
     monkeypatch.setattr(os, "pidfd_open", gone, raising=False)
     assert sshforward._signal_forward(child.pid, local, signal.SIGTERM) is False
+
+
+# ---- the third verification of PR 623: the two words -------------------------------------
+
+
+def test_the_handover_word_blames_no_one_file():
+    """W1: the exec may sit in ~/.profile or ~/.bash_profile as well as
+    ~/.bashrc; the word names the kind of file and the fix that holds for
+    each (the PATH above the line, or a tty guard)."""
+    result = sshforward.print_socket(CONNECTION, run=FakeRun(returncode=0, stdout=b""))
+    assert "login or interactive startup file" in result.text
+    assert "~/.profile, ~/.bash_profile, ~/.bashrc" in result.text
+    assert "[ -t 0 ]" in result.text
+    assert "Put the PATH in ~/.profile" not in result.text
+
+
+def test_exit_127_blames_the_path_only_when_the_shell_names_collins_service():
+    """W2: a $SHELL that is not installed makes both rounds exit 127 too;
+    the PATH hint is for a shell that said "collins-service: not found"."""
+    run = FakeRun(returncode=127, stderr=b"bash: line 1: collins-service: command not found\n")
+    result = sshforward.print_socket(CONNECTION, run=run)
+    assert "login shell's PATH" in result.text and "is $SHELL installed" not in result.text
+    run = FakeRun(returncode=127, stderr=b"sh: 1: /usr/bin/zsh: not found\n")
+    result = sshforward.print_socket(CONNECTION, run=run)
+    assert "is $SHELL installed there?" in result.text and "login shell's PATH" not in result.text
+    assert "(exit 127)" in result.text and "/usr/bin/zsh: not found" in result.text

@@ -61,8 +61,11 @@ writes `~/.bashrc`, which Debian guards against non-interactive
 shells); any other login shell gets `sh -lc`. The interactive round is
 never first: a `~/.bashrc` that hands the shell on (`exec zsh`,
 `exec fish`, an auto-started tmux) would run instead of the command.
-When that happens anyway — the PATH only in such an rc — *Test* says
-so; put the PATH in `~/.profile` or `~/.zprofile` and it works at once.
+When that happens anyway — the PATH only below such a line, in whichever
+startup file holds it — *Test* says so; set the PATH above that line, or
+guard the hand-over with `[ -t 0 ]`, and it works at once. A `$SHELL`
+naming a shell that is not installed on the box fails both rounds the
+same way (exit 127), and *Test* says that too.
 The path it prints is taken only when it is a plain absolute path
 (letters, digits, `.`, `_`, `-`, `/`, and the `@`, `+`, `,`, `=` of a
 directory-service home), since ssh expands `${VAR}` and `%`-tokens in a

@@ -131,10 +131,11 @@ MSG_TIMEOUT = N_("no answer from {target} within {seconds} s")
 MSG_BAD_PATH = N_("collins-service on {target} printed no socket path")
 MSG_NOT_ON_PATH = N_("collins-service is not on the login shell's PATH on {target}")
 MSG_HANDOVER = N_(
-    "the login shell on {target} ran its interactive startup files and the command never ran: "
-    "a ~/.bashrc that starts another shell (exec zsh, tmux)? Put the PATH in ~/.profile "
-    "or ~/.zprofile instead."
+    "the command never ran on {target}: a login or interactive startup file there "
+    "(~/.profile, ~/.bash_profile, ~/.bashrc) hands the shell on (exec zsh, tmux)? Set the "
+    "PATH above that line, or guard it with [ -t 0 ]."
 )
+MSG_NO_SHELL = N_("exit 127 from the login shell on {target}: is $SHELL installed there?")
 MSG_FORWARD_ENDED = N_("ssh to {target} ended: {detail}")
 MSG_FORWARD_CLOSED = N_("the ssh forward to {target} closed")
 MSG_FORWARD_EXIT = N_("the ssh forward to {target} ended (exit {code}): {detail}")
@@ -353,7 +354,11 @@ def print_socket(
     if code != 0:
         text = translate(MSG_REMOTE_FAILED, {"target": target, "code": code, "detail": detail or "-"})
         if code == SHELL_EXIT_NOT_FOUND:
-            text = f"{text}\n{translate(MSG_NOT_ON_PATH, {'target': target})}"
+            # 127 is "not found": collins-service when the shell says so,
+            # else the login shell itself ($SHELL naming one not installed:
+            # both rounds fail the same way).
+            hint = MSG_NOT_ON_PATH if "collins-service" in detail else MSG_NO_SHELL
+            text = f"{text}\n{translate(hint, {'target': target})}"
         return PrintSocketResult(ok=False, code=code, detail=detail, text=text)
     path = last_line(completed.stdout)
     if not _valid_socket_path(path):
