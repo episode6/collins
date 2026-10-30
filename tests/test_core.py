@@ -1519,13 +1519,20 @@ def _closing_server(tmp_path, monkeypatch):
     srv = loopback.LoopbackServer(core)
     ends = Client()
     client = srv.connect(ends.on_output, ends.on_event, device="laptop")
-    stage_cli("trap '' INT; exec sleep 300")
+    # The marker is echoed once the trap is in place: `has_running_command`
+    # alone turns true the moment the stub's shell is forked, before its
+    # `trap` has run, and a Ctrl+C sent in that window killed the stub (the
+    # shell then exited 130 instead of running out its budget): a race the
+    # base branch has too, caught 2 runs in 6 under the `-k close_budget`
+    # subset, pinned here because CI on any PR can hit it.
+    stage_cli("trap '' INT; echo TRAP-ARMED; exec sleep 300")
     reply = client.request({
         "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
     })
     pty = reply["pty"]
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+    assert pump(5, lambda: "TRAP-ARMED" in core.ptys.get(pty).screen.capture_contents())
     return srv, core, client, ends, pty
 
 
