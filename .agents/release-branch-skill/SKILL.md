@@ -123,8 +123,10 @@ Create two separate Pull Requests (as drafts, per repo convention).
           --changelog` and the COPR build page show it.
     - Mirror the outgoing release into the AUR files: set
       `pkgver=<VERSION>` in `packaging/aur/PKGBUILD` + the matching
-      `pkgver`/`source` lines in `packaging/aur/.SRCINFO` (the sha256 refresh
-      waits until the tag exists — post-ship step in the checklist).
+      `pkgver`/`source` lines in `packaging/aur/.SRCINFO`, and its
+      `depends = collins-service=<VERSION>-<pkgrel>` line (the split
+      package's own build; `verify_versions.py` checks it) — the sha256
+      refresh waits until the tag exists (post-ship step in the checklist).
 
 #### PR 2: Release Finalization on Release Branch
 - **Target Branch:** `release/v<VERSION>`

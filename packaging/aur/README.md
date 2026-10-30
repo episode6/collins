@@ -1,12 +1,16 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-13. Full change history: git log for this file.
+fork. Last modified: 2026-10-30. Full change history: git log for this file.
 -->
 # AUR packaging
 
 `PKGBUILD` and `.SRCINFO` for the [AUR](https://aur.archlinux.org/) package
-`collins`.
+`collins`. It is a split package (`pkgbase=collins`): `collins-service`,
+the headless half (the service, the keeper, both systemd user units and the
+Python package, with no GTK dependency), which can be installed on its own
+on a headless box, and `collins`, the window, which depends on the
+`collins-service` of the same build.
 
 ## Updating for a new release
 
@@ -21,11 +25,14 @@ hash refresh below can only happen after the release ships and the tag exists.
    ```
    Put the hash in `sha256sums=(...)`.
 2. Regenerate `.SRCINFO` (on an Arch system): `makepkg --printsrcinfo > .SRCINFO`
-   — or edit the `pkgver`/`source`/`sha256sums` lines by hand to match.
+   — or edit the `pkgver`/`source`/`sha256sums` lines and `collins`'s
+   `depends = collins-service=<pkgver>-<pkgrel>` line by hand to match
+   (`scripts/verify_versions.py` checks that one follows `pkgver`).
    The same goes for any other edit to `PKGBUILD` (a new `depends` or
    `optdepends` entry): the AUR indexes `.SRCINFO`, not `PKGBUILD`, so a
    dependency added to one file alone is a dependency the AUR never
-   resolves. `scripts/verify_versions.py` checks only the version lines.
+   resolves. `scripts/verify_versions.py` checks only the version lines (and that
+   `depends = collins-service=` line).
 3. (Recommended) test the build on Arch: `makepkg -si`.
 
 ## Publishing to the AUR

@@ -113,6 +113,22 @@ downloads of each version, see the
   died in the middle of copying a folder in the editor's file tree now
   removes exactly the unfinished copy at its next start (the copies in
   flight are recorded in `state.json`).
+- **A `collins-service` package in every channel.** The PPA, the COPR, the
+  `.deb` and `.rpm` downloads and the AUR recipe now build two packages
+  from the one wheel: `collins-service` (the `collins-service` and
+  `collins-keeper` commands, both systemd user units in
+  `/usr/lib/systemd/user/`, never enabled by the package, and the Python
+  package; it depends on PyGObject, GLib and libsoup 3 alone, and
+  recommends `bubblewrap`, `bindfs` and `fuse3`) and `collins` (the
+  window's launcher, desktop entry, icons and the GTK stack), which depends
+  on it. `apt install collins` and `dnf install collins` bring both; on a
+  headless box install `collins-service` alone (see
+  [Install the service](/guide/remote#install-the-service)). The `.deb`
+  and `.rpm` downloads are pairs now: install both files together. The
+  keeper's unit, which until now only `collins --install-desktop` wrote,
+  ships in every package. `collins-service --check` says how to turn
+  lingering on when it is off (`loginctl enable-linger <you>`), and why it
+  cannot tell when it reads `unknown`.
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch

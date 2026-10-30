@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-29. Full change history: git log for this file.
+fork. Last modified: 2026-10-30. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -64,6 +64,16 @@ runs fine without any of them, and the .deb and RPM only recommend them.
 
 ## Install
 
+Every system package below comes as two: **`collins`**, the window (its
+launcher, app icon and the GTK stack), and **`collins-service`**, the
+headless half — the `collins-service` and `collins-keeper` commands, their
+systemd user units, and the Python package itself. Installing `collins`
+brings `collins-service` with it. `collins-service` alone needs only
+PyGObject, GLib and libsoup 3, and is what goes on a headless box that a
+Collins window elsewhere reaches over ssh ([Remote service](./remote#install-the-service)).
+Neither package enables or starts a unit: the window starts the service
+when it needs one ([The session service](./service)).
+
 ### Ubuntu — the episode6 PPA
 
 The maintained channel on Ubuntu — Collins upgrades with the rest of your
@@ -71,7 +81,7 @@ system from here:
 
 ```bash
 sudo add-apt-repository ppa:episode6/stable
-sudo apt install collins
+sudo apt install collins            # or, on a headless box: collins-service
 ```
 
 The PPA covers **Ubuntu 24.04 (noble)** and **26.04 (resolute)**, and the
@@ -93,7 +103,7 @@ The maintained channel on Fedora — the same idea as the PPA, on dnf:
 
 ```bash
 sudo dnf copr enable episode6/stable
-sudo dnf install collins
+sudo dnf install collins            # or, on a headless box: collins-service
 ```
 
 The COPR builds for **every current Fedora** (new releases are added as
@@ -109,11 +119,13 @@ Bazzite…), where `dnf install` doesn't apply and the item stays out.
 ### RPM — direct download
 
 The [releases page](https://github.com/episode6/collins/releases/latest)
-also carries a binary noarch `.rpm` next to the `.deb` — the same package
-the COPR builds, for an RPM distro where enabling a COPR isn't wanted:
+also carries the binary noarch `.rpm`s next to the `.deb`s — the same two
+packages the COPR builds, for an RPM distro where enabling a COPR isn't
+wanted. Download both (`collins-<version>` and `collins-service-<version>`)
+and install them together:
 
 ```bash
-sudo dnf install ./collins-*.noarch.rpm
+sudo dnf install ./collins-*.noarch.rpm   # matches both
 ```
 
 It adds no repository, so it does not update itself; the COPR does.
@@ -125,11 +137,11 @@ Debian-family distros that don't build on Ubuntu — the `.deb` is the way in.
 (On distros outside the Debian family entirely, use PyPI below.) Grab the
 latest from the
 [releases page](https://github.com/episode6/collins/releases/latest), or
-build it with `./scripts/build_deb.sh`, then install it — dependencies are
-pulled in automatically:
+build them with `./scripts/build_deb.sh` (it writes both into `dist/`),
+then install the two together — dependencies are pulled in automatically:
 
 ```bash
-sudo apt install ./collins_*_all.deb
+sudo apt install ./collins_*_all.deb ./collins-service_*_all.deb
 ```
 
 A `.deb` installed this way adds no apt source, so it does not update
@@ -152,9 +164,12 @@ dependencies on purpose, because PyGObject, GTK, VTE, GtkSourceView and the
 markdown parser come from your distro's packages (above). An environment
 that cannot see them exits on `import gi` the first time you run the app.
 
-`collins --install-desktop` writes the launcher, app icon and metainfo under
-`~/.local/share` for your user — the same three files the `.deb` installs
-system-wide. The sidebar menu offers the same thing as **Install desktop
+The wheel is one package: it installs the `collins`, `collins-service` and
+`collins-keeper` commands together. `collins --install-desktop` writes the
+launcher, app icon and metainfo under `~/.local/share` for your user — the
+same files the `.deb`s install system-wide — and the service's and the
+keeper's systemd user units under `~/.local/share/systemd/user/`, pointed at
+the installed commands. The sidebar menu offers the same thing as **Install desktop
 icon**, shown only when nothing has put Collins in your app grid yet. It is
 the only extra step: the toolbar and sidebar artwork ships inside the
 package.
@@ -182,8 +197,8 @@ your `~/.config/collins/` state, so an update is always safe mid-stream.
 | --- | --- |
 | **Ubuntu PPA** | Nothing special — `sudo apt update && sudo apt upgrade` (or your desktop's software updater) picks Collins up with everything else. |
 | **Fedora COPR** | Likewise — `sudo dnf upgrade` (or GNOME Software) picks it up with everything else. |
-| **Debian `.deb`** | Download the new `.deb` from the [releases page](https://github.com/episode6/collins/releases/latest) and install it over the old one the same way: `sudo apt install ./collins_*_all.deb`. apt treats it as an upgrade; settings stay put. |
-| **`.rpm` download** | Download the new one and `sudo dnf install ./collins-*.noarch.rpm` over the old. |
+| **Debian `.deb`** | Download the new pair from the [releases page](https://github.com/episode6/collins/releases/latest) and install them over the old ones the same way: `sudo apt install ./collins_*_all.deb ./collins-service_*_all.deb`. apt treats it as an upgrade; settings stay put. |
+| **`.rpm` download** | Download the new pair and `sudo dnf install ./collins-*.noarch.rpm` over the old. |
 | **pipx** | `pipx upgrade collins` — the `--system-site-packages` flag you installed with is remembered by the venv, so it needn't be repeated. |
 | **pip** | `pip install --user --upgrade collins` |
 | **From source** | `git pull` in the checkout. The launcher from `./data/install.sh` points at the checkout, so it needs no re-run. |
