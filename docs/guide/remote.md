@@ -8,7 +8,7 @@ opened: no port, no token, no listener on the network. Collins forwards
 the service's socket over ssh and talks to it as if it were local.
 
 ::: tip What you need on the box
-`collins-service` installed and on the login shell's `PATH`, `claude`
+`collins-service` [installed](#install-the-service) and on the login shell's `PATH`, `claude`
 logged in there, and an ssh login that works without a prompt (a key in
 your agent). `collins-service --check` on the box says what is missing.
 :::
@@ -104,6 +104,59 @@ service again if it had stopped) and a fresh forward. Nothing is lost
 meanwhile: the sessions run on the box, and the terminal is redrawn from
 the service's screen when the link is back.
 
+## Install the service
+
+The box needs the **`collins-service`** package, not the window: the
+`collins-service` and `collins-keeper` commands, their systemd user units
+and the Python package, with PyGObject, GLib and libsoup 3 as its only
+dependencies (`bubblewrap`, `bindfs` and `fuse3` are recommended, for
+sandboxed sessions). No GTK comes with it.
+
+::: code-group
+
+```bash [Ubuntu PPA]
+sudo add-apt-repository ppa:episode6/stable
+sudo apt install collins-service
+```
+
+```bash [Fedora COPR]
+sudo dnf copr enable episode6/stable
+sudo dnf install collins-service
+```
+
+```bash [Debian .deb]
+sudo apt install ./collins-service_*_all.deb
+```
+
+```bash [RPM download]
+sudo dnf install ./collins-service-*.noarch.rpm
+```
+
+```bash [pipx]
+pipx install --system-site-packages collins
+```
+
+:::
+
+The `.deb` and `.rpm` are on the
+[releases page](https://github.com/episode6/collins/releases/latest) beside
+the window's. PyPI's wheel is one package with all three commands; on a
+headless box it needs only the distro's PyGObject and libsoup 3 typelib
+(`python3-gi gir1.2-glib-2.0 gir1.2-soup-3.0` on Debian and Ubuntu,
+`python3-gobject-base libsoup3` on Fedora). No package enables or starts
+a unit: the first `--print-socket` from a window starts the service.
+
+Then, on the box:
+
+```bash
+loginctl enable-linger "$USER"   # once: keep the service past your last logout
+collins-service --check          # what is still missing
+```
+
+`loginctl enable-linger` for your own user usually needs no password from
+an active login; where polkit asks for an administrator instead, run it as
+`sudo loginctl enable-linger "$USER"`.
+
 ## On the box
 
 `collins-service` on a headless box has two needs of its own, and
@@ -116,7 +169,9 @@ the service's screen when the link is back.
   lives as long as the process does; `--print-socket` starts it detached
   from the ssh command that asked, so it outlives that command, but not
   a logout that tears the session down. `loginctl enable-linger` is the
-  first step on a box with no desktop.
+  first step on a box with no desktop; `--check`'s `lingering:` line
+  says `off` with the command to run, for your user, until it is done (it
+  is a note, not a failure: the exit status stays 0).
 - **`claude` on the login shell's `PATH`.** The service starts terminals
   with your login shell's environment, so `~/.local/bin/claude` is found
   the way your shell finds it: both the login profile

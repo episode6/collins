@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 # Keep build artifacts and dev cruft out of the native source tarball.
 tar-ignore = .git
 tar-ignore = node_modules
@@ -18,6 +18,10 @@ tar-ignore = ".venv"
 tar-ignore = "*.deb"
 tar-ignore = debian/.debhelper
 tar-ignore = debian/collins
+# The second binary package (PR-3.7) and pybuild's staging tree.
+tar-ignore = debian/collins-service
+tar-ignore = debian/python3-collins
+tar-ignore = debian/tmp
 tar-ignore = debian/files
 tar-ignore = "debian/*.substvars"
 tar-ignore = "debian/*.debhelper"

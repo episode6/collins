@@ -1,7 +1,7 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-07. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -86,8 +86,8 @@ collins --install-desktop   # optional: add it to the app grid
 ```
 
 ```bash [Debian (.deb)]
-# from the GitHub releases page
-sudo apt install ./collins_*_all.deb
+# both files from the GitHub releases page
+sudo apt install ./collins_*_all.deb ./collins-service_*_all.deb
 ```
 
 ```bash [From source]

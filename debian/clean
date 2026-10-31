@@ -1,0 +1,3 @@
+# pybuild's staging tree (debian/rules installs the wheel into it and
+# dh_install reads from it); dh_clean removes only the packages' own trees.
+debian/python3-collins/

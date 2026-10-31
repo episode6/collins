@@ -5,7 +5,9 @@
 # window and its service), which the libsoup3 package ships and nothing
 # else provides a virtual name for: an explicit dependency it is.
 addFilter(r"explicit-lib-dependency libsoup3")
-# The service's user unit ships twice on purpose: installed for systemd,
-# and inside the package for `collins --install-desktop` (a pip install
-# has only the package to copy it out of).
+# The service's and the keeper's user units ship twice on purpose (both
+# copies in collins-service): installed for systemd, and inside the Python
+# package for `collins --install-desktop` (a pip install has only the
+# package to copy them out of).
 addFilter(r"files-duplicate /usr/lib/systemd/user/collins-service.service")
+addFilter(r"files-duplicate /usr/lib/systemd/user/collins-keeper.service")

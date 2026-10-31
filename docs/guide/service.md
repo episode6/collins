@@ -41,8 +41,10 @@ service's socket (`$XDG_RUNTIME_DIR/collins/<app id>/api.sock`) and,
 finding none, starts one: `systemctl --user start
 collins-service.service` where `systemctl` exists and the unit is
 installed, else it spawns `collins-service` itself, detached. The unit
-ships with the `.deb`, the RPM, the PPA and the AUR package and is written
-by `collins --install-desktop` for a pip install. **The packages do not
+ships in the `collins-service` package of every channel (the `.deb`, the
+RPM, the PPA and the AUR; the window's `collins` package depends on it), at
+`/usr/lib/systemd/user/collins-service.service` with the keeper's beside
+it, and is written by `collins --install-desktop` for a pip install. **The packages do not
 enable it**: nothing runs until a window asks, and nothing starts at login.
 To have it run from login, enable it yourself:
 
@@ -265,7 +267,7 @@ service inherits it. On a headless box two things need doing first, and
 ```
 $ collins-service --check
 service:      0.1.5, app id com.episode6.Collins
-lingering:    off (the service ends at logout on a headless box; `loginctl enable-linger` keeps it)
+lingering:    off (on a headless box the service and its sessions end at the last logout; to keep them: loginctl enable-linger you)
 runtime dir:  /run/user/1000
 socket:       /run/user/1000/collins/com.episode6.Collins/api.sock (none)
 shell:        /bin/bash (login profile and interactive rc read)
@@ -288,7 +290,12 @@ login shell's `PATH`.
 
 - **Lingering.** Without `loginctl enable-linger`, the user manager, the
   service and `$XDG_RUNTIME_DIR` go away at logout and do not exist at
-  boot. On a headless box, `loginctl enable-linger` is the first step.
+  boot. On a headless box, `loginctl enable-linger` is the first step;
+  the `lingering:` line names the command for your user while it is off,
+  and says why it cannot tell (`no loginctl`, or `loginctl did not say`)
+  when it reads `unknown`. Lingering is a note, not a requirement: it
+  never makes `--check` exit 1. Where polkit wants an administrator for
+  it, run the command with `sudo`.
   Without a runtime directory the keeper's lock falls back under
   `~/.local/state/collins/<app id>/` with the rest; on a home directory
   shared over NFS by two machines, Linux's NFS `flock` emulation can make
@@ -332,4 +339,7 @@ which case it inherits the window's stdout and stderr.
 
 `libsoup` 3 (`gir1.2-soup-3.0`, `libsoup3`) carries the socket and is a
 dependency of every package. The service imports no GTK: it runs on a box
-with no display.
+with no display, and its package, `collins-service`, depends on PyGObject,
+GLib and libsoup 3 alone (recommending `bubblewrap`, `bindfs` and `fuse3`
+for sandboxed sessions). Install it without the window on a headless box
+([A service on another machine](./remote#install-the-service)).

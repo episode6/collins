@@ -385,6 +385,46 @@ def test_check_reports_and_exits_one_on_a_missing_requirement(runtime, monkeypat
     assert "/usr/bin/claude" in out.getvalue()
 
 
+def _lingering_line(monkeypatch, linger, which=lambda name, path=None: f"/usr/bin/{name}") -> tuple[int, str]:
+    monkeypatch.setattr(service_main, "lingering", lambda: linger)
+    monkeypatch.setattr(service_main, "capture_login_shell", lambda: service_main.LoginCapture())
+    monkeypatch.setattr(service_main.shutil, "which", which)
+    out = io.StringIO()
+    code = service_main.check("com.example.Check", out=out)
+    return code, next(line for line in out.getvalue().splitlines() if line.startswith("lingering:"))
+
+
+def test_check_says_how_to_turn_lingering_on_and_still_passes(runtime, monkeypatch):
+    # PR-3.7: the off case names the command, for this user; lingering is a
+    # headless-box note, not a requirement (D52), so the exit stays 0.
+    monkeypatch.setattr(service_main, "linger_user", lambda: "alice")
+    code, line = _lingering_line(monkeypatch, False)
+    assert code == 0
+    assert line.startswith("lingering:    off (")
+    assert "end at the last logout" in line and line.endswith("loginctl enable-linger alice)")
+
+
+def test_check_says_why_lingering_is_unknown(runtime, monkeypatch):
+    assert _lingering_line(monkeypatch, True)[1] == "lingering:    on"
+    no_loginctl = lambda name, path=None: None if name == "loginctl" else f"/usr/bin/{name}"  # noqa: E731
+    assert _lingering_line(monkeypatch, None, no_loginctl)[1] == "lingering:    unknown (no loginctl)"
+    assert _lingering_line(monkeypatch, None)[1] == "lingering:    unknown (loginctl did not say)"
+
+
+def test_the_linger_user_is_the_uid_s_name_or_the_shell_variable(monkeypatch):
+    class _Entry:
+        pw_name = "bob"
+
+    monkeypatch.setattr(service_main.pwd, "getpwuid", lambda uid: _Entry())
+    assert service_main.linger_user() == "bob"
+
+    def _missing(uid):
+        raise KeyError(uid)
+
+    monkeypatch.setattr(service_main.pwd, "getpwuid", _missing)
+    assert service_main.linger_user() == "$USER"
+
+
 def test_parse_args_defaults_the_app_id_from_the_environment(monkeypatch):
     monkeypatch.setenv("COLLINS_APP_ID", "com.example.Env")
     assert service_main.parse_args([]).app_id == "com.example.Env"

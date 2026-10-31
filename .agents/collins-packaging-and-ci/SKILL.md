@@ -7,9 +7,10 @@ description: >-
   the Ubuntu PPA source builds (packaging/build-ppa-source.sh), the AUR recipe,
   the prebuilt CI images (.github/docker/ci.Dockerfile, ci-image.yml), the
   ci.yml jobs, verify_versions.py / verify_wheel_data.py, the version scheme
-  and the four changelogs, release.yml, and how every channel ships
-  collins-service and its never-enabled systemd user unit (KillMode=process,
-  libsoup 3). Use when adding a data file,
+  and the four changelogs, release.yml, and how every channel splits the
+  one wheel into a collins-service package (the service, the keeper and
+  their never-enabled systemd user units, KillMode=process, libsoup 3) and
+  the collins window package. Use when adding a data file,
   icon, sound or dependency, changing a workflow or Dockerfile, touching
   version numbers or changelogs, or debugging a packaging/CI job. For cutting
   or shipping a release use release-branch-skill / ship-release-skill.
@@ -56,41 +57,64 @@ package-data glob (or an explicit entry), `verify_wheel_data.py`,
 sounds also need license notices in `THIRD_PARTY_LICENSES.md`,
 `debian/copyright`, the spec `License:` and the PKGBUILD `license` array.
 
-## The service: `collins-service` and its unit
+## The service: `collins-service`, `collins-keeper` and their units
 
-Collins is two programs (split-service spec §3.10), and every channel ships
-both. The second entry point is `[project.scripts]` `collins-service =
-"collins.service.main:main"` in `pyproject.toml`, so a wheel install has
-it beside `collins`; the systemd user unit `data/collins-service.service`
-is package data through the `collins/collins-service.service` symlink
-(listed in `pyproject.toml`'s package-data and in `verify_wheel_data.py`'s
-expected set) because `collins --install-desktop` (`desktopentry.py`)
-writes it to `$XDG_DATA_HOME/systemd/user/` with `ExecStart=` resolved to
-the installed script and runs `systemctl --user daemon-reload`, for a pip
-install. Each recipe installs the unit itself, **never enabled and never
-started by the package** — the window starts it on demand and the user
-enables it for login (`service.md`):
+Collins is two programs (split-service spec §3.10) plus the pty keeper
+(PR-3.6), and every channel ships all three commands. The entry points are
+`[project.scripts]` in `pyproject.toml` (`collins-service =
+"collins.service.main:main"`, `collins-keeper =
+"collins.service.keeper:main"`), so a wheel install has them beside
+`collins`, and `verify_wheel_data.py` checks the wheel's console scripts.
+The systemd user units `data/collins-service.service` and
+`data/collins-keeper.service` are package data through the
+`collins/collins-service.service` and `collins/collins-keeper.service`
+symlinks (listed in `pyproject.toml`'s package-data and in
+`verify_wheel_data.py`'s expected set) because `collins --install-desktop`
+(`desktopentry.py`) writes both to `$XDG_DATA_HOME/systemd/user/` with
+`ExecStart=` resolved to the installed scripts and runs `systemctl --user
+daemon-reload`, for a pip install. Each recipe installs both units itself,
+**never enabled and never started by the package** — the window starts the
+service on demand, the service the keeper, and the user enables the
+service for login (`service.md`).
 
-| Channel | The command | The unit |
-| --- | --- | --- |
-| `.deb` (`scripts/build_deb.sh`) | a hand-written `usr/bin/collins-service` (`from collins.service.main import main`, like the `collins` launcher beside it) | `cp` to `usr/lib/systemd/user/` |
-| PPA (`debian/rules`) | pybuild's console script | `install -Dm644` to `usr/lib/systemd/user/`; `dh_installsystemduser --no-enable` and `dh_installsystemd --no-enable --no-start` overridden so the maintainer scripts neither enable nor (re)start it |
-| RPM (`collins.spec`) | `%{_bindir}/collins-service` in `%files` | `%{_userunitdir}` (`BuildRequires: systemd-rpm-macros`), in `%files` |
-| AUR (`PKGBUILD`) | python-installer's console script | `install -Dm644` to `/usr/lib/systemd/user/` |
-| pip / pipx | the console script | `collins --install-desktop` |
-| checkout (`data/install.sh`) | none: `connection.service_argv` falls back to `python3 -m collins.service.main` | none |
+**Two packages from one wheel** (spec §3.24, PR-3.7). The wheel stays one;
+every system channel cuts it into `collins-service` (the whole Python
+package — one tree, the window's modules ride along unimported — both
+service commands, both units; depends on PyGObject, GLib's typelibs and
+libsoup 3 only, recommends `bubblewrap`, `bindfs`, `fuse3`; installable
+alone on a headless box) and `collins` (the launcher, desktop entry, icons,
+metainfo; the GTK stack and the markdown parser; depends on the
+`collins-service` of the same build, since the window's code is in it).
+`scripts/verify_package_split.py deb|rpm <service> <app>` holds a pair to
+that: every file in exactly one, each package's must-haves, nothing of the
+other half.
 
-The `packaging` job extracts the built `.deb` and asserts `test -x
-usr/bin/collins-service` and `test -f usr/lib/systemd/user/collins-service.service`;
-the `rpm` job asserts the same pair after `dnf install`. A renamed entry
-point or a unit that fell out of a recipe fails there.
+| Channel | The split | The commands | The units |
+| --- | --- | --- | --- |
+| `.deb` (`scripts/build_deb.sh`) | two staging roots, two control blocks (Depends equal to `debian/control`'s) | hand-written `usr/bin/collins-service` and `collins-keeper` (`from collins.service.main import main`, like the `collins` launcher) | `cp` to `usr/lib/systemd/user/` |
+| PPA (`debian/`) | two stanzas in `control`; pybuild stages into `debian/python3-collins` (`PYBUILD_NAME`; noble's pyproject plugin ignores `PYBUILD_DESTDIR`, so don't reach for it), `dh_install` / `dh_missing --fail-missing` run with `--sourcedir=debian/python3-collins`, and `debian/collins-service.install` / `collins.install` divide it (`debian/clean` removes the staging tree); `collins-service (= ${source:Version})`; `collins-service` has `Breaks`/`Replaces: collins (<< 0.1.5~)`, the transition from a pre-split `collins` that owned the Python tree (also in `build_deb.sh`; a fixed marker, never bumped; `verify_package_split.py` checks it; rpm and pacman need nothing) | pybuild's console scripts | `install -Dm644` into `debian/collins-service/usr/lib/systemd/user/`; `dh_installsystemduser --no-enable` and `dh_installsystemd --no-enable --no-start` overridden so the maintainer scripts neither enable nor (re)start them |
+| RPM (`collins.spec`) | `%package service`; `%files service -f %{pyproject_files}`; `Requires: collins-service = %{version}-%{release}`; the service needs `python3-gobject-base` (no cairo), the window `python3-gobject` | `%{_bindir}/collins-service`, `collins-keeper` in `%files service` | `%{_userunitdir}` (`BuildRequires: systemd-rpm-macros`), in `%files service` |
+| AUR (`PKGBUILD`) | `pkgname=('collins' 'collins-service')`; `build()` stages one `python -m installer` run, each `package_*()` takes its half; `.SRCINFO`'s `depends = collins-service=<pkgver>-<pkgrel>` is checked by `verify_versions.py` | python-installer's console scripts | `install -Dm644` to `/usr/lib/systemd/user/` |
+| pip / pipx | one wheel | the console scripts | `collins --install-desktop` |
+| checkout (`data/install.sh`) | — | none: `connection.service_argv` falls back to `python3 -m collins.service.main`, the service to `python3 -m collins.service.keeper` | none |
+
+CI: the `packaging` job runs `verify_package_split.py` on `build_deb.sh`'s
+two debs, extracts both, imports `collins.app` and the service from them,
+and asserts both commands and both units; each `ppa-source` leg builds the
+binary packages from the source package it made (`dpkg-source -x` +
+`dpkg-buildpackage -b`, what Launchpad does next; a source upload alone
+never runs `debian/rules binary`) and runs the split check on them; the
+`rpm` job runs the split check on the two RPMs, `dnf install`s both, and
+asserts the four paths and who owns them. A renamed entry point, a unit
+that fell out of a recipe or a file in the wrong package fails there.
 
 **libsoup 3** is a hard dependency since the split (the WebSocket between
 the window and the service: `collins/api/client.py`, `service/main.py`;
 without the typelib the window cannot start its service): `gir1.2-soup-3.0`
-in `debian/control` and `build_deb.sh`'s control (with `gir1.2-glib-2.0`,
-both Depends lists kept equal), `Requires: libsoup3` in the spec,
-`libsoup3` in the PKGBUILD *and* `.SRCINFO` (the AUR indexes `.SRCINFO`;
+in both stanzas of `debian/control` and of `build_deb.sh`'s controls
+(with `gir1.2-glib-2.0`, the Depends lists kept equal), `Requires:
+libsoup3` in both of the spec's packages, `libsoup3` in both of the
+PKGBUILD's packages *and* `.SRCINFO` (the AUR indexes `.SRCINFO`;
 regenerate it with `makepkg --printsrcinfo` on every PKGBUILD edit, not
 only at a version bump), `gir1.2-soup-3.0` in the CI Dockerfile for the
 e2e stack, and the install lines in `docs/guide/getting-started.md`.
@@ -105,9 +129,9 @@ and its agents run on either way. **The keeper's unit**
 symlink, `KillMode=process` too, `Type=simple`, the `collins-keeper`
 script in `[project.scripts]`) ships in the wheel's package data and is
 written beside the service's by `collins --install-desktop`
-(`desktopentry.KEEPER_UNIT`); the `.deb`, RPM, PPA and AUR install lines
-and `scripts/verify_wheel_data.py`'s `expected()` learn it in PR-3.7
-(the split `collins-service` package). A package upgrade restarts nothing anyway (the `--no-enable`
+(`desktopentry.KEEPER_UNIT`), and every system channel installs it beside
+the service's in the `collins-service` package (PR-3.7);
+`scripts/verify_wheel_data.py`'s `expected()` holds it. A package upgrade restarts nothing anyway (the `--no-enable`
 overrides, and no `%systemd_user_post` / `%systemd_user_postun` scriptlets
 in the spec), so the old service keeps serving the new window through the
 protocol window until *Restart service*; changing the unit's `ExecStart`

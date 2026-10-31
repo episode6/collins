@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-13. Full change history: git log for this file.
+fork. Last modified: 2026-10-30. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -12,65 +12,125 @@ exist once set up for it.)
 
 | Channel | Files | Notes |
 | --- | --- | --- |
-| **`.deb`** (GitHub releases) | `scripts/build_deb.sh` | Hand-rolled binary deb attached to each release. |
-| **`.rpm`** (GitHub releases) | `packaging/fedora/` | Binary noarch RPM built from the COPR spec (`build-copr-srpm.sh --rebuild`), attached next to the `.deb`. |
-| **AUR** | `packaging/aur/` | `PKGBUILD` + `.SRCINFO`; see `packaging/aur/README.md`. |
+| **`.deb`** (GitHub releases) | `scripts/build_deb.sh` | Hand-rolled binary debs (`collins` and `collins-service`) attached to each release. |
+| **`.rpm`** (GitHub releases) | `packaging/fedora/` | Binary noarch RPMs (`collins` and `collins-service`) built from the COPR spec (`build-copr-srpm.sh --rebuild`), attached next to the `.deb`s. |
+| **AUR** | `packaging/aur/` | A split `PKGBUILD` (`collins`, `collins-service`) + `.SRCINFO`; see `packaging/aur/README.md`. |
 | **PyPI** | `pyproject.toml` + `.github/workflows/release.yml` | Auto-published on tag via trusted publishing (once configured). |
 | **Ubuntu PPA** | `debian/` + `packaging/build-ppa-source.sh` | Source upload to Launchpad; see below. |
 | **Fedora COPR** | `packaging/fedora/` | SRPM upload to COPR, which builds for every Fedora and RHEL 10; see below. |
 
-## The service and its systemd unit
+## Two packages: `collins` and `collins-service`
 
 Collins is two programs: `collins` (the window) and `collins-service` (the
 sessions, their ptys, the shared state, the `gh` and `git` calls; see the
-guide's *The service* page). Every channel ships both commands and the
-service's systemd user unit, `data/collins-service.service`, and **no
-channel enables or starts the unit**: the window starts it on demand, and a
-user who wants it from login runs `systemctl --user enable
-collins-service.service` themselves.
+guide's *The service* page), with a third, `collins-keeper`, that holds the
+sessions' terminals across a service restart. **The wheel is one**
+(`pyproject.toml` declares no dependencies; it carries all three console
+scripts). Every system channel cuts it into **two binary packages**
+(split-service spec §3.24, PR-3.7):
 
-- **The command.** `pyproject.toml` declares `collins-service =
-  "collins.service.main:main"` under `[project.scripts]`, so the wheel, the
-  PPA package (pybuild), the RPM (`%{_bindir}/collins-service` in `%files`)
-  and the AUR package (python-installer) all get it from there.
-  `scripts/build_deb.sh` installs no wheel and writes `usr/bin/collins-service`
-  by hand, like its `collins` launcher. A source checkout has neither on
-  `PATH`: the window falls back to `python3 -m collins.service.main` from its
-  own tree (`connection.service_argv`), and `data/install.sh` installs no
-  unit.
-- **The unit.** `debian/rules` installs it to `usr/lib/systemd/user/` and
-  overrides `dh_installsystemduser --no-enable` (and `dh_installsystemd
+| Package | Holds | Depends |
+| --- | --- | --- |
+| `collins-service` | the whole Python package (one tree: the window's modules ride along as files the service never imports), `collins-service`, `collins-keeper`, both user units in `/usr/lib/systemd/user/` | PyGObject, GLib's typelibs, libsoup 3; recommends `bubblewrap`, `bindfs`, `fuse3` |
+| `collins` | the `collins` launcher, the desktop entry, the app and action icons, the metainfo | `collins-service` of the same build, the GTK stack, the markdown parser; recommends libspelling, GStreamer |
+
+`collins-service` installs on its own on a headless box (the guide's
+*Install the service*); `collins` pulls it in. Where each recipe says it:
+
+- **PPA** (`debian/`): two stanzas in `debian/control`. With
+  `PYBUILD_NAME` set, pybuild installs the wheel into
+  `debian/python3-collins` (a staging tree, not a package) on noble's
+  dh-python and resolute's alike — noble's pyproject plugin ignores
+  `PYBUILD_DESTDIR` — so `debian/rules` runs `dh_install` and `dh_missing
+  --fail-missing` with `--sourcedir=debian/python3-collins`, and
+  `debian/collins-service.install` / `debian/collins.install` divide that
+  tree; a file neither claims fails the build, and `debian/clean` removes
+  the staging tree (`dh_clean` removes only the packages' own). `collins`
+  depends on `collins-service (= ${source:Version})`.
+- **The transition** (dpkg only): every pre-split install has the Python
+  tree in `collins`, so `collins-service` declares `Breaks: collins (<<
+  0.1.5~)` and `Replaces: collins (<< 0.1.5~)` (Debian Policy §7.6.1) in
+  `debian/control` and `build_deb.sh` alike; without them installing the
+  pair over `collins` 0.1.4 fails on the first shared file. `0.1.5~` marks
+  the split and never moves with the version. rpm and pacman move the files
+  within the one transaction the exact-version dependency forces and need
+  nothing.
+- **`.deb`** (`scripts/build_deb.sh`): two staging roots and two control
+  blocks, kept equal to `debian/control`'s Depends, Breaks and Replaces.
+- **RPM** (`collins.spec`): `%package service`; `%pyproject_save_files`'s
+  list goes to `%files service`, and `collins` has `Requires:
+  collins-service = %{version}-%{release}`. The service requires
+  `python3-gobject-base` (no cairo), the window `python3-gobject`.
+- **AUR** (`PKGBUILD`): `pkgname=('collins' 'collins-service')`; `build()`
+  stages one `python -m installer` run and each `package_*()` takes its
+  half. `.SRCINFO` spells `depends = collins-service=<pkgver>-<pkgrel>` out
+  in full, and `scripts/verify_versions.py` checks it follows `pkgver`.
+
+**CI** holds each split with `scripts/verify_package_split.py` (every file
+in exactly one package, each package's must-haves, nothing of the other
+half, no enablement link or `/etc` file, and for a `.deb` pair the
+transition's Breaks and Replaces): the `packaging` job on `build_deb.sh`'s two debs, the
+`ppa-source` legs on the binary packages they now build from the source
+package they made (`dpkg-buildpackage -b`, what Launchpad's builders run
+next), and the `rpm` job on the two RPMs, which it then `dnf install`s
+together.
+
+## The service, the keeper and their systemd units
+
+Every channel ships the service's and the keeper's systemd user units,
+`data/collins-service.service` and `data/collins-keeper.service`, in the
+`collins-service` package, and **no channel enables or starts either
+unit**: the window starts the service on demand, the service starts the
+keeper, and a user who wants the service from login runs `systemctl
+--user enable collins-service.service` themselves.
+
+- **The commands.** `pyproject.toml` declares `collins-service =
+  "collins.service.main:main"` and `collins-keeper =
+  "collins.service.keeper:main"` under `[project.scripts]`, so the wheel,
+  the PPA package (pybuild), the RPM (`%{_bindir}/collins-service` and
+  `collins-keeper` in `%files service`) and the AUR package
+  (python-installer) all get them from there; `scripts/verify_wheel_data.py`
+  checks the wheel's console scripts. `scripts/build_deb.sh` installs no
+  wheel and writes both by hand, like its `collins` launcher. A source
+  checkout has none on `PATH`: the window falls back to `python3 -m
+  collins.service.main` from its own tree (`connection.service_argv`), the
+  service to `python3 -m collins.service.keeper`, and `data/install.sh`
+  installs no unit.
+- **The units.** `debian/rules` installs both to `usr/lib/systemd/user/`
+  and overrides `dh_installsystemduser --no-enable` (and `dh_installsystemd
   --no-enable --no-start`, for a system unit that does not exist) so the
-  generated maintainer scripts neither enable it nor start or restart it on
-  an upgrade. The spec installs it to `%{_userunitdir}` (`BuildRequires:
-  systemd-rpm-macros`) and lists it in `%files`, with no `%systemd_user_*`
-  scriptlets. The PKGBUILD and `build_deb.sh` copy it to
-  `/usr/lib/systemd/user/`. For a pip or pipx install, `collins
-  --install-desktop` writes a copy to `$XDG_DATA_HOME/systemd/user/` with
-  `ExecStart=` resolved to the installed script and runs `systemctl --user
-  daemon-reload`; that is why the unit is also package data in the wheel
-  (the `collins/collins-service.service` symlink into `data/`, checked by
-  `scripts/verify_wheel_data.py`).
-- **CI.** The `packaging` job extracts the built `.deb` and asserts
-  `usr/bin/collins-service` is executable and the unit file exists; the `rpm`
-  job asserts the same two paths after `dnf install`.
+  generated maintainer scripts neither enable them nor start or restart
+  them on an upgrade. The spec installs both to `%{_userunitdir}`
+  (`BuildRequires: systemd-rpm-macros`) and lists them in `%files service`,
+  with no `%systemd_user_*` scriptlets. The PKGBUILD and `build_deb.sh`
+  copy them to `/usr/lib/systemd/user/`. For a pip or pipx install,
+  `collins --install-desktop` writes copies to
+  `$XDG_DATA_HOME/systemd/user/` with `ExecStart=` resolved to the
+  installed scripts and runs `systemctl --user daemon-reload`; that is why
+  the units are also package data in the wheel (the
+  `collins/collins-service.service` and `collins/collins-keeper.service`
+  symlinks into `data/`, checked by `scripts/verify_wheel_data.py`).
+- **CI.** The `packaging` job extracts both `.deb`s and asserts both
+  commands are executable and both units exist; the `rpm` job asserts the
+  same four paths after `dnf install`, and that `collins-service` owns them.
 - **libsoup 3** is a hard runtime dependency since the split: the window and
   the service talk WebSocket over a Unix socket through it. It is
-  `gir1.2-soup-3.0` in `debian/control` and `build_deb.sh`'s control block
-  (the two Depends lists are kept identical), `Requires: libsoup3` in the
-  spec, and `libsoup3` in the PKGBUILD and `.SRCINFO` — the AUR indexes
-  `.SRCINFO`, so regenerate it (`makepkg --printsrcinfo`) on every PKGBUILD
-  edit, not only at a version bump.
-- **`KillMode=process`** (split-service spec D52) is the unit's one
-  non-default: a stop or restart signals the service alone, never the ptys'
-  children or the CLI's `/bg` daemon. The service's own stop sequence then
-  ends the foreground sessions gracefully (they are resumable) and the
-  daemon and its agents run on. Since no channel restarts the unit on an
-  upgrade, a running service keeps serving the upgraded window for as long
-  as their protocols overlap; the new service code, and any change to the
-  unit itself, takes effect at the next *Restart service* (or `systemctl
-  --user restart collins-service.service`), and the `--install-desktop` copy
-  changes only when that command is run again.
+  `gir1.2-soup-3.0` in both stanzas of `debian/control` and of
+  `build_deb.sh`'s control blocks (the Depends lists are kept identical),
+  `Requires: libsoup3` in both of the spec's packages, and `libsoup3` in
+  both of the PKGBUILD's and `.SRCINFO`'s — the AUR indexes `.SRCINFO`, so
+  regenerate it (`makepkg --printsrcinfo`) on every PKGBUILD edit, not only
+  at a version bump.
+- **`KillMode=process`** (split-service spec D52) is both units' one
+  non-default: a stop or restart signals the service (or the keeper)
+  alone, never the ptys' children or the CLI's `/bg` daemon. With the
+  keeper holding the terminals, a service stop or restart ends no session;
+  stopping the keeper is what ends them all. Since no channel restarts a
+  unit on an upgrade, a running service keeps serving the upgraded window
+  for as long as their protocols overlap; the new service code, and any
+  change to a unit itself, takes effect at the next *Restart service* (or
+  `systemctl --user restart collins-service.service`), and the
+  `--install-desktop` copies change only when that command is run again.
 
 ## Ubuntu PPA
 
@@ -156,7 +216,8 @@ series:
    (Requires `build-essential devscripts dput debhelper dh-python
    pybuild-plugin-pyproject python3-all` and the signing key in the keyring.)
 
-Launchpad emails an acceptance notice, then builds and publishes the `.deb`.
+Launchpad emails an acceptance notice, then builds and publishes the two
+`.deb`s (`collins` and `collins-service`).
 Expect minutes to hours in the build queue, plus ~20 minutes for the publisher.
 
 ### Automated uploads on a tag
@@ -351,10 +412,10 @@ tag beside `ppa`, in the Fedora stage of the CI image. It:
   that fails to build fails the job.
 
 The workflow's separate `rpm` job runs beside it in the same image: it
-rebuilds the SRPM into the binary noarch RPM (`build-copr-srpm.sh
---rebuild`, dist tag left empty since the package is not tied to the
-building image's Fedora) and the `github-release` job attaches it to the
-release next to the `.deb`, for anyone installing straight from the
+rebuilds the SRPM into the two binary noarch RPMs (`build-copr-srpm.sh
+--rebuild`, dist tag left empty since the packages are not tied to the
+building image's Fedora) and the `github-release` job attaches them to the
+release next to the `.deb`s, for anyone installing straight from the
 releases page. The COPR remains the maintained Fedora channel.
 
 One secret:

@@ -2,7 +2,8 @@
 
 This mirrors the episode6 library/app repos' release process — cut a release
 branch, harden it, ship from it — adapted to a Python/GTK app whose one tag
-push fans out to a GitHub release with a `.deb` and a binary `.rpm`, a PyPI
+push fans out to a GitHub release with two `.deb`s and two binary `.rpm`s
+(`collins` and `collins-service`), a PyPI
 publish, a source upload per Ubuntu series to `ppa:episode6/stable`, and an
 SRPM upload to the `episode6/stable` COPR. Agent skills in
 [.agents/](./.agents) automate most of it (`release-branch-skill`,
@@ -124,7 +125,9 @@ Create 2 PRs (as drafts, per repo convention):
       `<VERSION>` says what shipped.
     - Mirror the outgoing release into the AUR files so main's copies stay
       current once it ships: set `pkgver` to `<VERSION>` in `PKGBUILD` +
-      `.SRCINFO` (sha256 gets refreshed after the tag exists — see
+      `.SRCINFO` (its `pkgver`, `source` and `depends =
+      collins-service=<VERSION>-<pkgrel>` lines; sha256 gets refreshed
+      after the tag exists — see
       `packaging/aur/README.md`).
 - `[VERSION] Release v<VERSION>` points at the new release branch
     - Make the same outgoing-release edits as above: finalize all four
@@ -139,7 +142,8 @@ Create 2 PRs (as drafts, per repo convention):
 
 - CI green (e2e included) on the release branch.
 - Sanity pass on a real install: `./scripts/build_deb.sh`,
-  `sudo apt install ./dist/collins_<VERSION>_all.deb`, launch it, open a
+  `sudo apt install ./dist/collins_<VERSION>_all.deb
+  ./dist/collins-service_<VERSION>_all.deb`, launch it, open a
   session, then remove/reinstall your dev setup as needed.
 - `THIRD_PARTY_LICENSES.md` still matches what actually ships.
 - Fix any bugs on the `main` branch first, then cherry-pick into the release
@@ -155,9 +159,9 @@ Create 2 PRs (as drafts, per repo convention):
    GitHub release + tag `v<VERSION>` pointing at the release branch, with
    notes extracted from `docs/releases.md`.
 2. The tag push triggers `.github/workflows/release.yml`:
-   - builds the wheel/sdist + `.deb`, and a binary noarch `.rpm` (via
-     `packaging/fedora/build-copr-srpm.sh --rebuild`, in the Fedora CI
-     image), and attaches the `.deb` and `.rpm` to the release,
+   - builds the wheel/sdist + the two `.deb`s, and the two binary noarch
+     `.rpm`s (via `packaging/fedora/build-copr-srpm.sh --rebuild`, in the
+     Fedora CI image), and attaches them to the release,
    - publishes to PyPI via trusted publishing,
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
@@ -177,7 +181,7 @@ Create 2 PRs (as drafts, per repo convention):
    token (`COPR_API_CONFIG`) expires every 180 days; when it fails on that,
    mint a new one at <https://copr.fedorainfracloud.org/api/>, replace the
    secret, and dispatch the same way (`packaging/README.md`).
-3. Verify: the `.deb` and `.rpm` are attached and carry the right version;
+3. Verify: the `.deb`s and `.rpm`s are attached and carry the right version;
    Launchpad sends an acceptance email per series and the builds go green; `apt install
    collins` from the PPA on a covered series picks up the new version; the
    COPR build is green in every chroot on

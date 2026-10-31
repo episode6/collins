@@ -8,6 +8,15 @@
 # the action icons, so only the desktop entry, app icon and metainfo are
 # installed on top of it) and debian/control's dependency floors.
 #
+# Two binary packages from the one wheel (split-service spec §3.24,
+# PR-3.7), the split debian/control makes: collins-service is the headless
+# half (the whole Python package -- one tree, so the window's modules ride
+# along as files the service never imports -- the collins-service and
+# collins-keeper commands and both systemd user units, never enabled), and
+# installs on a box with no display; collins is the window (the launcher,
+# desktop entry, icons and metainfo, and the GTK stack) and requires the
+# collins-service of the same build, since the window's modules are in it.
+#
 # Version: is kept at the plain next version, like debian/changelog's top
 # entry, and bumped in the same version-bump PRs (RELEASE_CHECKLIST.md);
 # scripts/verify_versions.py checks it agrees with pyproject.toml and that
@@ -31,7 +40,7 @@ BuildRequires:  pyproject-rpm-macros
 # %%check: the desktop entry and the AppStream metainfo the package installs.
 BuildRequires:  desktop-file-utils
 BuildRequires:  appstream
-# %%{_userunitdir}, for the service's systemd user unit.
+# %%{_userunitdir}, for the systemd user units.
 BuildRequires:  systemd-rpm-macros
 
 # Mirrors debian/control. GTK 4.10 (Gtk.FileDialog / Gtk.FontDialog) and
@@ -50,12 +59,10 @@ BuildRequires:  systemd-rpm-macros
 # gstreamer1-plugins-base — so, again, nothing else to name. The claude CLI is a curl-installed
 # binary with no package, so it cannot be a dependency at all; the app's own
 # first-run check handles its absence. markdown-it-py and linkify-it-py
-# (pure Python) render pull request bodies as real markdown blocks.
-# bubblewrap builds a sandboxed session's box; without it Collins says so in
-# Preferences and every session launches unsandboxed, as before the feature.
-# bindfs and fuse3 (fusermount3) let a directory allowed to a sandboxed
-# session reach it while it runs; without either the grant applies at the
-# session's next restart. bindfs is in EPEL on RHEL 10, fuse3 in its BaseOS.
+# (pure Python) render pull request bodies as real markdown blocks. The
+# window reaches its service over libsoup 3 too (collins/api/client.py), so
+# libsoup3 is named here as well as in collins-service.
+Requires:       collins-service = %{version}-%{release}
 Requires:       python3-gobject
 Requires:       libsoup3
 Requires:       gtk4 >= 4.10
@@ -67,9 +74,6 @@ Requires:       python3-linkify-it-py
 Recommends:     libspelling
 Recommends:     gstreamer1
 Recommends:     gstreamer1-plugins-base
-Recommends:     bubblewrap
-Recommends:     bindfs
-Recommends:     fuse3
 
 %description
 Collins browses every Claude Code session on your machine in a sidebar
@@ -78,6 +82,32 @@ embedded terminal tabs.
 
 It is an unofficial community tool, not affiliated with Anthropic, and never
 modifies the agents' own session data.
+
+%package        service
+Summary:        Headless session service for Collins
+# What the service and the keeper import, and no more:
+# tests/test_service_imports.py holds them to GLib, GObject and Gio, which
+# python3-gobject-base brings with their typelibs (no cairo, which the
+# service never draws with), and api/server.py's libsoup 3; the service
+# imports no markdown library. bubblewrap builds a sandboxed session's box;
+# without it Collins says so in Preferences and every session launches
+# unsandboxed, as before the feature. bindfs and fuse3 (fusermount3) let a
+# directory allowed to a sandboxed session reach it while it runs; without
+# either the grant applies at the session's next restart. bindfs is in EPEL
+# on RHEL 10, fuse3 in its BaseOS. All three run on the service's side.
+Requires:       python3-gobject-base
+Requires:       libsoup3
+Recommends:     bubblewrap
+Recommends:     bindfs
+Recommends:     fuse3
+
+%description    service
+The half of Collins that runs Claude Code sessions: collins-service holds
+every session's terminal, its sandbox and the repository and pull request
+calls, and collins-keeper keeps the terminals alive across a service
+restart. Both come with systemd user units the package never enables.
+Installed alone, it is the service on a headless box that a Collins window
+on another machine reaches over ssh.
 
 %prep
 %autosetup
@@ -91,8 +121,8 @@ modifies the agents' own session data.
 %install
 %pyproject_install
 %pyproject_save_files -l collins
-# The wheel ships the package, the collins command and the action icons
-# (app.py puts the package's own icons directory on the icon search path, so
+# The wheel ships the package, the commands and the action icons (app.py
+# puts the package's own icons directory on the icon search path, so
 # nothing goes in the shared hicolor theme but the app icon, which the shell
 # has to find by id). The desktop entry launches the installed command from
 # no particular directory: the checkout's Exec/Path are for a source tree.
@@ -105,9 +135,14 @@ install -Dm644 data/icons/com.episode6.Collins.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
 install -Dm644 data/com.episode6.Collins.metainfo.xml \
   %{buildroot}%{_metainfodir}/com.episode6.Collins.metainfo.xml
-# The session service's systemd user unit (not enabled: the app starts it).
+# The systemd user units: the service's and the keeper's (not enabled: the
+# window starts the service, the service the keeper). No
+# %%systemd_user_post / %%systemd_user_postun scriptlets either, so an
+# upgrade restarts nothing.
 install -Dm644 data/collins-service.service \
   %{buildroot}%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-service.service
+install -Dm644 data/collins-keeper.service \
+  %{buildroot}%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-keeper.service
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/com.episode6.Collins.desktop
@@ -118,17 +153,22 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/com.episode6.Collins.
 appstreamcli validate --no-net --override releases-not-in-order=info \
   %{buildroot}%{_metainfodir}/com.episode6.Collins.metainfo.xml
 
-%files -f %{pyproject_files}
+%files
 %doc README.md
+%license LICENSE
 %{_bindir}/collins
-%{_bindir}/collins-service
-# The keeper's command (PR-3.6); its unit's install line is PR-3.7's, with
-# the split collins-service subpackage.
-%{_bindir}/collins-keeper
-%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-service.service
 %{_datadir}/applications/com.episode6.Collins.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
 %{_metainfodir}/com.episode6.Collins.metainfo.xml
+
+# The Python package (%%{pyproject_files}, with its license) is the
+# service's: the window's own package holds its launcher and desktop files.
+%files service -f %{pyproject_files}
+%doc README.md
+%{_bindir}/collins-service
+%{_bindir}/collins-keeper
+%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-service.service
+%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-keeper.service
 
 # One entry per release, added by the version-bump PRs; the full notes are in
 # docs/releases.md. Dates are the release branch's cut date, like
@@ -141,6 +181,10 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
   by the package): quitting or crashing the window ends no session, Detach
   leaves a session running, and Restart service runs new service code
   after an upgrade. App state is split into state.json and ui-state.json.
+- New subpackage collins-service: the service, the pty keeper
+  (collins-keeper, which keeps sessions running across a service restart)
+  and both systemd user units, never enabled by the package. It installs
+  on its own on a headless box; collins requires it.
 
 * Sun Sep 27 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
 - Sandboxed sessions in a bubblewrap box (a home per session, settings and

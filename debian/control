@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 
 Source: collins
 Section: utils
@@ -19,6 +19,53 @@ Standards-Version: 4.6.2
 Homepage: https://github.com/episode6/collins
 Rules-Requires-Root: no
 
+# Two binary packages from the one wheel (split-service spec §3.24, PR-3.7).
+# collins-service is the headless half and installs on a box with no
+# display: the whole Python package (one tree, so the window's modules ride
+# along as files the service never imports), the collins-service and
+# collins-keeper commands, and both systemd user units, never enabled or
+# started by the package. collins is the window: its launcher, desktop
+# entry, icons and metainfo, and the GTK stack. It depends on the
+# collins-service built from the same source, since the window's own
+# modules are in it. debian/*.install say which file goes where.
+Package: collins-service
+Architecture: all
+# What the service and the keeper import, and no more:
+# tests/test_service_imports.py holds them to GLib, GObject and Gio (which
+# gir1.2-glib-2.0 carries) and api/server.py's libsoup 3; the service
+# imports no markdown library. bubblewrap is Recommends: it is what a
+# sandboxed session's box is built with, and without it Collins says so in
+# Preferences and launches every session unsandboxed, which is what it did
+# before the feature existed. bindfs and fuse3 (fusermount3) are Recommends
+# too: with them a directory allowed to a sandboxed session reaches it while
+# it runs; without either the grant applies at the session's next restart,
+# and Preferences says so. All three run on the service's side, so they are
+# this package's (apt installs a dependency's Recommends with collins too).
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3-gi,
+         gir1.2-glib-2.0,
+         gir1.2-soup-3.0
+# The transition (Debian Policy §7.6.1): before the split the collins
+# package owned the Python tree this package now holds, so it takes those
+# files over from every pre-split collins (0.1.4 and older), which is
+# deconfigured first. 0.1.5~ sorts below every 0.1.5 build (0.1.5~noble1,
+# 0.1.5~resolute1, 0.1.5) and above every 0.1.4 one; it marks the split and
+# stays at 0.1.5~, never moving with the version. Keep it equal in
+# scripts/build_deb.sh; scripts/verify_package_split.py checks both.
+Breaks: collins (<< 0.1.5~)
+Replaces: collins (<< 0.1.5~)
+Recommends: bubblewrap,
+            bindfs,
+            fuse3
+Description: headless session service for Collins
+ The half of Collins that runs Claude Code sessions: collins-service holds
+ every session's terminal, its sandbox and the repository and pull request
+ calls, and collins-keeper keeps the terminals alive across a service
+ restart. Both come with systemd user units the package never enables.
+ Installed alone, it is the service on a headless box that a Collins
+ window on another machine reaches over ssh.
+
 Package: collins
 Architecture: all
 # The two versioned floors are the ones measured against actual API use:
@@ -36,14 +83,11 @@ Architecture: all
 # preserved) render pull request bodies as real markdown blocks; without
 # them the PR page falls back to a plainer regex renderer, but rich PR
 # rendering isn't optional in spirit, so they are Depends, not Recommends.
-# bubblewrap is Recommends: it is what a sandboxed session's box is built
-# with, and without it Collins says so in Preferences and launches every
-# session unsandboxed, which is what it did before the feature existed.
-# bindfs and fuse3 (fusermount3) are Recommends too: with them a directory
-# allowed to a sandboxed session reaches it while it runs; without either
-# the grant applies at the session's next restart, and Preferences says so.
+# The window reaches its service over libsoup 3 as well
+# (collins/api/client.py), so gir1.2-soup-3.0 is named here too.
 Depends: ${python3:Depends},
          ${misc:Depends},
+         collins-service (= ${source:Version}),
          python3-gi,
          gir1.2-gtk-4.0 (>= 4.10),
          gir1.2-adw-1 (>= 1.5),
@@ -55,10 +99,7 @@ Depends: ${python3:Depends},
          python3-linkify-it
 Recommends: gir1.2-spelling-1,
             gir1.2-gstreamer-1.0,
-            gir1.2-gst-plugins-base-1.0,
-            bubblewrap,
-            bindfs,
-            fuse3
+            gir1.2-gst-plugins-base-1.0
 Description: native GTK4 desktop app to manage Claude Code sessions
  Collins browses every Claude Code session on your machine in a
  sidebar grouped by project, lets you name and star them, and resumes any of

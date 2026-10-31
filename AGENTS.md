@@ -101,7 +101,10 @@ session ended as *Stop Sessions and Quit* does with its id recorded as
 `resume_on_start`; exit 0 either way (so a unit's `Restart=on-failure`
 leaves it down). `collins-service --check` and `--print-socket` are the
 headless box's helpers. `data/collins-service.service` is its systemd
-user unit, never enabled by a package. **The keeper**
+user unit, never enabled by a package; every system channel ships the
+service, the keeper and both units as a `collins-service` package that
+installs alone on a headless box, the window's `collins` package depending
+on it (one wheel; `collins-packaging-and-ci`). **The keeper**
 (`service/keeper.py`, stdlib only, `collins-keeper`, its unit
 `data/collins-keeper.service`, `KillMode=process`) forks every pty child
 on the service's request, stays their parent, holds a duplicate of every
@@ -460,7 +463,7 @@ local with `debug.local` (`e2e_service.drop_local`, D60).
 | The keeper's systemd user unit (never enabled by a package; started on demand by the service, which spawns `collins-keeper` itself where there is none) | `data/collins-keeper.service`, installed beside the service's by `collins --install-desktop` (the packages: PR-3.7) |
 | The tree copies `fs.paste` has in flight (destination directory and temporary name each), written around every top temporary directory and read at the next start to remove exactly those trees | `state.json` (`inflight_copies`, the service's alone) |
 | The service's single-instance lock (an `flock`, taken as its first step and held for its life; a second service for the id exits 0 on it) | `<runtime dir>/collins/<app id>/service.lock` |
-| The service's systemd user unit (never enabled by a package; started on demand by the client) | `data/collins-service.service`, installed to `/usr/lib/systemd/user/` by the packages and `~/.local/share/systemd/user/` by `collins --install-desktop` |
+| The service's and the keeper's systemd user units (never enabled by a package; the service started on demand by the client, the keeper by the service) | `data/collins-service.service` and `data/collins-keeper.service`, installed to `/usr/lib/systemd/user/` by every channel's `collins-service` package and to `~/.local/share/systemd/user/` by `collins --install-desktop` |
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
 | Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
