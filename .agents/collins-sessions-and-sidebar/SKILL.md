@@ -346,8 +346,9 @@ knows, takes a record from the file only where the file's entry is
 non-empty, takes a device setting only where it differs from its default
 or `ui-state.json` never held the key (`UiState.present_keys`), and never
 overwrites `state.json.pre-split` (a `.<YYYYMMDD-HHMMSS>` sibling is
-written instead). Mind that `./start-debug` sets the app id (and `PYTHONPATH`, and
-stops a running debug service first) but shares the real config dir: a debug launch of a split build migrates the
+written instead). Mind that `./start-debug` sets only the app id and `PYTHONPATH` (after
+stopping any debug service and keeper already running) and shares the
+real config dir: a debug launch of a split build migrates the
 user's real `state.json`, and the installed pre-split build then runs on
 default device settings until the merge above brings them back. A corrupt
 `ui-state.json` is copied to `ui-state.json.corrupt` before the first save
