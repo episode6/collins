@@ -144,9 +144,12 @@ def titles(group) -> list[str]:
     return [row.get_title() for row in group.rows]
 
 
-def visible_rows(page) -> list[str]:
+def visible_rows(dialog) -> list[str]:
+    # Both pages, This device first (the device rows come first within a
+    # mixed group too).
     return [
         row.get_title()
+        for page in dialog._pages
         for group in page.groups
         if group.get_visible()
         for row in group.rows
@@ -221,26 +224,47 @@ def changes() -> int:
 
 def step_layout() -> bool:
     dialog = state["dialog"]
-    page = dialog._page
-    headings = [g.get_title() or "" for g in page.groups]
-    index = prefslayout.GROUPS.index("git")
+    for side in ("device", "service"):
+        page = dialog._device_page if side == "device" else dialog._service_page
+        headings = [g.get_title() or "" for g in page.groups]
+        index = prefslayout.page_groups(side).index("git")
+        check(
+            f"the Git group sits right after Pull requests on the {side} page",
+            headings[index - 1 : index + 1] == ["Pull requests", "Git"],
+            headings,
+        )
+    # The group is two halves of one title (D61): the view's own knobs on
+    # This device, what the commits panel loads and the parent branch on
+    # the Service page.
+    git_device = dialog._group("git", "device")
+    git_service = dialog._group("git", "service")
+    for git in (git_device, git_service):
+        check(
+            "each half says what the group is for",
+            (git.get_description() or "").startswith("The git page:"),
+            git.get_description(),
+        )
     check(
-        "the Git group sits right after Pull requests",
-        headings[index - 1 : index + 1] == ["Pull requests", "Git"],
-        headings,
+        "This device holds the view's five rows in order",
+        titles(git_device) == ROW_TITLES[:5],
+        titles(git_device),
     )
-    git = page.groups[index]
     check(
-        "the group says what it is for",
-        (git.get_description() or "").startswith("The git page:"),
-        git.get_description(),
+        "the Service page holds the other three in order",
+        [t for t in titles(git_service) if t] == ROW_TITLES[5:],
+        titles(git_service),
     )
     # The entry carries a title-less reason row beneath it, the way the
     # CLI path row does.
-    check("the group holds its eight rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
-    check("the entry has a reason row under it", titles(git)[-1] == "", titles(git))
-    check("no viewer switch and no theme row (the diff view is the one viewer)", "Diff viewer" not in titles(git) and "Theme" not in titles(git), titles(git))
-    layout, numbers, wrap, words, whitespace, untracked, log_page, parent, _r2 = git.rows
+    check("the entry has a reason row under it", titles(git_service)[-1] == "", titles(git_service))
+    for git in (git_device, git_service):
+        check(
+            "no viewer switch and no theme row (the diff view is the one viewer)",
+            "Diff viewer" not in titles(git) and "Theme" not in titles(git),
+            titles(git),
+        )
+    layout, numbers, wrap, words, whitespace = git_device.rows
+    untracked, log_page, parent, _r2 = git_service.rows
     model = layout.get_model()
     labels = [model.get_string(i) for i in range(model.get_n_items())]
     check("the Layout row lists the view's three layouts", labels == ["Automatic", "Split", "Stacked"], labels)
@@ -261,7 +285,14 @@ def step_layout() -> bool:
         isinstance(parent, Adw.EntryRow) and parent.get_text() == "",
         parent.get_text(),
     )
-    state.update(page=page, git=git, layout=layout, untracked=untracked, log_page=log_page, parent=parent)
+    state.update(
+        git_device=git_device,
+        git_service=git_service,
+        layout=layout,
+        untracked=untracked,
+        log_page=log_page,
+        parent=parent,
+    )
     return later(step_writes, 200)
 
 
@@ -348,6 +379,9 @@ def step_writes_settled() -> bool:
 def step_focus_out() -> bool:
     parent = state["parent"]
     dialog = state["dialog"]
+    # An Adw.ViewStack maps one page, and a row on an unmapped page takes no
+    # focus: show the Service page, where the parent box is.
+    dialog._view_stack.set_visible_child(dialog._service_page)
     root = parent.get_root()
     grabbed = parent.grab_focus()
     if not grabbed and state["focus_tries"] < 60:  # ~3 s
@@ -377,7 +411,8 @@ def step_focus_out() -> bool:
 
 
 def step_search() -> bool:
-    dialog, page, git = state["dialog"], state["page"], state["git"]
+    dialog = state["dialog"]
+    git_titles = titles(state["git_device"]) + titles(state["git_service"])
     entry = dialog._search_entry
     for query, expected in (
         ("new files", ["Show untracked files"]),
@@ -388,23 +423,27 @@ def step_search() -> bool:
         # view has no theme of its own (it follows the editor's scheme).
         ("dracula", ["Color theme"]),
         # The group's own words keep every row, by design.
-        ("untracked", titles(git)),
-        ("parent branch", titles(git)),
+        ("untracked", git_titles),
+        ("parent branch", git_titles),
     ):
         entry.set_text(query)
         dialog._apply_filter()
-        rows = visible_rows(page)
+        rows = visible_rows(dialog)
         check(f"searching {query!r} finds {expected}", rows == expected, rows)
     entry.set_text("")
     dialog._apply_filter()
-    check("clearing the search shows everything again", len(visible_rows(page)) > 40, len(visible_rows(page)))
+    check("clearing the search shows everything again", len(visible_rows(dialog)) > 40, len(visible_rows(dialog)))
     check(
         "show_group opens on the group's title",
         dialog.show_group("git") and entry.get_text() == "Git",
         entry.get_text(),
     )
+    check(
+        "and shows the page the group's first half is on (This device)",
+        dialog._view_stack.get_visible_child() is dialog._device_page,
+    )
     dialog._apply_filter()
-    rows = visible_rows(page)
+    rows = visible_rows(dialog)
     check("and the group's rows are all showing", all(t in rows for t in ROW_TITLES), rows)
     # Closing the dialog on a word still settling keeps it.
     state["parent"].set_text("trunk")

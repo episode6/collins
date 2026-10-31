@@ -317,11 +317,15 @@ cat > "$E2E/config/collins/state.json" <<EOF
   },
   "settings": {
     "title_model": "none",
-    "welcome_seen": true,
-    "window_width": 1280,
-    "window_height": 860
+    "welcome_seen": true
   }
 }
+EOF
+
+# The window's size is this device's setting: ui-state.json, not state.json
+# (a size left in state.json is migrated over ui-state.json's on first start).
+cat > "$E2E/config/collins/ui-state.json" <<EOF
+{"device": {"settings": {"window_width": 1280, "window_height": 860}}}
 EOF
 
 cat > "$E2E/state/collins/panel_history/$U1.txt" <<EOF

@@ -34,8 +34,10 @@ tray, Caffeine, the composer's, editor's and git page's looks, which
 notifications this screen shows) lives in `ui-state.json` beside it,
 written by `uistate.UiState` through `AppState`. `get_setting` /
 `set_setting` route, so no call site cares; `prefslayout.GROUP_SIDES`
-records which side each group is on (several are "mixed" until PR-3.3
-regroups the dialog into "This device" and "Service" headings).
+records which side each group is on and `prefslayout.GROUP_SETTINGS` the
+settings its rows write; the dialog is **two pages**, "This device" and
+"Service" (PR-3.3, D61), `prefslayout.page_groups(side)` says which groups
+are on each (a "mixed" group is on both, as two groups of one title).
 
 **A setting write is optimistic** (PR-1.10, spec §3.8). The `state` the
 dialog is handed is the app's `remotestate.RemoteState`, the mirror of
@@ -57,10 +59,19 @@ To add a setting:
 1. The `DEFAULT_SETTINGS` entry with its comment, and its name in
    `SERVICE_SETTINGS` or `DEVICE_SETTINGS` (`tests/test_state_split.py`
    fails until it is on exactly one side).
-2. A row in `prefs.PreferencesDialog` in the right `_build_*_group`; groups
-   are `_SearchableGroup`s built in `prefslayout.GROUPS` order (the Token use
-   group sits directly under General, and `TOKEN_USE_ROWS` pins its rows —
-   `tests/test_prefslayout.py` fails if either drifts). Rows write the setting
+2. A row in `prefs.PreferencesDialog` in the right `_build_*_group`, added
+   with **the settings it writes**: `group.add(row, "the_key")` (every row of
+   the dialog names its keys, none for a row that writes nothing; a caption
+   row names its entry's) and the key in `prefslayout.GROUP_SETTINGS` for
+   the group. Groups are `_SearchableGroup`s built in `prefslayout.GROUPS`
+   order (the Token use group sits directly under General on the Service
+   page, and `TOKEN_USE_ROWS` pins its rows — `tests/test_prefslayout.py`
+   fails if either drifts); a mixed group (General, Session behavior, Pull
+   requests, Git) is a `_SplitGroup` whose `add` routes the row to the half
+   of its first key's side (`state.SERVICE_SETTINGS`), so a row lands on its
+   setting's page by itself and raises `ValueError` if it names no key or
+   keys of both sides. `check_token_use_prefs.py`'s pin step holds every
+   row's tags to the table and the side lists. Rows write the setting
    the moment they change and call `on_change` (Escape after a toggle loses
    nothing); `MainWindow.apply_preferences` fans the new settings out to tabs
    (`TerminalTab.apply_settings` → every `PanelPage.apply_settings`).
@@ -73,7 +84,17 @@ To add a setting:
 4. Docs: `docs/guide/features.md` (and the README bullet if it changes the
    feature list).
 
-Dialog facts: an `Adw.Dialog` + `Adw.ToolbarView` with the search bar as a
+Dialog facts: two `_SearchablePage`s (`_device_page`, `_service_page`; the
+service page's description names `apilink.service_host()`, the hello's
+`host`) in an `Adw.ViewStack` (`_view_stack`) behind an `Adw.ViewSwitcher`
+(WIDE) in the header; `_pages` is the pair, `_group(name, side)` the group
+of a name on a page (None when it has no half there) and there is no single
+`_page`. `show_group` shows the page of the group's side (This device for a
+mixed group). `_apply_filter` spans both pages: each tab's badge counts its
+matched rows while a query is typed, and the other page is shown when the
+shown one has none and the other has (clearing never switches back); an
+`Adw.ViewStack` maps one page, so a row on the other page takes no focus
+until it is shown. An `Adw.Dialog` + `Adw.ToolbarView` with the search bar as a
 second top bar (libadwaita's built-in search matches title+subtitle only and
 pushes a separate page); an `Adw.Dialog` hands focus to its first focusable
 widget on open, so the search bar translates Escape into clear-then-close; a

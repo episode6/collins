@@ -77,7 +77,8 @@ SCENES = (
     "main-window", "hero", "quick-switcher", "session-details", "mcp-servers",
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
     "editor-panel", "editor-picker", "attachments-panel", "notifications",
-    "notification-card", "preferences-notifications", "welcome", "welcome-cli",
+    "notification-card", "preferences-notifications", "preferences-service",
+    "preferences-search", "welcome", "welcome-cli",
     "git-page", "git-page-notes", "git-page-commit", "git-page-commit-folded",
     "git-page-gap-note",
 )
@@ -86,18 +87,44 @@ if args.scene not in SCENES:
 
 
 def edit_settings() -> None:
-    path = os.path.join(os.environ["XDG_CONFIG_HOME"], "collins", "state.json")
+    # A setting lives in one of two files since the state split: the
+    # service's in state.json, this device's (the window's size among them)
+    # in ui-state.json. --size and --set write each where the app reads it.
+    sys.path.insert(0, args.repo_root)
+    from collins.state import DEVICE_SETTINGS
+
+    config = os.path.join(os.environ["XDG_CONFIG_HOME"], "collins")
+    path = os.path.join(config, "state.json")
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     settings = data.setdefault("settings", {})
+    ui_path = os.path.join(config, "ui-state.json")
+    try:
+        with open(ui_path, encoding="utf-8") as fh:
+            ui = json.load(fh)
+    except (OSError, ValueError):
+        ui = {}
+    device = ui.setdefault("device", {}).setdefault("settings", {})
+    edits: dict = {}
     if args.size:
         w, h = args.size.lower().split("x")
-        settings["window_width"], settings["window_height"] = int(w), int(h)
+        edits["window_width"], edits["window_height"] = int(w), int(h)
     for item in args.set:
         key, _, value = item.partition("=")
-        settings[key] = json.loads(value)
+        edits[key] = json.loads(value)
+    # A device key left in state.json's settings would be migrated over
+    # ui-state.json's on the service's first start (a staged state.json has
+    # no service_id), so the first scene's size would depend on a race: pop
+    # every one, whoever staged it.
+    for key in [k for k in settings if k in DEVICE_SETTINGS]:
+        device.setdefault(key, settings[key])
+        del settings[key]
+    for key, value in edits.items():
+        (device if key in DEVICE_SETTINGS else settings)[key] = value
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
+    with open(ui_path, "w", encoding="utf-8") as fh:
+        json.dump(ui, fh, indent=2)
 
 
 edit_settings()
@@ -274,6 +301,21 @@ def stage(win) -> list[tuple[int, callable]]:
         dialogs.mcp_browser_dialog(win)
     elif scene == "preferences":
         win.activate_action("win.preferences")
+    elif scene in ("preferences-service", "preferences-search"):
+        # Preferences is two pages (This device, Service); the first is
+        # the "preferences" scene. These open the dialog and show the
+        # Service page, or type a search that has matches on both with the
+        # tabs' counts (not docs shots: a PR's).
+        win.activate_action("win.preferences")
+
+        def second_view() -> None:
+            dialog = win.get_visible_dialog()
+            if scene == "preferences-service":
+                dialog._view_stack.set_visible_child(dialog._service_page)
+            else:
+                dialog._search_entry.set_text("parent branch")
+
+        return [(1200, second_view)]
     elif scene == "preferences-notifications":
         # The dialog filtered to the Notifications group, the way the
         # sheet's Preferences… link opens it (not a docs shot: a PR's).

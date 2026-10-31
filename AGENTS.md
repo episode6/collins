@@ -462,7 +462,10 @@ goes to `/dev/null` unless it is set; under the unit it is the journal), `COLLIN
   comment saying what it does and where it is read), its name in
   `state.SERVICE_SETTINGS` or `state.DEVICE_SETTINGS` (which file it lives
   in; `tests/test_state_split.py` fails until it is on a side), a row in `prefs.py`
-  placed per `prefslayout.GROUPS`, search words if its row's text doesn't
+  placed per `prefslayout.GROUPS` (added with the setting it writes,
+  `group.add(row, "key")`, and the key in `prefslayout.GROUP_SETTINGS`: the
+  dialog is two pages, This device and Service, and a row lands on its
+  setting's), search words if its row's text doesn't
   carry them, and a mention in `docs/guide/features.md`. Read settings via
   `state.get_setting`; the file writes every default back, so a new key exists
   in every install after its first save.

@@ -26,6 +26,7 @@ from . import (  # noqa: E402
     clonerepo,
     editor,
     footerapps,
+    mcptools,
     notifycenter,
     notifysound,
     prefslayout,
@@ -43,7 +44,7 @@ from .api.protocol import RequestRefused
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .formatting import display_path
 from .i18n import LANGUAGES, N_, _, ngettext
-from .state import AppState
+from .state import SERVICE_SETTINGS, AppState
 from .themes import DEFAULT_THEME, THEME_NAMES, get_theme
 
 
@@ -190,14 +191,48 @@ class _SearchableGroup(Adw.PreferencesGroup):
         super().__init__(**kwargs)
         self.rows: list[Gtk.Widget] = []
 
-    def add(self, row: Gtk.Widget) -> None:
+    def add(self, row: Gtk.Widget, *settings: str) -> None:
+        """Add *row*, which writes *settings* (the keys of `state.DEFAULT_SETTINGS`
+        it saves; none for a row that writes nothing). The tag is what a mixed
+        group routes by (`_SplitGroup`) and what check_token_use_prefs.py holds
+        the dialog's rows to `prefslayout.GROUP_SETTINGS` with."""
         super().add(row)
+        row.settings = settings
         self.rows.append(row)
 
     def remove(self, row: Gtk.Widget) -> None:
         super().remove(row)
         if row in self.rows:
             self.rows.remove(row)
+
+
+class _SplitGroup:
+    """One of the four mixed groups (`prefslayout.GROUP_SIDES`) while it is
+    built: two `_SearchableGroup`s of one title, `.device` for This device's
+    page and `.service` for the Service page. `add(row, *settings)` puts a
+    row on the half of its first setting's side, so the builders keep adding
+    rows in the group's order and know nothing of the pages."""
+
+    def __init__(self, **kwargs) -> None:
+        self.device = _SearchableGroup(**kwargs)
+        self.service = _SearchableGroup(**kwargs)
+
+    def add(self, row: Gtk.Widget, *settings: str) -> None:
+        if not settings:
+            raise ValueError("a row in a mixed group has to name the settings it writes")
+        sides = {key in SERVICE_SETTINGS for key in settings}
+        if len(sides) != 1:
+            raise ValueError(f"a row writing {settings} is on both sides of the split")
+        (self.service if sides.pop() else self.device).add(row, *settings)
+
+    @property
+    def search_terms(self) -> str:
+        return getattr(self.device, "search_terms", "")
+
+    @search_terms.setter
+    def search_terms(self, value: str) -> None:
+        self.device.search_terms = value
+        self.service.search_terms = value
 
 
 class _SearchablePage(Adw.PreferencesPage):
@@ -276,8 +311,25 @@ class PreferencesDialog(Adw.Dialog):
         self._search_entry.connect("search-changed", self._on_search_changed)
         self._search_entry.connect("stop-search", self._on_search_stopped)
 
-        page = _SearchablePage(title=_("Preferences"), icon_name="preferences-system-symbolic")
-        self._page = page
+        # Two pages (PR-3.3, D61): the settings this device keeps and the
+        # ones the Collins service keeps, behind a switcher in the header.
+        # A mixed group (prefslayout.GROUP_SIDES) is two groups of one title,
+        # one on each page.
+        host = apilink.service_host()
+        self._device_page = _SearchablePage(title=_("This device"), icon_name="computer-symbolic")
+        self._service_page = _SearchablePage(
+            title=_("Service"),
+            icon_name="network-server-symbolic",
+            description=(
+                # The page's description is Pango markup, and the hello's
+                # host is the service's word (a remote machine's): escaped.
+                _("The Collins service on {host}").format(host=GLib.markup_escape_text(host))
+                if host
+                else _("The Collins service")
+            ),
+        )
+        self._pages = (self._device_page, self._service_page)
+        self._groups: dict[tuple[str, str], _SearchableGroup] = {}
 
         # The groups, in the order prefslayout promises them — a loop over
         # data rather than a run of page.add calls, so the order is one the
@@ -300,7 +352,17 @@ class PreferencesDialog(Adw.Dialog):
             "editor": self._build_editor_group,
         }
         for name in prefslayout.GROUPS:
-            page.add(builders[name](state))
+            built = builders[name](state)
+            if isinstance(built, _SplitGroup) != (prefslayout.GROUP_SIDES[name] == "mixed"):
+                raise ValueError(f"the {name} group is built as the wrong kind for its side")
+            halves = (
+                (("device", built.device), ("service", built.service))
+                if isinstance(built, _SplitGroup)
+                else ((prefslayout.GROUP_SIDES[name], built),)
+            )
+            for side, group in halves:
+                (self._device_page if side == "device" else self._service_page).add(group)
+                self._groups[(name, side)] = group
 
         self._no_results = Adw.StatusPage(
             icon_name="system-search-symbolic",
@@ -310,7 +372,14 @@ class PreferencesDialog(Adw.Dialog):
         # Not homogeneous: the placeholder is free to be smaller than the
         # settings, which would otherwise widen the dialog to fit it.
         self._stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
-        self._stack.add_named(page, "settings")
+        self._view_stack = Adw.ViewStack()
+        self._device_vsp = self._view_stack.add_titled_with_icon(
+            self._device_page, "device", _("This device"), "computer-symbolic"
+        )
+        self._service_vsp = self._view_stack.add_titled_with_icon(
+            self._service_page, "service", _("Service"), "network-server-symbolic"
+        )
+        self._stack.add_named(self._view_stack, "settings")
         self._stack.add_named(self._no_results, "no-results")
 
         # The box lines up with the setting rows rather than running the full
@@ -328,24 +397,31 @@ class PreferencesDialog(Adw.Dialog):
         )
 
         toolbar_view = Adw.ToolbarView(content=self._stack)
-        toolbar_view.add_top_bar(Adw.HeaderBar())
+        header = Adw.HeaderBar()
+        header.set_title_widget(
+            Adw.ViewSwitcher(stack=self._view_stack, policy=Adw.ViewSwitcherPolicy.WIDE)
+        )
+        toolbar_view.add_top_bar(header)
         toolbar_view.add_top_bar(search_bar)
-        # The search box is the first focusable widget in the dialog, so
-        # Adw.Dialog hands it the focus on open: preferences opens ready to
-        # type into. _on_search_stopped keeps Escape closing anyway.
+        # Preferences opens ready to type into: the box is named as the
+        # focus, because the view switcher's buttons come first in the focus
+        # chain now and Adw.Dialog would hand one of them the focus.
+        # _on_search_stopped keeps Escape closing anyway.
         self.set_child(toolbar_view)
+        self.set_focus(self._search_entry)
 
     def _build_cli_group(self, state: AppState) -> _SearchableGroup:
-        # Above everything, under no heading: the CLI is the tool the app is
-        # about, and the row that answers "which claude is Collins running?"
-        # shouldn't take scrolling — or a category — to find.
+        # Above everything on the Service page, under no heading: the CLI is
+        # the tool the app is about, and the row that answers "which claude
+        # is Collins running?" shouldn't take scrolling — or a category — to
+        # find. It runs where the service runs, so it heads that page.
         cli_group = _SearchableGroup()
         self._build_cli_rows(state, cli_group)
         return cli_group
 
-    def _build_general_group(self, state: AppState) -> _SearchableGroup:
+    def _build_general_group(self, state: AppState) -> _SplitGroup:
         # General: what Collins looks like and what the sidebar shows.
-        general_group = _SearchableGroup(title=_("General"))
+        general_group = _SplitGroup(title=_("General"))
         current_lang = state.get_setting("language") or ""
         self._initial_lang = current_lang
         current_label = next(
@@ -375,7 +451,8 @@ class PreferencesDialog(Adw.Dialog):
         general_group.add(
             _searchable(
                 self._lang_expander, _("Restart now"), *(label for _c, label in LANGUAGES)
-            )
+            ),
+            "language",
         )
         scheme_row = Adw.ComboRow(title=_("Dark / Light Mode"))
         scheme_labels = [_(label) for _k, label, _s in _SCHEMES]
@@ -385,7 +462,7 @@ class PreferencesDialog(Adw.Dialog):
             next((i for i, (k, _l, _s) in enumerate(_SCHEMES) if k == current_scheme), 0)
         )
         scheme_row.connect("notify::selected", self._on_scheme_changed)
-        general_group.add(_searchable(scheme_row, *scheme_labels))
+        general_group.add(_searchable(scheme_row, *scheme_labels), "color_scheme")
         self._build_status_icon_row(state, general_group)
         self._tab_drag_row = Adw.SwitchRow(
             title=_("Tab drag handles"),
@@ -397,19 +474,19 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._tab_drag_row.set_active(bool(state.get_setting("panel_tab_drag_handles")))
         self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
-        general_group.add(self._tab_drag_row)
+        general_group.add(self._tab_drag_row, "panel_tab_drag_handles")
         self._folder_path_row = Adw.SwitchRow(
             title=_("Show folder paths in sidebar"),
         )
         self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
         self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
-        general_group.add(self._folder_path_row)
+        general_group.add(self._folder_path_row, "show_folder_path")
         icon_size_row = Adw.SpinRow.new_with_range(16, 32, 2)
         icon_size_row.set_title(_("Project icon size"))
         icon_size_row.set_subtitle(_("Size of the project and folder icons in the sidebar"))
         icon_size_row.set_value(int(state.get_setting("project_icon_size") or 16))
         icon_size_row.connect("notify::value", self._on_icon_size_changed)
-        general_group.add(icon_size_row)
+        general_group.add(icon_size_row, "project_icon_size")
         self._build_clone_directory_row(state, general_group)
         self._usage_panel_row = Adw.SwitchRow(
             title=_("Show Claude usage"),
@@ -417,7 +494,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
         self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
-        general_group.add(self._usage_panel_row)
+        general_group.add(self._usage_panel_row, "show_usage_panel")
         self._update_check_row = Adw.SwitchRow(
             title=_("Check for updates"),
             subtitle=_(
@@ -428,11 +505,12 @@ class PreferencesDialog(Adw.Dialog):
         self._update_check_row.set_active(bool(state.get_setting(updatecheck.SETTING)))
         self._update_check_row.connect("notify::active", self._on_update_check_changed)
         general_group.add(
-            _searchable(self._update_check_row, "update", "upgrade", "version", "release", "github")
+            _searchable(self._update_check_row, "update", "upgrade", "version", "release", "github"),
+            updatecheck.SETTING,
         )
         return general_group
 
-    def _build_clone_directory_row(self, state: AppState, group: _SearchableGroup) -> None:
+    def _build_clone_directory_row(self, state: AppState, group: _SearchableGroup | _SplitGroup) -> None:
         """Where Add project → Clone repository starts its "Clone into"
         field (clone_directory). The path is the subtitle; the folder button
         picks another, and the reset button — shown only once one was
@@ -458,7 +536,8 @@ class PreferencesDialog(Adw.Dialog):
         group.add(
             _searchable(
                 self._clone_dir_row, "clone", "git", "repository", "folder", "directory", "add project"
-            )
+            ),
+            "clone_directory",
         )
 
     def _refresh_clone_directory_row(self, value) -> None:
@@ -499,7 +578,11 @@ class PreferencesDialog(Adw.Dialog):
             # The N_-marked terms ("None", "Refresh") are what the row shows,
             # so they match in the user's language; the rest are English
             # keywords gettext hands back untouched.
-            group.add(_searchable(row, *(_(term) for term in _TOKEN_ROW_TERMS[key])))
+            # The Model list row writes nothing; the others their setting.
+            group.add(
+                _searchable(row, *(_(term) for term in _TOKEN_ROW_TERMS[key])),
+                *(() if key == "model_list" else (key,)),
+            )
         return group
 
     def _build_mcp_tools_group(self, state: AppState) -> _SearchableGroup:
@@ -512,11 +595,11 @@ class PreferencesDialog(Adw.Dialog):
         for name, row in self._mcp_tool_rows.items():
             # The tool's name is in the subtitle already; "session tools" is
             # what the group used to be called.
-            group.add(_searchable(row, "session tools", name))
+            group.add(_searchable(row, "session tools", name), mcptools.tool_setting_key(name))
         return group
 
-    def _build_sessions_group(self, state: AppState) -> _SearchableGroup:
-        sessions_group = _SearchableGroup(title=_("Session behavior"))
+    def _build_sessions_group(self, state: AppState) -> _SplitGroup:
+        sessions_group = _SplitGroup(title=_("Session behavior"))
         self._restore_session_row = Adw.SwitchRow(
             title=_("Reopen the last session"),
             subtitle=_(
@@ -527,7 +610,8 @@ class PreferencesDialog(Adw.Dialog):
         self._restore_session_row.set_active(bool(state.get_setting("restore_last_session")))
         self._restore_session_row.connect("notify::active", self._on_restore_session_changed)
         sessions_group.add(
-            _searchable(self._restore_session_row, "launch", "restore", "resume", "startup")
+            _searchable(self._restore_session_row, "launch", "restore", "resume", "startup"),
+            "restore_last_session",
         )
         self._worktree_row = Adw.SwitchRow(
             title=_("Start new sessions in a git worktree"),
@@ -539,7 +623,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._worktree_row.set_active(bool(state.get_setting("worktree_new_sessions")))
         self._worktree_row.connect("notify::active", self._on_worktree_changed)
-        sessions_group.add(self._worktree_row)
+        sessions_group.add(self._worktree_row, "worktree_new_sessions")
         self._cli_title_row = Adw.SwitchRow(
             title=_("Follow Claude's own session names"),
             subtitle=_(
@@ -550,7 +634,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._cli_title_row.set_active(bool(state.get_setting("cli_title_sessions")))
         self._cli_title_row.connect("notify::active", self._on_cli_title_changed)
-        sessions_group.add(_searchable(self._cli_title_row, "rename", "cli", "title"))
+        sessions_group.add(_searchable(self._cli_title_row, "rename", "cli", "title"), "cli_title_sessions")
         self._add_running_behavior_row(
             sessions_group,
             _("When archiving a running session"),
@@ -593,7 +677,8 @@ class PreferencesDialog(Adw.Dialog):
         self._remote_archive_row.set_active(bool(state.get_setting("archive_on_claude_ai")))
         self._remote_archive_row.connect("notify::active", self._on_remote_archive_changed)
         sessions_group.add(
-            _searchable(self._remote_archive_row, "claude.ai", "remote", "web", "sync")
+            _searchable(self._remote_archive_row, "claude.ai", "remote", "web", "sync"),
+            "archive_on_claude_ai",
         )
         self._build_auto_delete_row(state, sessions_group)
         self._attach_autodock_row = Adw.SwitchRow(
@@ -610,7 +695,8 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._attach_autodock_row.connect("notify::active", self._on_attach_autodock_changed)
         sessions_group.add(
-            _searchable(self._attach_autodock_row, "images", "gallery", "dock")
+            _searchable(self._attach_autodock_row, "images", "gallery", "dock"),
+            "dock_attachments_when_room",
         )
         self._progress_termprop_row = Adw.SwitchRow(
             title=_("Exact busy tracking from the agent"),
@@ -622,7 +708,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._progress_termprop_row.set_active(bool(state.get_setting("progress_termprop")))
         self._progress_termprop_row.connect("notify::active", self._on_progress_termprop_changed)
-        sessions_group.add(self._progress_termprop_row)
+        sessions_group.add(self._progress_termprop_row, "progress_termprop")
         self._bg_poll_row = Adw.SwitchRow(
             title=_("Poll for background sessions"),
             subtitle=_(
@@ -632,10 +718,10 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
         self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
-        sessions_group.add(self._bg_poll_row)
+        sessions_group.add(self._bg_poll_row, "background_status_poll")
         return sessions_group
 
-    def _build_auto_delete_row(self, state: AppState, group: _SearchableGroup) -> None:
+    def _build_auto_delete_row(self, state: AppState, group: _SearchableGroup | _SplitGroup) -> None:
         """Delete archived sessions after: a number and, as its suffix, the
         unit drop-down (days / weeks / months / years). 0 is never, and the
         row says so in its subtitle rather than with a separate switch."""
@@ -673,7 +759,9 @@ class PreferencesDialog(Adw.Dialog):
                 "retention",
                 "expire",
                 *unit_labels,
-            )
+            ),
+            autodelete.SETTING_COUNT,
+            autodelete.SETTING_UNIT,
         )
 
     def _build_sandbox_group(self, state: AppState) -> _SearchableGroup:
@@ -690,7 +778,7 @@ class PreferencesDialog(Adw.Dialog):
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
             row.set_active(bool(state.get_setting(key)))
             row.connect("notify::active", self._on_sandbox_switch, key)
-            group.add(_searchable(row, *terms))
+            group.add(_searchable(row, *terms), key)
             self._sandbox_rows.append(row)
             return row
 
@@ -771,7 +859,8 @@ class PreferencesDialog(Adw.Dialog):
         group.add(
             _searchable(
                 tools_row, "tools", "mcp", "session tools", *self._sandbox_tool_rows
-            )
+            ),
+            *mcptools.default_sandbox_tool_settings(),
         )
         self._sandbox_rows.append(tools_row)
         # The status row: whether a box can be built here, and why not.
@@ -876,7 +965,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._inapp_row.set_active(bool(state.get_setting("inapp_notifications")))
         self._inapp_row.connect("notify::active", self._on_inapp_changed)
-        group.add(_searchable(self._inapp_row, "card", "banner", "desktop", "popup"))
+        group.add(_searchable(self._inapp_row, "card", "banner", "desktop", "popup"), "inapp_notifications")
 
         # The subtitle is kept short: the selected value gets what the
         # subtitle leaves, and "Follow app" was coming back as "Follo…"
@@ -893,7 +982,8 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._card_scheme_row.connect("notify::selected", self._on_card_scheme_changed)
         group.add(
-            _searchable(self._card_scheme_row, *card_scheme_labels, "theme", "color", "scheme", "mode")
+            _searchable(self._card_scheme_row, *card_scheme_labels, "theme", "color", "scheme", "mode"),
+            "notification_color_scheme",
         )
 
         self._sound_row = Adw.ComboRow(title=_("Sound"))
@@ -929,7 +1019,8 @@ class PreferencesDialog(Adw.Dialog):
         self._sound_row.add_suffix(self._sound_play)
         self._refresh_sound_row()
         group.add(
-            _searchable(self._sound_row, *labels, _("Custom…"), "file", "gstreamer", "mute", "chime")
+            _searchable(self._sound_row, *labels, _("Custom…"), "file", "gstreamer", "mute", "chime"),
+            "notification_sound",
         )
 
         self._bell_row = Adw.SwitchRow(
@@ -941,7 +1032,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._bell_row.set_active(bool(state.get_setting("bell_notifications")))
         self._bell_row.connect("notify::active", self._on_bell_notifications_changed)
-        group.add(_searchable(self._bell_row, "beep", "BEL", "terminal"))
+        group.add(_searchable(self._bell_row, "beep", "BEL", "terminal"), "bell_notifications")
 
         self._announce_row = Adw.SwitchRow(
             title=_("Announce finished runs"),
@@ -949,7 +1040,10 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._announce_row.set_active(bool(state.get_setting("announce_finished_runs")))
         self._announce_row.connect("notify::active", self._on_announce_finished_changed)
-        group.add(_searchable(self._announce_row, "finished", "done", "complete", "green"))
+        group.add(
+            _searchable(self._announce_row, "finished", "done", "complete", "green"),
+            "announce_finished_runs",
+        )
         return group
 
     def _sound_index(self, value: str) -> int:
@@ -996,7 +1090,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._composer_typing_row.set_active(bool(state.get_setting("composer_on_typing")))
         self._composer_typing_row.connect("notify::active", self._on_composer_typing_changed)
-        composer_group.add(self._composer_typing_row)
+        composer_group.add(self._composer_typing_row, "composer_on_typing")
         self._attach_overlay_row = Adw.SwitchRow(
             title=_("Floating composer button"),
             subtitle=_(
@@ -1007,7 +1101,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._attach_overlay_row.set_active(bool(state.get_setting("attach_overlay_button")))
         self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
-        composer_group.add(self._attach_overlay_row)
+        composer_group.add(self._attach_overlay_row, "attach_overlay_button")
         self._composer_enter_row = Adw.SwitchRow(
             title=_("Enter sends composer text"),
             subtitle=_(
@@ -1019,7 +1113,7 @@ class PreferencesDialog(Adw.Dialog):
             bool(state.get_setting("composer_enter_sends"))
         )
         self._composer_enter_row.connect("notify::active", self._on_composer_enter_changed)
-        composer_group.add(self._composer_enter_row)
+        composer_group.add(self._composer_enter_row, "composer_enter_sends")
         self._spell_click_row = Adw.SwitchRow(
             title=_("Right-click aims spell-check"),
             subtitle=_(
@@ -1030,7 +1124,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._spell_click_row.set_active(bool(state.get_setting("composer_spell_click")))
         self._spell_click_row.connect("notify::active", self._on_spell_click_changed)
-        composer_group.add(self._spell_click_row)
+        composer_group.add(self._spell_click_row, "composer_spell_click")
         return composer_group
 
     def _build_terminal_group(self, state: AppState) -> _SearchableGroup:
@@ -1053,7 +1147,7 @@ class PreferencesDialog(Adw.Dialog):
             row.set_activatable_widget(radio)
             row.add_suffix(_theme_swatch(name))
             self._theme_expander.add_row(row)
-        terminal_group.add(_searchable(self._theme_expander, *THEME_NAMES))
+        terminal_group.add(_searchable(self._theme_expander, *THEME_NAMES), "terminal_theme")
 
         font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to all terminal tabs"))
         self._font_button = Gtk.FontDialogButton(dialog=Gtk.FontDialog(), valign=Gtk.Align.CENTER)
@@ -1068,13 +1162,13 @@ class PreferencesDialog(Adw.Dialog):
         reset_font.set_tooltip_text(_("Reset to default font"))
         reset_font.connect("clicked", self._on_font_reset)
         font_row.add_suffix(reset_font)
-        terminal_group.add(font_row)
+        terminal_group.add(font_row, "font")
 
         scroll_row = Adw.SpinRow.new_with_range(1_000, 1_000_000, 1_000)
         scroll_row.set_title(_("Scrollback lines"))
         scroll_row.set_value(int(state.get_setting("scrollback") or 10_000))
         scroll_row.connect("notify::value", self._on_scrollback_changed)
-        terminal_group.add(scroll_row)
+        terminal_group.add(scroll_row, "scrollback")
 
         max_width_row = Adw.SpinRow.new_with_range(0, 6_000, 20)
         max_width_row.set_title(_("Max width"))
@@ -1083,7 +1177,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         max_width_row.set_value(int(state.get_setting("terminal_max_width") or 0))
         max_width_row.connect("notify::value", self._on_terminal_max_width_changed)
-        terminal_group.add(max_width_row)
+        terminal_group.add(max_width_row, "terminal_max_width")
 
         # use_markup off, and set before the title: the bare "&" in the title
         # is not valid Pango markup.
@@ -1097,7 +1191,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
         self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
-        terminal_group.add(self._easy_copy_row)
+        terminal_group.add(self._easy_copy_row, "easy_copy_paste")
         return terminal_group
 
     def _build_footer_apps_group(self, state: AppState) -> _SearchableGroup:
@@ -1121,8 +1215,8 @@ class PreferencesDialog(Adw.Dialog):
         self._footer_apps_group.set_visible(apilink.is_local())
         return self._footer_apps_group
 
-    def _build_pr_group(self, state: AppState) -> _SearchableGroup:
-        pr_group = _SearchableGroup(title=_("Pull requests"))
+    def _build_pr_group(self, state: AppState) -> _SplitGroup:
+        pr_group = _SplitGroup(title=_("Pull requests"))
         pr_scale_row = Adw.SpinRow.new_with_range(50, 300, 5)
         pr_scale_row.set_title(_("Text size"))
         pr_scale_row.set_subtitle(
@@ -1133,7 +1227,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         pr_scale_row.set_value(int(state.get_setting("pr_font_scale") or 100))
         pr_scale_row.connect("notify::value", self._on_pr_font_scale_changed)
-        pr_group.add(pr_scale_row)
+        pr_group.add(pr_scale_row, "pr_font_scale")
         # Not "Show images": the MCP-tools group already has a row by
         # that name (the show_image tool), and one Preferences window can't
         # carry two of them.
@@ -1148,7 +1242,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._pr_images_row.set_active(bool(state.get_setting("pr_inline_images")))
         self._pr_images_row.connect("notify::active", self._on_pr_images_changed)
-        pr_group.add(self._pr_images_row)
+        pr_group.add(self._pr_images_row, "pr_inline_images")
         self._pr_autoshow_row = Adw.SwitchRow(
             title=_("Open new pull requests automatically"),
             subtitle=_(
@@ -1159,7 +1253,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._pr_autoshow_row.set_active(bool(state.get_setting("open_pr_panel_on_attach")))
         self._pr_autoshow_row.connect("notify::active", self._on_pr_autoshow_changed)
-        pr_group.add(_searchable(self._pr_autoshow_row, "attach", "dock"))
+        pr_group.add(_searchable(self._pr_autoshow_row, "attach", "dock"), "open_pr_panel_on_attach")
         self._confirm_merges_row = Adw.SwitchRow(
             title=_("Confirm before merging"),
             subtitle=_(
@@ -1170,7 +1264,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._confirm_merges_row.set_active(bool(state.get_setting("confirm_merges")))
         self._confirm_merges_row.connect("notify::active", self._on_confirm_merges_changed)
-        pr_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"))
+        pr_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"), "confirm_merges")
         self._attach_prompt_prs_row = Adw.SwitchRow(
             title=_("Attach pull requests linked in prompts"),
             subtitle=_(
@@ -1181,7 +1275,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._attach_prompt_prs_row.set_active(bool(state.get_setting("attach_prompt_prs")))
         self._attach_prompt_prs_row.connect("notify::active", self._on_attach_prompt_prs_changed)
-        pr_group.add(self._attach_prompt_prs_row)
+        pr_group.add(self._attach_prompt_prs_row, "attach_prompt_prs")
         self._pr_title_row = Adw.SwitchRow(
             title=_("Rename sessions after their pull requests"),
             subtitle=_(
@@ -1191,7 +1285,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._pr_title_row.set_active(bool(state.get_setting("pr_title_sessions")))
         self._pr_title_row.connect("notify::active", self._on_pr_title_changed)
-        pr_group.add(self._pr_title_row)
+        pr_group.add(self._pr_title_row, "pr_title_sessions")
         self._pr_launch_row = Adw.SwitchRow(
             title=_("Refresh pull requests at launch"),
             subtitle=_(
@@ -1202,16 +1296,16 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._pr_launch_row.set_active(bool(state.get_setting("refresh_prs_on_launch")))
         self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
-        pr_group.add(self._pr_launch_row)
+        pr_group.add(self._pr_launch_row, "refresh_prs_on_launch")
         return pr_group
 
-    def _build_git_group(self, state: AppState) -> _SearchableGroup:
+    def _build_git_group(self, state: AppState) -> _SplitGroup:
         """The git page's knobs (see gitpage.py and gitloads.Options): how
         the diff view draws, what its commits panel loads, and the branch
         the page measures against. All of them reach an open page as they
         change. The diff's colours and font are the editor's (Preferences →
         Editor), not a row here."""
-        git_group = _SearchableGroup(
+        git_group = _SplitGroup(
             title=_("Git"),
             description=_("The git page: how the diff is drawn and what the commits panel loads"),
         )
@@ -1232,21 +1326,21 @@ class PreferencesDialog(Adw.Dialog):
         self._git_line_numbers_row.connect(
             "notify::active", self._on_git_switch_changed, "git_line_numbers"
         )
-        git_group.add(_searchable(self._git_line_numbers_row, "gutter", "numbers"))
+        git_group.add(_searchable(self._git_line_numbers_row, "gutter", "numbers"), "git_line_numbers")
         self._git_wrap_row = Adw.SwitchRow(
             title=_("Wrap long lines"),
             subtitle=_("Wrap instead of scrolling each hunk sideways"),
         )
         self._git_wrap_row.set_active(bool(state.get_setting("git_wrap_lines")))
         self._git_wrap_row.connect("notify::active", self._on_git_switch_changed, "git_wrap_lines")
-        git_group.add(_searchable(self._git_wrap_row, "wrap", "truncate"))
+        git_group.add(_searchable(self._git_wrap_row, "wrap", "truncate"), "git_wrap_lines")
         self._git_word_diff_row = Adw.SwitchRow(
             title=_("Highlight changed words"),
             subtitle=_("Emphasise what moved within a changed line"),
         )
         self._git_word_diff_row.set_active(bool(state.get_setting("git_word_diff")))
         self._git_word_diff_row.connect("notify::active", self._on_git_switch_changed, "git_word_diff")
-        git_group.add(_searchable(self._git_word_diff_row, "word", "emphasis", "inline"))
+        git_group.add(_searchable(self._git_word_diff_row, "word", "emphasis", "inline"), "git_word_diff")
         self._git_hide_whitespace_row = Adw.SwitchRow(
             title=_("Hide whitespace changes"),
             subtitle=_("Draw lines that differ only in whitespace as unchanged"),
@@ -1255,7 +1349,10 @@ class PreferencesDialog(Adw.Dialog):
         self._git_hide_whitespace_row.connect(
             "notify::active", self._on_git_switch_changed, "git_hide_whitespace"
         )
-        git_group.add(_searchable(self._git_hide_whitespace_row, "whitespace", "indent", "ignore"))
+        git_group.add(
+            _searchable(self._git_hide_whitespace_row, "whitespace", "indent", "ignore"),
+            "git_hide_whitespace",
+        )
 
         self._git_untracked_row = Adw.SwitchRow(
             title=_("Show untracked files"),
@@ -1266,7 +1363,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._git_untracked_row.set_active(bool(state.get_setting("git_untracked")))
         self._git_untracked_row.connect("notify::active", self._on_git_untracked_changed)
-        git_group.add(_searchable(self._git_untracked_row, "new files", "exclude"))
+        git_group.add(_searchable(self._git_untracked_row, "new files", "exclude"), "git_untracked")
 
         log_page_row = Adw.SpinRow.new_with_range(5, 200, 5)
         log_page_row.set_title(_("Commits per page"))
@@ -1275,7 +1372,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         log_page_row.set_value(int(state.get_setting("git_log_page") or 20))
         log_page_row.connect("notify::value", self._on_git_log_page_changed)
-        git_group.add(_searchable(log_page_row, "load more", "log"))
+        git_group.add(_searchable(log_page_row, "load more", "log"), "git_log_page")
 
         # A branch name, not a picker: Preferences is app-wide and one
         # repository's branches can't serve the rest, so the name is looked
@@ -1287,7 +1384,7 @@ class PreferencesDialog(Adw.Dialog):
         self._git_parent_row.connect("entry-activated", self._on_git_parent_activated)
         self._flush_git_word_on_focus_out(self._git_parent_row, "git_parent_branch", _git_branch_ok)
         self.connect("closed", lambda *_a: self._flush_git_words())
-        git_group.add(_searchable(self._git_parent_row, *parent_terms))
+        git_group.add(_searchable(self._git_parent_row, *parent_terms), "git_parent_branch")
         parent_reason = Adw.ActionRow(activatable=False, selectable=False)
         parent_reason.add_css_class("dim-label")
         parent_reason.set_subtitle(
@@ -1299,7 +1396,7 @@ class PreferencesDialog(Adw.Dialog):
                 "default branch"
             )
         )
-        git_group.add(_searchable(parent_reason, *parent_terms))
+        git_group.add(_searchable(parent_reason, *parent_terms), "git_parent_branch")
         return git_group
 
     def _build_caffeine_group(self, state: AppState) -> _SearchableGroup:
@@ -1314,7 +1411,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._caffeine_screen_row.set_active(bool(state.get_setting("caffeine_keep_screen_on")))
         self._caffeine_screen_row.connect("notify::active", self._on_caffeine_screen_changed)
-        caffeine_group.add(self._caffeine_screen_row)
+        caffeine_group.add(self._caffeine_screen_row, "caffeine_keep_screen_on")
         # Minutes, not a duration key: the grace is a short wait, and a spin
         # row keeps any length one drag away without a menu of guesses.
         self._caffeine_grace_row = Adw.SpinRow.new_with_range(1, 120, 1)
@@ -1330,7 +1427,7 @@ class PreferencesDialog(Adw.Dialog):
             grace_seconds(state.get_setting("caffeine_idle_grace_minutes")) // 60
         )
         self._caffeine_grace_row.connect("notify::value", self._on_caffeine_grace_changed)
-        caffeine_group.add(self._caffeine_grace_row)
+        caffeine_group.add(self._caffeine_grace_row, "caffeine_idle_grace_minutes")
         self._caffeine_launch_row = Adw.SwitchRow(
             title=_("Turn on at launch"),
             subtitle=_(
@@ -1340,7 +1437,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._caffeine_launch_row.set_active(bool(state.get_setting("caffeine_on_launch")))
         self._caffeine_launch_row.connect("notify::active", self._on_caffeine_launch_changed)
-        caffeine_group.add(self._caffeine_launch_row)
+        caffeine_group.add(self._caffeine_launch_row, "caffeine_on_launch")
         # The same durations the button's context menu offers, so "on at
         # launch" doesn't have to mean "on until you remember it".
         self._caffeine_timer_row = Adw.ComboRow(
@@ -1356,7 +1453,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._caffeine_timer_row.set_sensitive(self._caffeine_launch_row.get_active())
         self._caffeine_timer_row.connect("notify::selected", self._on_caffeine_timer_changed)
-        caffeine_group.add(_searchable(self._caffeine_timer_row, *duration_labels))
+        caffeine_group.add(_searchable(self._caffeine_timer_row, *duration_labels), "caffeine_launch_timer")
         return caffeine_group
 
     def _build_editor_group(self, state: AppState) -> _SearchableGroup:
@@ -1387,7 +1484,8 @@ class PreferencesDialog(Adw.Dialog):
             row.set_activatable_widget(radio)
             self._editor_scheme_expander.add_row(row)
         editor_group.add(
-            _searchable(self._editor_scheme_expander, *(scheme_label(s) for s in scheme_ids))
+            _searchable(self._editor_scheme_expander, *(scheme_label(s) for s in scheme_ids)),
+            "editor_style_scheme",
         )
 
         font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to the editor panel"))
@@ -1403,12 +1501,12 @@ class PreferencesDialog(Adw.Dialog):
         reset_editor_font.set_tooltip_text(_("Reset to system monospace"))
         reset_editor_font.connect("clicked", self._on_editor_font_reset)
         font_row.add_suffix(reset_editor_font)
-        editor_group.add(font_row)
+        editor_group.add(font_row, "editor_font")
 
         self._editor_line_numbers_row = Adw.SwitchRow(title=_("Show line numbers"))
         self._editor_line_numbers_row.set_active(bool(state.get_setting("editor_show_line_numbers")))
         self._editor_line_numbers_row.connect("notify::active", self._on_editor_line_numbers_changed)
-        editor_group.add(self._editor_line_numbers_row)
+        editor_group.add(self._editor_line_numbers_row, "editor_show_line_numbers")
 
         self._editor_hidden_files_row = Adw.SwitchRow(
             title=_("Show hidden files"),
@@ -1416,7 +1514,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._editor_hidden_files_row.set_active(bool(state.get_setting("editor_show_hidden_files")))
         self._editor_hidden_files_row.connect("notify::active", self._on_editor_hidden_files_changed)
-        editor_group.add(self._editor_hidden_files_row)
+        editor_group.add(self._editor_hidden_files_row, "editor_show_hidden_files")
 
         pop_out_row = Adw.SpinRow.new_with_range(0, 30_000, 100)
         pop_out_row.set_title(_("Open in a window on small screens"))
@@ -1429,7 +1527,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         pop_out_row.set_value(int(state.get_setting("editor_pop_out_screen_width") or 0))
         pop_out_row.connect("notify::value", self._on_editor_pop_out_width_changed)
-        editor_group.add(pop_out_row)
+        editor_group.add(pop_out_row, "editor_pop_out_screen_width")
 
         narrow_row = Adw.SpinRow.new_with_range(0, 5_000, 20)
         narrow_row.set_title(_("Single column when narrow"))
@@ -1442,10 +1540,10 @@ class PreferencesDialog(Adw.Dialog):
         )
         narrow_row.set_value(int(state.get_setting("editor_narrow_width") or 0))
         narrow_row.connect("notify::value", self._on_editor_narrow_width_changed)
-        editor_group.add(narrow_row)
+        editor_group.add(narrow_row, "editor_narrow_width")
         return editor_group
 
-    def _build_status_icon_row(self, state: AppState, group: _SearchableGroup) -> None:
+    def _build_status_icon_row(self, state: AppState, group: _SearchableGroup | _SplitGroup) -> None:
         """The status icon's switch, and the truth about whether this desktop
         can show one.
 
@@ -1462,7 +1560,10 @@ class PreferencesDialog(Adw.Dialog):
         self._status_icon_switch.connect("notify::active", self._on_status_icon_changed)
         self._status_icon_row.add_suffix(self._status_icon_switch)
         self._status_icon_row.set_activatable_widget(self._status_icon_switch)
-        group.add(_searchable(self._status_icon_row, "tray", "top bar", "indicator", "AppIndicator"))
+        group.add(
+            _searchable(self._status_icon_row, "tray", "top bar", "indicator", "AppIndicator"),
+            "status_icon",
+        )
         # Seeded synchronously so the row opens saying something, then
         # followed live: availability moves under a running app — extensions
         # get switched on and off, and an X11 shell restart takes the watcher
@@ -1531,14 +1632,14 @@ class PreferencesDialog(Adw.Dialog):
             self._cli_row.add_suffix(browse)
         self._cli_row.set_text(state.get_setting(clisetup.PATH_SETTING) or "")
         self._cli_row.connect("changed", self._on_cli_path_changed)
-        group.add(_searchable(self._cli_row, "claude", "CLI", "PATH", _("Browse…")))
+        group.add(_searchable(self._cli_row, "claude", "CLI", "PATH", _("Browse…")), clisetup.PATH_SETTING)
 
         # The verdict's reason, directly under the box like the welcome
         # dialog's: a title-less row in the same list. The same search terms
         # as the entry keep the two showing and hiding together.
         self._cli_reason = Adw.ActionRow(activatable=False, selectable=False)
         self._cli_reason.add_css_class("dim-label")
-        group.add(_searchable(self._cli_reason, "claude", "CLI", "PATH", _("Browse…")))
+        group.add(_searchable(self._cli_reason, "claude", "CLI", "PATH", _("Browse…")), clisetup.PATH_SETTING)
         self._refresh_cli_row(save=False)
 
     def _on_cli_path_changed(self, _row: Adw.EntryRow) -> None:
@@ -1632,48 +1733,70 @@ class PreferencesDialog(Adw.Dialog):
         else:
             self.close()
 
+    def _group(self, name: str, side: str) -> _SearchableGroup | None:
+        """The group *name* has on the page of *side* ("device" or "service");
+        None when it has no half there (prefslayout.page_groups)."""
+        return self._groups.get((name, side))
+
     def show_group(self, name: str) -> bool:
         """Open on one group: the search box is filled with the group's title,
-        so the page is filtered to that group — plus any other row that
+        so the dialog is filtered to that group — plus any other row that
         happens to name it (see _apply_filter) — the way someone who typed
         it would see it, and the one filter this dialog has (an
-        Adw.PreferencesPage can scroll to its top, not to a group).
+        Adw.PreferencesPage can scroll to its top, not to a group). The page
+        shown is the group's side's; a mixed group lands on This device, the
+        first page.
 
-        *name* is a prefslayout.GROUPS entry. False, with the page left whole,
-        for a name the layout doesn't have or a group with no title to search
-        by (the untitled CLI rows) — a caller pointing at a group that isn't
-        built yet gets plain Preferences rather than an empty page.
+        *name* is a prefslayout.GROUPS entry. False, with the dialog left
+        whole, for a name the layout doesn't have or a group with no title to
+        search by (the untitled CLI rows) — a caller pointing at a group that
+        isn't built yet gets plain Preferences rather than an empty page.
         """
         if name not in prefslayout.GROUPS:
             return False
-        title = self._page.groups[prefslayout.GROUPS.index(name)].get_title() or ""
+        side = "device" if prefslayout.GROUP_SIDES[name] in ("device", "mixed") else "service"
+        group = self._group(name, side)
+        title = (group.get_title() if group is not None else "") or ""
         if not title:
             return False
+        self._view_stack.set_visible_child_name(side)
         self._search_entry.set_text(title)
         return True
 
     def _apply_filter(self) -> None:
-        """Hide every setting the search box doesn't name.
+        """Hide every setting the search box doesn't name, on both pages.
 
         A group whose own title matches keeps all of its rows: someone typing
         "terminal" wants that whole section, not just the rows that happen to
-        repeat the word.
+        repeat the word. Two rules make a search over two pages no worse than
+        one over one: each page's tab carries the number of rows it matched
+        (while a query is typed), and when the page shown has none but the
+        other has, the other is shown. Clearing the search never switches
+        back.
         """
         query = self._search_entry.get_text()
-        anything_matched = False
-        for group in self._page.groups:
-            if getattr(group, "local_only", False) and not apilink.is_local():
-                group.set_visible(False)  # a local extra's settings: never offered
-                continue
-            whole_group = prefssearch.matches(query, _group_text(group))
-            matched_rows = False
-            for row in group.rows:
-                visible = whole_group or prefssearch.matches(query, _row_text(row))
-                row.set_visible(visible)
-                matched_rows = matched_rows or visible
-            group.set_visible(matched_rows)
-            anything_matched = anything_matched or matched_rows
-        self._stack.set_visible_child_name("settings" if anything_matched else "no-results")
+        counts: list[int] = []
+        for page in self._pages:
+            count = 0
+            for group in page.groups:
+                if getattr(group, "local_only", False) and not apilink.is_local():
+                    group.set_visible(False)  # a local extra's settings: never offered
+                    continue
+                whole_group = prefssearch.matches(query, _group_text(group))
+                matched_rows = 0
+                for row in group.rows:
+                    visible = whole_group or prefssearch.matches(query, _row_text(row))
+                    row.set_visible(visible)
+                    matched_rows += visible
+                group.set_visible(matched_rows > 0)
+                count += matched_rows
+            counts.append(count)
+        for vsp, count in zip((self._device_vsp, self._service_vsp), counts, strict=True):
+            vsp.set_badge_number(count if query.strip() else 0)
+        shown = 0 if self._view_stack.get_visible_child() is self._device_page else 1
+        if counts[shown] == 0 and counts[1 - shown] > 0:
+            self._view_stack.set_visible_child(self._pages[1 - shown])
+        self._stack.set_visible_child_name("settings" if any(counts) else "no-results")
 
     def _on_editor_scheme_radio(self, radio: Gtk.CheckButton, scheme_id: str) -> None:
         if not radio.get_active():
@@ -1980,7 +2103,7 @@ class PreferencesDialog(Adw.Dialog):
 
     def _add_running_behavior_row(
         self,
-        group: _SearchableGroup,
+        group: _SearchableGroup | _SplitGroup,
         title: str,
         subtitle: str,
         key: str,
@@ -1994,7 +2117,7 @@ class PreferencesDialog(Adw.Dialog):
         current = self._state.get_setting(key)
         row.set_selected(values.index(current) if current in values else 0)
         row.connect("notify::selected", self._on_running_behavior_changed, key, values)
-        group.add(_searchable(row, *labels))
+        group.add(_searchable(row, *labels), key)
         return row
 
     def _on_running_behavior_changed(
@@ -2093,12 +2216,12 @@ class PreferencesDialog(Adw.Dialog):
             for btn in (up_btn, down_btn, remove_btn):
                 btn.add_css_class("flat")
                 row.add_suffix(btn)
-            self._footer_apps_group.add(row)
+            self._footer_apps_group.add(row, "footer_apps")
             self._footer_app_rows.append(row)
         if not apps:
             row = Adw.ActionRow(title=_("No apps configured"))
             row.set_sensitive(False)
-            self._footer_apps_group.add(row)
+            self._footer_apps_group.add(row, "footer_apps")
             self._footer_app_rows.append(row)
 
     def _on_add_footer_app(self, _button: Gtk.Button) -> None:

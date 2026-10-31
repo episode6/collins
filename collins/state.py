@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-12. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -822,7 +822,11 @@ SHARED_KEYS: dict[str, SharedKey] = {
         SharedKey("sandbox_tools", MAP, lambda raw: _sandbox_tools(raw)),
         SharedKey("project_order", LIST, _clean_set),
         SharedKey("virtual_projects", MAP, _map_of(_is_str)),
-        SharedKey("expanded_groups", SET, _clean_set),
+        # No longer written: the sidebar's fold state is this device's per
+        # service (uistate, PR-3.3, D36). The service keeps the value it
+        # had and serves it so a device can read it once to seed its own
+        # (AppState.seed_expanded_groups).
+        SharedKey("expanded_groups", SET, _clean_set, writable=False),
         SharedKey("session_prs", MAP, _map_of(lambda v: isinstance(v, list))),
         SharedKey("session_attachments", MAP, _map_of(lambda v: isinstance(v, list))),
         SharedKey("session_drafts", MAP, _clean_drafts),
@@ -969,7 +973,9 @@ class AppState:
         # (project name -> working directory, "" when it was never known), so
         # deleting sessions doesn't cost you the folder.
         self.virtual_projects: dict[str, str] = {}
-        self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
+        # What the service's state.json still holds of the sidebar's fold
+        # state (frozen since PR-3.3); this device's is in ui-state.json.
+        self.expanded_groups: set[str] = set()
         # This device's file (ui-state.json), and which service's block of it
         # this state is: per-session dock layouts and editor states live
         # there (the panel_layouts and editor_states properties below), as
@@ -1754,24 +1760,60 @@ class AppState:
         self.save()
 
     # -- expanded groups ---------------------------------------------------
+    #
+    # The sidebar's fold state is this device's, per service (PR-3.3, D36):
+    # it lives in the service's block of ui-state.json. `expanded_groups`
+    # the attribute is only what the service still holds in state.json (a
+    # key it no longer reads or writes): the one-time read that seeds a
+    # block which has never held the key (`seed_expanded_groups`), and
+    # nothing a mutator below touches.
+
+    def _expanded_block(self) -> dict | None:
+        return self.ui.service(self.service_id) if self.service_id else None
+
+    def _expanded_now(self) -> set[str]:
+        block = self._expanded_block()
+        listed = block.get("expanded_groups") if block is not None else None
+        # Never chosen on this device: the service's value stands in.
+        return set(self.expanded_groups if listed is None else listed)
+
+    def seed_expanded_groups(self) -> bool:
+        """The one-time read (D36): a service block that has never held
+        `expanded_groups` takes the service's value (the attribute), so a
+        sidebar that was folded before the move stays folded. True when it
+        seeded. Once the key is in the block the service's value is never
+        read again."""
+        block = self._expanded_block()
+        if block is None or block.get("expanded_groups") is not None:
+            return False
+        block["expanded_groups"] = uistate.clean_expanded_groups(self.expanded_groups)
+        self._save_ui()
+        return True
 
     def is_group_expanded(self, group: str) -> bool:
-        return group in self.expanded_groups
+        return group in self._expanded_now()
+
+    def _change_expanded(self, change) -> None:
+        block = self._expanded_block()
+        if block is None:
+            return  # the service has not named itself yet; nothing to key it by
+        groups = self._expanded_now()
+        change(groups)
+        clean = uistate.clean_expanded_groups(groups)
+        if block.get("expanded_groups") == clean:
+            return
+        block["expanded_groups"] = clean
+        self._save_ui()
 
     def set_group_expanded(self, group: str, expanded: bool) -> None:
-        if expanded:
-            self.expanded_groups.add(group)
-        else:
-            self.expanded_groups.discard(group)
-        self.save()
+        self._change_expanded(lambda g: g.add(group) if expanded else g.discard(group))
 
     def set_groups_expanded(self, groups: Iterable[str], expanded: bool) -> None:
         """Expand/collapse several groups with a single write to disk."""
-        if expanded:
-            self.expanded_groups.update(groups)
-        else:
-            self.expanded_groups.difference_update(groups)
-        self.save()
+        listed = list(groups)
+        self._change_expanded(
+            lambda g: g.update(listed) if expanded else g.difference_update(listed)
+        )
 
     # -- session forwards --------------------------------------------------
 

@@ -317,7 +317,7 @@ def test_every_shared_key_survives_the_trip(app_state, tmp_path):
     service.set_sandbox_project_grants("/home/u/alpha", ["/data"])
     service.set_project_order(["beta", "alpha"])
     service.keep_virtual_projects({"kept": "/home/u/kept"})
-    service.set_groups_expanded(["proj:alpha"], True)
+    service.expanded_groups = {"proj:alpha"}  # the service's frozen value (PR-3.3)
     service.set_session_prs("s1", [{"number": 1, "url": "https://github.com/o/r/pull/1"}])
     service.set_session_draft("s1", "half")
     service.set_process_baseline("s1", ["node mcp"])

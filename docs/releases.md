@@ -391,6 +391,20 @@ downloads of each version, see the
   It now copies every subpackage, installs the service's command and user
   unit, and depends on `gir1.2-soup-3.0` (and the markdown libraries); CI
   installs the built .deb into a scratch root and imports the app from it.
+- **Preferences is two pages.** *This device* holds what describes this
+  computer (appearance, sounds, the tray, the composer, the editor, the git
+  page's looks, the pull request page's looks) and *Service* what the Collins
+  service does for your sessions (which `claude`, launches, titles,
+  archiving, the sandbox, the tools, what the git page reads), headed with
+  the service's host name. A group with both kinds appears on each page under
+  the same title. The search covers both: the tabs count their matches and
+  the page without any gives way to the one with. A window on a service on
+  another machine now shows which of its settings are that machine's.
+- **Which sidebar groups are expanded is this device's.** The fold state
+  used to be kept by the service, so a laptop and a desktop window sharing
+  one service folded each other's sidebars. It is now kept in this
+  device's own file, per service; the first time a device meets a service
+  it takes the service's old value, once, so nothing refolds.
 
 ### v0.1.4 — 2026-09-27
 

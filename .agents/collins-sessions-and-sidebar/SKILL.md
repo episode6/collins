@@ -667,7 +667,13 @@ dialog opens no folder and runs no `which` of this device's).
 - The CLI recycles an unchanged existing worktree for a new `-w` session, so
   a leftover transcript can sit under its key before the new session writes.
 - Sidebar groups start **collapsed** unless `expanded_groups` lists them;
-  a placeholder in a group persists its expansion so discovery doesn't snap it
+  the list is **this device's, per service** (PR-3.3, D36): the service's
+  block of `ui-state.json`, `AppState.is_group_expanded` /
+  `set_group_expanded`, never `state.json`. `state.json` keeps its old
+  `expanded_groups` frozen (a read-only shared key); a block without the key
+  has never chosen and takes that value once (`seed_expanded_groups`, run by
+  `RemoteState` when the service's id and the value have both arrived).
+  A placeholder in a group persists its expansion so discovery doesn't snap it
   shut.
 - `chats.py` once claimed trust was not inherited; it is. Ignore stale
   comments to the contrary.

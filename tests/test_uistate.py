@@ -107,3 +107,111 @@ def test_a_pty_entry_outside_the_protocols_range_never_reaches_an_attach():
     assert uistate.open_tab_pty("pty:4294967295") == 2**32 - 1
     assert uistate.open_tab_pty("pty:\u0661") is None  # a non-ASCII digit
     assert uistate.clean_open_tabs([huge, "pty:4294967296", "pty:3"]) == ["pty:3"]
+
+
+# -- expanded_groups: the sidebar's fold state, this device's (PR-3.3, D36) --
+
+
+def test_expanded_groups_are_cleaned_on_the_way_in():
+    dirty = ["proj:a", "proj:a", "", 7, "ctl\x01", "x" * 513, "fav:", None]
+    assert uistate.clean_expanded_groups(dirty) == ["fav:", "proj:a"]
+    assert uistate.clean_expanded_groups("nope") == []
+    many = [f"proj:{i}" for i in range(uistate.EXPANDED_GROUPS_MAX + 10)]
+    assert len(uistate.clean_expanded_groups(many)) == uistate.EXPANDED_GROUPS_MAX
+
+
+def test_a_block_holds_expanded_groups_only_once_it_was_seeded_or_written(tmp_path):
+    path = tmp_path / "ui-state.json"
+    path.write_text(json.dumps({"services": {
+        SERVICE: {"expanded_groups": ["proj:b", "proj:a"]},
+        OTHER: {"expanded_groups": "nope"},
+    }}), encoding="utf-8")
+    ui = uistate.UiState(path, {})
+    assert ui.service(SERVICE)["expanded_groups"] == ["proj:a", "proj:b"]
+    # "Never chosen" is the key's absence, not an empty list.
+    assert "expanded_groups" not in ui.service(OTHER)
+    assert "expanded_groups" not in ui.service("c" * 32)
+
+
+def test_expanded_groups_are_this_devices_not_the_services(app_state):
+    state = app_state.AppState()
+    state.set_group_expanded("proj:alpha", True)
+    ui = json.loads(app_state._ui_state_file().read_text(encoding="utf-8"))
+    assert ui["services"][state.service_id]["expanded_groups"] == ["proj:alpha"]
+    # The service's file keeps the value it had: it is no longer written.
+    assert state.expanded_groups == set()
+
+
+def test_the_services_value_is_read_once(app_state):
+    state = app_state.AppState()
+    state.expanded_groups = {"proj:old", "fav:"}
+    assert state.is_group_expanded("proj:old")  # never chosen here: the service's value stands in
+    assert state.seed_expanded_groups() is True
+    assert state.seed_expanded_groups() is False
+    state.expanded_groups = {"proj:changed-on-the-service"}  # never read again
+    assert state.is_group_expanded("fav:")
+    assert not state.is_group_expanded("proj:changed-on-the-service")
+    state.set_group_expanded("fav:", False)
+    assert not state.is_group_expanded("fav:")
+    assert state.is_group_expanded("proj:old")
+
+
+def test_a_first_write_seeds_from_the_services_value(app_state):
+    state = app_state.AppState()
+    state.expanded_groups = {"proj:old"}
+    state.set_group_expanded("proj:new", True)
+    block = state.ui.service(state.service_id)
+    assert block["expanded_groups"] == ["proj:new", "proj:old"]
+
+
+def test_expanded_groups_are_kept_per_service(app_state):
+    state = app_state.AppState()
+    state.set_group_expanded("proj:alpha", True)
+    first = state.service_id
+    state.service_id = OTHER
+    assert not state.is_group_expanded("proj:alpha")
+    state.set_group_expanded("proj:beta", True)
+    state.service_id = first
+    assert state.is_group_expanded("proj:alpha") and not state.is_group_expanded("proj:beta")
+
+
+def test_the_mirror_seeds_from_the_snapshot_once_the_service_is_named(app_state, tmp_path):
+    from collins.remotestate import RemoteState
+
+    class _Link:
+        def __init__(self):
+            self.handlers = {}
+            self.sent = []
+
+        def on(self, name, fn):
+            self.handlers[name] = fn
+
+        def send(self, *args, **kwargs):
+            self.sent.append(args)
+
+    link = _Link()
+    ui_path = tmp_path / "client-ui.json"
+    ui = uistate.UiState(ui_path, app_state.device_defaults())
+    state = RemoteState(link, ui=ui)
+    event = link.handlers["state.set"]
+    # The old value first, the id after: the seed waits for both.
+    event({"key": "expanded_groups", "value": ["proj:a"]})
+    assert not ui.has_service(SERVICE)
+    event({"key": "service_id", "value": SERVICE})
+    saved = json.loads(ui_path.read_text(encoding="utf-8"))
+    assert saved["services"][SERVICE]["expanded_groups"] == ["proj:a"]
+    assert state.is_group_expanded("proj:a")
+    # What the service says afterwards is not read again.
+    event({"key": "expanded_groups", "value": ["proj:z"]})
+    assert state.is_group_expanded("proj:a") and not state.is_group_expanded("proj:z")
+    # A write is this device's: nothing goes to the service.
+    state.set_group_expanded("proj:b", True)
+    assert link.sent == []
+    saved = json.loads(ui_path.read_text(encoding="utf-8"))
+    assert saved["services"][SERVICE]["expanded_groups"] == ["proj:a", "proj:b"]
+
+
+def test_the_service_refuses_a_write_of_the_old_key():
+    from collins.state import SHARED_KEYS
+
+    assert SHARED_KEYS["expanded_groups"].writable is False

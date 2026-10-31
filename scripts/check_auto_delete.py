@@ -143,7 +143,7 @@ gi.require_version("Vte", "3.91")
 import e2e_service  # noqa: E402
 from gi.repository import Adw, GLib  # noqa: E402
 
-from collins import autodelete, i18n, prefslayout  # noqa: E402
+from collins import autodelete, i18n  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.prefs import PreferencesDialog  # noqa: E402
 from collins.state import AppState  # noqa: E402
@@ -220,8 +220,7 @@ def stage() -> bool:
 
 def step_row() -> bool:
     dialog = state["dialog"]
-    page = dialog._page
-    sessions = page.groups[prefslayout.GROUPS.index("sessions")]
+    sessions = dialog._group("sessions", "service")
     row = next((r for r in sessions.rows if r.get_title() == ROW_TITLE), None)
     check("the Session behavior group holds the row", row is not None, [r.get_title() for r in sessions.rows])
     if row is None:
@@ -264,7 +263,9 @@ def step_row() -> bool:
     entry = dialog._search_entry
     entry.set_text("retention")
     dialog._apply_filter()
-    visible = [r.get_title() for g in page.groups if g.get_visible() for r in g.rows if r.get_visible()]
+    visible = [
+        r.get_title() for p in dialog._pages for g in p.groups if g.get_visible() for r in g.rows if r.get_visible()
+    ]
     check("the search finds the row by its words", visible == [ROW_TITLE], visible)
     entry.set_text("")
     dialog._apply_filter()

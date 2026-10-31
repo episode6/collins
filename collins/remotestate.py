@@ -142,6 +142,9 @@ class RemoteState(AppState):
         self._capture: list | None = None
         self._listeners: list[Callable[[str, str | None, bool], None]] = []
         self._draft_timers: dict[str, Any] = {}
+        # Whether the service has said its (frozen) `expanded_groups` yet:
+        # the one-time seed of this device's own waits for it.
+        self._legacy_expanded_seen = False
         # How many events have landed, per key (any event of it), per
         # key whole (an event with no entry) and per entry: a write takes
         # a snapshot when it goes out, and its reply confirms it only when
@@ -207,6 +210,7 @@ class RemoteState(AppState):
         What is shown stays until an event moves it."""
         self._pending.clear()
         self._capture = None
+        self._legacy_expanded_seen = False  # the next snapshot may be another service's
         self._confirmed.clear()
         self._any_events.clear()
         self._whole_events.clear()
@@ -452,8 +456,15 @@ class RemoteState(AppState):
                 log.warning("state: the service sent %s[%s] a value it does not take", name, entry)
                 return
         self._shown[name] = copy.deepcopy(self.export_key(name))
+        if name == "expanded_groups":
+            self._legacy_expanded_seen = True
         if name == "service_id":
             self._on_service_id()
+        if name in ("service_id", "expanded_groups") and self._legacy_expanded_seen:
+            # The sidebar's fold state is this device's (D36): the first
+            # time both the service's id and its old value are known, a
+            # block that never held the key takes the value, once.
+            self.seed_expanded_groups()
         self._announce(name, entry, False)
 
     def _on_service_id(self) -> None:

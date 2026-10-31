@@ -21,7 +21,8 @@ Shape:
      "last_connection": "",        # Phase 3
      "client_id": "<uuid hex>",    # minted once, this device's name on the wire
      "services": {"<service id>": {"panel_layout": {}, "editor_states": {},
-                                   "open_tabs": [], "last_active_session": ""}}}
+                                   "open_tabs": [], "last_active_session": "",
+                                   "expanded_groups": [...]}}}
 
 `connections` and `last_connection` are written with their defaults and
 read by nobody yet: PR-3.1 fills them in. `open_tabs` is the tabs this
@@ -36,6 +37,11 @@ spec left room:
   such thing in the code any more: it was the pre-tree panel shape, which
   `AppState._load` migrates into `panel_layout` on read and drops. It is
   not written here either.
+- `expanded_groups` (the sidebar's fold state) is this device's per
+  service (PR-3.3, D36). The key is *absent* from a block until it is
+  first seeded from the value the service still holds (a one-time read,
+  `AppState.seed_expanded_groups`) or first written; absent means "this
+  device never chose", which is not the same as "nothing is expanded".
 - `last_active_session` keeps its place in `state.DEFAULT_SETTINGS` (so
   `get_setting` keeps answering it) but is stored in the per-service
   block: a session id names a session *of a service*, and the spec's
@@ -95,6 +101,26 @@ def _is_id(value: object) -> bool:
 
 def mint_id() -> str:
     return uuid.uuid4().hex
+
+
+# How many sidebar groups a block keeps, and how long a group key may be
+# ("proj:<name>", "fav:", "chats:"): bounded like open_tabs (rule 5).
+EXPANDED_GROUPS_MAX = 4096
+_GROUP_KEY_MAX_LEN = 512
+
+
+def clean_expanded_groups(raw: object) -> list[str]:
+    """An `expanded_groups` list as the file (or a caller) gave it: unique
+    strings with no control characters, at most `_GROUP_KEY_MAX_LEN` long,
+    sorted, at most `EXPANDED_GROUPS_MAX`."""
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return []
+    keep = {
+        g for g in raw
+        if isinstance(g, str) and g and len(g) <= _GROUP_KEY_MAX_LEN
+        and not any(ord(c) < 32 or c == "\x7f" for c in g)
+    }
+    return sorted(keep)[:EXPANDED_GROUPS_MAX]
 
 
 def _record_map(raw: object) -> dict[str, dict]:
@@ -158,6 +184,8 @@ def _block(raw: object) -> dict:
     block["open_tabs"] = clean_open_tabs(data.get("open_tabs"))
     last = data.get("last_active_session")
     block["last_active_session"] = last if isinstance(last, str) else ""
+    if isinstance(data.get("expanded_groups"), list):
+        block["expanded_groups"] = clean_expanded_groups(data["expanded_groups"])
     return block
 
 
