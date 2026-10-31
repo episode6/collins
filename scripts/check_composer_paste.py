@@ -37,6 +37,10 @@ os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{_RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = os.path.join(_SCRATCH, "projects")
 os.environ["COLLINS_CLAUDE_CONFIG"] = os.path.join(_SCRATCH, "claude.json")
 os.environ["COLLINS_CHATS_DIR"] = os.path.join(_SCRATCH, "chats")
+# The check counts the pending uploads, so they are its own: under the
+# headless wrapper an inherited COLLINS_UPLOADS_DIR is the whole run's,
+# where another check's drops wait too.
+os.environ["COLLINS_UPLOADS_DIR"] = os.path.join(_SCRATCH, "uploads")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))

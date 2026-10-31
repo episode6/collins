@@ -133,6 +133,19 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 python3 scripts/run_e2e.py --list --shard 2/5       # …and its estimate; no display needed
 ```
 
+The uploads are isolated twice over. The wrapper exports one scratch
+`COLLINS_UPLOADS_DIR` for everything it runs (so a check run directly
+under it never touches `~/.local/share/collins/uploads`), and the runner
+gives each run of a check a fresh directory inside whatever the
+environment names, a retry included. Both matter: `check_composer_paste.py`
+and `check_drop_upload.py` count the files in the pending folder, and
+with only the wrapper's directory they shared it, so under one wrapper
+`drop_upload` found `composer_paste`'s two pastes and failed on the count
+(CI never saw it: `xvfb-run` sets no `COLLINS_UPLOADS_DIR`, so the runner
+minted one per check there). A check that counts its uploads also sets
+`COLLINS_UPLOADS_DIR` in its own preamble, as those two do, so a direct
+run is isolated as well.
+
 The service and the mirrors have modules of their own. `tests/test_remote_state.py`
 drives `remotestate.RemoteState` through a fake link that holds every reply
 until the test answers it (a refused write reverts, notifies and toasts; an

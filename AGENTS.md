@@ -482,7 +482,7 @@ e2e checks: `COLLINS_APP_ID`, `COLLINS_PROJECTS_DIR`, `COLLINS_CLAUDE_CONFIG`,
 bubblewrap, like the fake `claude`), `COLLINS_BINDFS` and
 `COLLINS_FUSERMOUNT` (the two tools a live grant is mounted with; a path
 that doesn't exist says "not installed"), `COLLINS_PTY_STATE_DIR` (where
-the service saves pty models), `COLLINS_UPLOADS_DIR` (the uploads; the one override that lets an instance on a staged `COLLINS_PROJECTS_DIR` run the orphan sweep, and the e2e runner and the headless wrapper set a scratch one when the caller set none), `COLLINS_DEBUG_API=1` (the service serves the
+the service saves pty models), `COLLINS_UPLOADS_DIR` (the uploads; the one override that lets an instance on a staged `COLLINS_PROJECTS_DIR` run the orphan sweep; the headless wrapper sets a scratch one for its whole run when the caller set none, and the e2e runner gives every check a scratch one of its own inside whatever the environment names, since two checks count their pending uploads), `COLLINS_DEBUG_API=1` (the service serves the
 `debug.*` probe and applies `scripts/e2e_stubs.py`; never set it outside a
 check), plus `XDG_CONFIG_HOME` / `XDG_STATE_HOME` /
 `XDG_RUNTIME_DIR`.
