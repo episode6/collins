@@ -11,6 +11,8 @@ with a lightbox overlay:
 - a texture dropped on the composer is uploaded (`PUT /api/upload`) into
   the service's pending uploads (the bare view has no session: D37), the
   mention names the upload, and the thumbnail fills from the blob GET;
+  a third link on another device is refused that upload (PR-3.5: a
+  pending upload is served to the device that sent it only);
 - a file dropped by the client that isn't `local` is uploaded under its
   basename and the mention names the upload, never the client's path; the
   `local` client's mention names the dropped file itself and nothing is
@@ -44,6 +46,10 @@ os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{_RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = os.path.join(_SCRATCH, "projects")
 os.environ["COLLINS_CLAUDE_CONFIG"] = os.path.join(_SCRATCH, "claude.json")
 os.environ["COLLINS_CHATS_DIR"] = os.path.join(_SCRATCH, "chats")
+# The check counts the pending uploads, so they are its own: under the
+# headless wrapper an inherited COLLINS_UPLOADS_DIR is the whole run's,
+# where an earlier check's pastes wait too.
+os.environ["COLLINS_UPLOADS_DIR"] = os.path.join(_SCRATCH, "uploads")
 os.environ["COLLINS_DEBUG_API"] = "1"
 # The service's fetch of the local image server must not go through a proxy.
 for _proxy in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
@@ -202,6 +208,16 @@ def main() -> int:
         len(pictures_) == 1 and pictures_[0].get_paintable() is not None,
     )
     check("…and nothing was reported", notes == [], notes)
+    # PR-3.5: the pending folder is every device's, so the drop is served
+    # back to the device that sent it and to no other client that is not
+    # local (a second device on the same service).
+    phone = SocketLink(api_server.socket_path(app_id), app_id="", device="phone")
+    phone.connect()
+    mine = remote.http_get(blobcache.file_url(upload))[0]
+    theirs = phone.http_get(blobcache.file_url(upload))[0]
+    check("…served to the device that dropped it", mine == 200, mine)
+    check("…and refused to another device", theirs == 403, theirs)
+    phone.close()
     window.close()
 
     # -- a dropped file: uploaded for a remote client, its own path for a local one --

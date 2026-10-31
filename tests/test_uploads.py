@@ -116,6 +116,38 @@ def test_inside_names_the_sessions_directory_and_the_pending_one(uploads_root):
     assert uploads.inside(mine, "sid-1") and uploads.inside(pending, "sid-1")
     assert not uploads.inside(other, "sid-1")
     assert uploads.inside(pending, None) and not uploads.inside(mine, None)
+    # Without the pending folder: the session's own only (PR-3.5).
+    assert uploads.inside(mine, "sid-1", pending=False)
+    assert not uploads.inside(pending, "sid-1", pending=False)
+    assert not uploads.inside(pending, None, pending=False)
+    assert uploads.in_pending(pending) and not uploads.in_pending(mine)
+
+
+def test_pending_owners_serve_a_drop_to_its_own_device_only(uploads_root):
+    """PR-3.5 (the Fable review of PR 615, call 5): a pending upload is
+    held to the device that sent it, an unknown or empty one serves nobody,
+    a name reused by a later upload takes the later device, and the record
+    is bounded with the oldest forgotten first."""
+    owners = uploads.PendingOwners(limit=2)
+    first = uploads.write(None, "a.png", b"x")
+    owners.record(first, "laptop")
+    assert owners.serves(first, "laptop")
+    assert not owners.serves(first, "phone") and not owners.serves(first, "")
+    assert not owners.serves(first, None)
+    unknown = uploads.write(None, "b.png", b"x")
+    assert owners.owner(unknown) == "" and not owners.serves(unknown, "")
+    owners.record(unknown, "")  # a client with no device: recorded, serves nobody
+    assert not owners.serves(unknown, "")
+    owners.record(first, "phone")  # the name came round again for another device
+    assert owners.serves(first, "phone") and not owners.serves(first, "laptop")
+    third = uploads.write(None, "c.png", b"x")
+    owners.record(third, "laptop")
+    assert len(owners) == 2 and owners.owner(unknown) == ""  # the oldest went
+    assert owners.serves(first, "phone") and owners.serves(third, "laptop")
+    # Keyed by the resolved path, so a spelling through `..` is the same file.
+    assert owners.serves(f"{uploads_root}/{uploads.PENDING}/../{uploads.PENDING}/c.png", "laptop")
+    owners.record(third, 7)  # a device that is no string is none
+    assert not owners.serves(third, 7) and owners.owner(third) == ""
 
 
 # -- removed with the session (D37) -----------------------------------------------
@@ -220,9 +252,16 @@ class Core:
         self.sessions = {}
         self.store = self
         self.known = set(known)
+        self.pending_owners = uploads.PendingOwners()
 
     def get_session(self, sid):
         return object() if sid in self.known else None
+
+
+class Client:
+    def __init__(self, device="", client_id=""):
+        self.device = device
+        self.client_id = client_id
 
 
 def _put(feed, query, body, client=None):
@@ -248,6 +287,25 @@ def test_the_put_writes_and_answers_the_path(uploads_root):
 def test_the_put_with_no_session_writes_a_pending_upload(uploads_root):
     status, _h, body = _put(_inline(Core()), "name=drop.png", b"png")
     assert status == 200 and json.loads(body)["path"] == str(uploads_root / uploads.PENDING / "drop.png")
+
+
+def test_the_put_holds_a_pending_upload_to_the_uploading_device(uploads_root):
+    """PR-3.5: the hello's device of the client that sent the body is
+    recorded beside a pending upload; a session's upload is not recorded
+    (its folder is its session's), and a request that names no client
+    records an empty device, which serves nobody."""
+    core = Core({"sid-1"})
+    feed = _inline(core)
+    pending = json.loads(_put(feed, "name=drop.png", b"png", Client("laptop"))[2])["path"]
+    assert core.pending_owners.owner(pending) == "laptop"
+    mine = json.loads(_put(feed, "session=sid-1&name=a.png", b"png", Client("laptop"))[2])["path"]
+    assert core.pending_owners.owner(mine) == "" and len(core.pending_owners) == 1
+    anonymous = json.loads(_put(feed, "name=drop.png", b"png")[2])["path"]
+    assert anonymous != pending and not core.pending_owners.serves(anonymous, "")
+    assert len(core.pending_owners) == 2
+    # A client that named no device is held to its client id (N2).
+    nameless = json.loads(_put(feed, "name=drop.png", b"png", Client("", "c-9"))[2])["path"]
+    assert core.pending_owners.owner(nameless) == "\x00client:c-9"
 
 
 def test_the_put_refuses_an_unknown_session_a_bad_name_and_a_body_past_the_cap(uploads_root, monkeypatch):

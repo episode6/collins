@@ -1211,8 +1211,9 @@ class PanelTerminal(Gtk.Box):
         _setup_smooth_scroll(self.terminal)
         _setup_scroll_zoom(self.terminal)
 
-        scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        # The scrolled terminal in the frame that pins it while another
+        # device owns the size (PR-3.5).
+        scrolled = ptyclient.TerminalFrame(self._view)
         self.append(scrolled)
 
         keys = Gtk.EventControllerKey()
@@ -1893,8 +1894,10 @@ class TerminalTab(Gtk.Box):
         self._search_bar = self._build_search_bar()
         self.append(self._search_bar)
 
-        scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        # The scrolled terminal, in the frame that pins it to the pty's grid
+        # under "Sized for <device>" while another device owns the size
+        # (ptyclient.TerminalFrame, PR-3.5).
+        scrolled = ptyclient.TerminalFrame(self._view)
 
         # Floating composer button over the terminal's bottom-left corner —
         # opens the composer panel (a GUI prompt box, see collins/composer.py)

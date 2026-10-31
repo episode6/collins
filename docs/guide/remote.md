@@ -200,3 +200,30 @@ are hidden when the service is elsewhere (type the CLI's path instead).
 Collins decides "is this the service's machine" by a proof it reads from
 its own disk, not by anything the service claims: a window reaching a
 service over ssh never gets the local extras, whatever the far side says.
+
+## Two windows on one session
+
+A session runs on the service, so two computers can show it at once: the
+laptop and the desktop each connected to the same box, or a window on the
+box itself and one over ssh. Both see the same terminal and both can
+type, but the terminal has one size, and the size belongs to the window
+that last used it: the last one to type into it, click into it or focus
+it.
+
+The other window keeps the terminal at that size rather than redrawing it
+to fit itself: its terminal is pinned to the grid the active window chose,
+at the top left of its pane (cut off where its pane is smaller, empty
+space beside it where it is larger), under a banner that says *Sized for
+\<device\>* (the other computer's host name). **Use this size** takes the
+size over, and so does typing into the terminal or clicking into it; the
+banner goes, the terminal fills the pane again, and the session is redrawn
+at that size. The other window is pinned in turn. Moving the mouse over
+a pinned terminal, scrolling it or switching away from it takes nothing.
+When the window that has the size lets go of the session (it detaches,
+quits or loses its connection), the other one takes the size at once.
+Within one window none of this shows: a session has one tab there.
+
+A picture or file you drop into a composer before its session has started
+(the new-chat screen) is uploaded to the box and shown back only to the
+computer that dropped it; the other window never sees another computer's
+drops.

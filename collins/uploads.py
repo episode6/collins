@@ -15,7 +15,10 @@ mentions the path that comes back. The bytes land here:
   none (D37: the new-chat screen, a tab whose id has not resolved yet),
   never moved — the typed mention already names the path — and swept once
   older than `dropimages.PRUNE_AFTER_SECONDS` (`sweep_pending`, the
-  service's housekeeping tick);
+  service's housekeeping tick). The folder is not per session, so each
+  pending upload is held to the device that sent it (`PendingOwners`,
+  PR-3.5: the hello's ``device``), and the blob GET serves it to a client
+  that is not `local` only on that device;
 - a session's directory whose session the service no longer knows (not a
   live agent pty's, not in the store: the CLI's own ``cleanupPeriodDays``
   took the transcript, or the user removed it outside Collins) goes on the
@@ -46,7 +49,9 @@ import os
 import re
 import shutil
 import stat
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
@@ -66,6 +71,10 @@ NAME_MAX = 200
 # How many "-N" names are tried before giving up (a burst of drops of one
 # name; past it something is wrong).
 MAX_NAME_ATTEMPTS = 1000
+# How many pending uploads `PendingOwners` remembers the device of (the
+# oldest forgotten first; a forgotten one is served to no client that is
+# not `local`).
+PENDING_OWNERS_MAX = 4096
 # A session id as a directory name: what the CLI mints (a UUID), with room
 # for an id of another shape, never a path.
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -214,11 +223,11 @@ def write(session_id: str | None, name: object, data: bytes) -> Path:
         os.close(dir_fd)
 
 
-def inside(path: str | os.PathLike, session_id: str | None) -> bool:
+def inside(path: str | os.PathLike, session_id: str | None, pending: bool = True) -> bool:
     """Whether *path* (already resolved) is inside the session's upload
-    directory or the pending one."""
+    directory or (with *pending*) the pending one."""
     real = os.path.realpath(os.fspath(path))
-    folders = [directory(None)]
+    folders = [directory(None)] if pending else []
     if valid_session(session_id):
         folders.append(directory(session_id))
     for folder in folders:
@@ -226,6 +235,63 @@ def inside(path: str | os.PathLike, session_id: str | None) -> bool:
         if real.startswith(base.rstrip(os.sep) + os.sep):
             return True
     return False
+
+
+def in_pending(path: str | os.PathLike) -> bool:
+    """Whether *path* (already resolved) is inside the pending directory."""
+    return inside(path, None)
+
+
+class PendingOwners:
+    """The device each pending upload came from (PR-3.5; the Fable review
+    of PR 615, call 5). The pending folder holds every client's drops made
+    before a session had an id (D37) and is not per session, so with two
+    devices on one service each one's drops are served back to it alone:
+    `UploadBlobs.put` records the uploading client's hello ``device``
+    beside the file's resolved path, and the blob GET serves a pending
+    upload to a client that is not `local` only when its device is the one
+    recorded (`serves`). An upload from a client with no device (no
+    ``Collins-Client`` header, an empty hello field) is recorded as such
+    and serves nobody, so a stale entry for a name a later upload reused
+    can never stand in for it.
+
+    In memory, bounded at *limit* (the oldest forgotten first), and empty
+    after the service restarts, as the show_image registry and the
+    delivered set are (D58): a pending upload nobody remembers is still
+    the CLI's to read by the path its mention names, and is served to no
+    client that is not `local`. Recorded from the upload's worker thread
+    and read from the main loop, so behind a lock."""
+
+    def __init__(self, limit: int = PENDING_OWNERS_MAX) -> None:
+        self.limit = max(1, int(limit))
+        self._owners: OrderedDict[str, str] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def record(self, path: str | os.PathLike, device: object) -> None:
+        """*path* (a pending upload just written) came from *device*."""
+        key = os.path.realpath(os.fspath(path))
+        owner = device if isinstance(device, str) else ""
+        with self._lock:
+            self._owners.pop(key, None)
+            self._owners[key] = owner
+            while len(self._owners) > self.limit:
+                self._owners.popitem(last=False)
+
+    def owner(self, path: str | os.PathLike) -> str:
+        """The device *path* was uploaded from, "" for none known."""
+        key = os.path.realpath(os.fspath(path))
+        with self._lock:
+            return self._owners.get(key, "")
+
+    def serves(self, path: str | os.PathLike, device: object) -> bool:
+        """Whether the pending upload at *path* may be served to a client
+        on *device*: the device it came from, never an empty one."""
+        owner = self.owner(path)
+        return bool(owner) and isinstance(device, str) and owner == device
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._owners)
 
 
 def remove(session_id: str, trash: Callable[[str], str | None] | None = None) -> str | None:

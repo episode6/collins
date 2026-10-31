@@ -311,6 +311,52 @@ def test_a_resize_from_a_non_active_sink_waits_until_it_sends_input(server):
     assert winsize(server.get(pty).master) == (70, 20)
 
 
+@pytest.mark.parametrize(
+    "frame",
+    [
+        b"\x1b[O",  # focus out (?1004h): the pinned user looked away
+        b"\x1b[I",  # focus in: the client's `focus` event is what takes the role
+        b"\x1b[O\x1b[I",  # the pair VTE commits on a button press (F11)
+        b"\x1b[<35;5;5M",  # any-motion, no button (?1003h)
+        b"\x1b[<64;5;5M",  # a wheel step
+        b"\x1b[<0;5;5M\x1b[<0;5;5m",  # a press and its release
+        b"\x1b[M #!",  # an X10 report
+        b"",
+    ],
+)
+def test_focus_and_mouse_reports_take_no_role(server, frame):
+    """The Fable review of PR 627, M1: a frame of nothing but what a VTE
+    commits on its own leaves the size where it is; typing takes it."""
+    pty = spawn_cat(server)
+    a, b = Sink(device="laptop"), Sink(device="desk")
+    server.attach(pty, a, 80, 24)
+    server.attach(pty, b, 100, 30)
+    server.write(pty, frame, sink=b)
+    settle()
+    assert server.get(pty).active == id(a)
+    assert winsize(server.get(pty).master) == (80, 24)
+    # A key in the same frame as a report is typing.
+    server.write(pty, frame + b"k", sink=b)
+    assert server.get(pty).active == id(b)
+    assert winsize(server.get(pty).master) == (100, 30)
+
+
+def test_takes_role_reads_only_whole_frames_of_reports_as_passive():
+    from collins.service.ptyserver import takes_role
+
+    for typing in (b"a", b"\r", b"\x1b[A", b"\x1b", b"\x1b[200~paste\x1b[201~", b"\x1b[Ix", b"\x1b[<0;5;5"):
+        assert takes_role(typing), typing
+    passives = (b"", b"\x1b[I", b"\x1b[O\x1b[I", b"\x1b[<35;120;40M", b"\x1b[<65;1;1m", b"\x1b[M\xff\xff\xff")
+    for passive in passives:
+        assert not takes_role(passive), passive
+    # The URXVT (?1015h) and UTF-8 (?1005h) mouse encodings: passive too
+    # (the Fable verification of PR 627, V2).
+    for passive in (b"\x1b[35;120;40M", b"\x1b[96;1;1M", b"\x1b[M \xc2\x80!", b"\x1b[M#\xc4\x80\xc3\xbf"):
+        assert not takes_role(passive), passive
+    for typing in (b"\x1b[35;120;40Mx", b"\x1b[35;120M", b"\x1b[M \xc2"):
+        assert takes_role(typing), typing
+
+
 def test_sinks_are_told_of_size_and_active_changes(server):
     pty = spawn_cat(server)
     a, b = Sink(device="laptop"), Sink(device="desk")
@@ -332,8 +378,9 @@ def test_sinks_are_told_of_size_and_active_changes(server):
     assert last(b)["active"] is True
     server.resize(pty, 90, 28, sink=b)
     assert last(a)["cols"] == 90 and last(b)["cols"] == 90
+    # b leaves: the role passes to a at once (§3.3, the review of PR 627).
     server.detach(pty, b)
-    assert last(a)["active"] is False and last(a)["sized_for"] == ""
+    assert last(a)["active"] is True and last(a)["sized_for"] == "laptop"
 
 
 @pytest.mark.parametrize("grid", [(120, 40), (80, 24)])
@@ -372,15 +419,80 @@ def test_a_resize_with_no_sink_is_the_services_own(server):
     assert winsize(server.get(pty).master) == (60, 20)
 
 
-def test_detaching_the_active_sink_frees_the_size(server):
+def test_detaching_the_active_sink_hands_the_role_on_with_its_size(server):
+    """§3.3 (ruled on the Fable review of PR 627, S2): when the active sink
+    detaches while others are attached, the role passes at once and the
+    heir's remembered size applies; a lone remaining sink is never left
+    pinned under nobody."""
     pty = spawn_cat(server)
-    a, b = Sink(), Sink()
+    a, b = Sink(device="laptop"), Sink(device="desk")
     server.attach(pty, a, 80, 24)
     server.attach(pty, b, 100, 30)
     server.detach(pty, a)
+    assert server.get(pty).active == id(b)
+    assert winsize(server.get(pty).master) == (100, 30)
+    event = [e for e in b.events if e["t"] == "pty"][-1]
+    assert event["active"] is True and event["sized_for"] == "desk" and event["cols"] == 100
+    # The last one leaving leaves nobody, and the size alone.
+    server.detach(pty, b)
     assert server.get(pty).active is None
-    # The next to type takes it, and its remembered size applies.
-    server.write(pty, b"q", sink=b)
+    assert winsize(server.get(pty).master) == (100, 30)
+    # The next to attach takes it, as before.
+    c = Sink(device="phone")
+    assert server.attach(pty, c, 70, 20)["active"] is True
+
+
+def test_the_heir_is_the_sink_that_most_recently_typed_or_reported_focus(server):
+    pty = spawn_cat(server)
+    a, b, c, d = Sink("a"), Sink("b"), Sink("c"), Sink("d")
+    server.attach(pty, a, 80, 24)  # active, the first to attach
+    server.attach(pty, b, 90, 25)
+    server.attach(pty, c, 100, 26)
+    server.attach(pty, d, 110, 27)
+    server.write(pty, b"x", sink=c)  # c typed (and took the role)
+    server.focus(pty, b, True)  # then b reported focus (and took it)
+    server.write(pty, b"\x1b[<35;1;1M", sink=d)  # d only moved its mouse: no act
+    server.write(pty, b"y", sink=a)  # a takes it back by typing, the latest act
+    server.detach(pty, a)
+    assert server.get(pty).active == id(b)  # b's focus is newer than c's key
+    assert winsize(server.get(pty).master) == (90, 25)
+    # c's grid moved while it was not active: remembered, applied when it
+    # inherits (its attach grid was spent when it typed).
+    server.resize(pty, 101, 29, sink=c)
+    assert winsize(server.get(pty).master) == (90, 25)
+    server.detach(pty, b)
+    assert server.get(pty).active == id(c)  # c typed; d never acted
+    assert winsize(server.get(pty).master) == (101, 29)
+
+
+def test_with_no_act_the_heir_is_the_most_recently_attached(server):
+    pty = spawn_cat(server)
+    a, b, c = Sink("a"), Sink("b"), Sink("c")
+    server.attach(pty, a, 80, 24)
+    server.attach(pty, b, 90, 25)
+    server.attach(pty, c, 100, 26)
+    server.focus(pty, b, False)  # a focus *out* is no act
+    server.write(pty, b"\x1b[O\x1b[<64;2;2M", sink=b)  # nor a focus-out report and a wheel
+    server.attach(pty, b, 95, 25)  # b attaches again: the most recent attach now
+    server.detach(pty, a)
+    assert server.get(pty).active == id(b)
+    assert winsize(server.get(pty).master) == (95, 25)
+
+
+def test_a_focus_event_takes_the_role_and_a_focus_report_frame_does_not(server):
+    """§3.3: "report focus on it" is the client's `focus {focused: true}`
+    event; a focus report the VTE commits as input (ESC [ I, ESC [ O) is
+    one of the things it commits on its own, which takes nothing."""
+    pty = spawn_cat(server)
+    a, b = Sink("a"), Sink("b")
+    server.attach(pty, a, 80, 24)
+    server.attach(pty, b, 100, 30)
+    server.write(pty, b"\x1b[I", sink=b)
+    assert server.get(pty).active == id(a)
+    server.focus(pty, b, False)
+    assert server.get(pty).active == id(a)
+    server.focus(pty, b, True)
+    assert server.get(pty).active == id(b)
     assert winsize(server.get(pty).master) == (100, 30)
 
 
@@ -874,7 +986,8 @@ def test_the_server_loads_no_gtk():
 
 def test_a_ptys_colour_queries_follow_its_active_client(server):
     """§3.3: the term a pty's queries are answered from is its active
-    sink's, the last one any client sent standing in while none is active;
+    sink's, the last one any client sent standing in while the active one
+    has said nothing;
     one client's theme never answers another's pty. (A pty per question:
     cat echoes each answer back, which the stream reads as the program
     setting the colour itself.)"""
@@ -900,10 +1013,20 @@ def test_a_ptys_colour_queries_follow_its_active_client(server):
     assert server.get(first).state.background == (0x1010, 0x2020, 0x3030)  # a's still
 
     third = two_sinks()
-    server.detach(third, a)  # the active one leaves: nobody is active
+    server.detach(third, a)  # the active one leaves: b takes the role (§3.3)
     server.set_term({"bg": "#708090"})
     server.write(third, query)
-    wait_live(b, b"\x1b]11;rgb:7070/8080/9090\x07")
+    wait_live(b, b"\x1b]11;rgb:4040/5050/6060\x07")
+
+    # An active sink that has said nothing about its theme: the last term
+    # any client sent stands in.
+    quiet = Sink("quiet")
+    fourth = spawn_cat(server)
+    server.attach(fourth, a, 100, 30)
+    server.attach(fourth, quiet, 100, 30)
+    server.detach(fourth, a)  # quiet takes the role, with no term of its own
+    server.write(fourth, query)
+    wait_live(quiet, b"\x1b]11;rgb:7070/8080/9090\x07")
 
 
 def test_attaching_an_attached_sink_again_is_idempotent(server):
