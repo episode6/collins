@@ -85,6 +85,27 @@ def test_what_is_no_site_is_pinned_with_its_reason_and_its_count():
         assert len(reason) > 20, site  # says what the receiver is
 
 
+def test_start_session_asks_the_service_for_the_cli():
+    """The `start_session` tool's "is there a claude" check is the service's
+    word (`remotecli.missing()`: `service.status`'s ``cli``), never a
+    command built from this process's PATH (`provider.new_command()`):
+    the walker cannot see that read (it is `shutil.which` inside
+    providers.py, D50's record item 2), and it refused the tool from a
+    window started without `~/.local/bin` on its PATH while the service,
+    with the login shell's PATH and `claude_cli_path` appended, launched
+    sessions fine. The service assembles the command at spawn
+    (`service/session.py`, `_launch_command`), so the client has no
+    command to build here at all."""
+    source = (pathless.ROOT / "toolclient.py").read_text(encoding="utf-8")
+    calls = {
+        node.func.attr
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "missing" in calls  # remotecli.missing()
+    assert not calls & {"new_command", "resume_command", "continue_command"}, calls
+
+
 def test_the_git_pages_sites_are_gone():
     found = pathless.walk()
     for prefix in ("gitpage:", "gitinfo:", "remotegit:", "gitpatch:"):

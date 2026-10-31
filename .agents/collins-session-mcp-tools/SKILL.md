@@ -337,7 +337,16 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   answering with the new session id once `session-resolved` fires (12 s
   deadline, `process-exited` fail-fast, tab kept on failure). Spawns
   **serialize per project root** (`_start_session_chains`) so two siblings
-  can't claim each other's transcript. The sibling is sandboxed whenever
+  can't claim each other's transcript. Whether there is a `claude` to
+  spawn is the **service's word** (`remotecli.missing()`, from
+  `service.status`'s `cli`), never this process's PATH: the service types
+  the command (`service/session.py`'s `_launch_command`) on the login
+  shell's PATH with `claude_cli_path` appended, and a desktop-launched
+  window has no `~/.local/bin` — asking `provider.new_command()` here
+  refused the tool with "The Claude CLI isn't available" on a machine where
+  every launch worked (2026-10-31). `check_start_session.py` pins it by
+  dropping the shim's folder from the client's PATH before the calls. The
+  sibling is sandboxed whenever
   its parent is (`mcptools.sibling_sandboxed` — never an unsandboxed
   sibling from a sandboxed parent), else per the project's default
   (`window._sandbox_for_new_session`); a sandboxed parent's sibling runs

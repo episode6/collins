@@ -13,7 +13,10 @@ that keeps two back-to-back spawns from racing each other's transcript.
 None of this is reachable from pytest (tests/conftest.py blocks the GTK stack),
 and the claims that matter are exactly the ones a headless unit test can't
 make: that the tool never moves what the user is looking at, that it resolves
-with a real session id, and that a second spawn waits for the first.
+with a real session id, that a second spawn waits for the first, and that the
+tool asks the service whether there is a `claude` (the client process loses the
+shim's folder from its PATH before the calls, as a desktop-launched window has
+no `~/.local/bin`; the service keeps it).
 
 `claude` is a Python shim that draws Claude Code's idle prompt (❯ + NBSP, cursor
 parked so takes_prompt says yes), captures the bracketed-paste prompt injected
@@ -108,7 +111,7 @@ gi.require_version("Vte", "3.91")
 import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
-from collins import i18n, mcptools, terminal, trust  # noqa: E402
+from collins import i18n, mcptools, remotecli, terminal, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.sessions import worktree_project_root  # noqa: E402
 from collins.state import AppState  # noqa: E402
@@ -187,6 +190,25 @@ def fire_tool() -> bool:
     caller = state["caller"]
     before = win.tab_view.get_n_pages()
 
+    # The CLI is the service's, not this process's: a window started from a
+    # desktop launcher has a PATH without the CLI's folder while the service
+    # (the login shell's PATH, the `claude_cli_path` setting appended) runs
+    # it fine. The tool used to ask this process's PATH (`provider.
+    # new_command()`) and refused with "The Claude CLI isn't available" on
+    # exactly that machine. So the client loses the shim's folder for the
+    # calls (and any folder with a real `claude` in it, on a dev machine):
+    # the service, started above with it, keeps it.
+    state["path"] = os.environ["PATH"]
+    os.environ["PATH"] = ":".join(
+        p for p in state["path"].split(":") if p and not os.path.exists(f"{p}/claude")
+    )
+    check("the client process can't see the shim itself", shutil.which("claude") is None)
+    check(
+        "the service says where its claude is",
+        remotecli.found_at() == SHIM,
+        remotecli.found_at(),
+    )
+
     first = app.tool_client.start_session((win, caller), {"prompt": PROMPT, "cwd": TRUSTED})
     second = app.tool_client.start_session(
         (win, caller), {"prompt": "Second sibling, go.", "cwd": TRUSTED}
@@ -206,8 +228,11 @@ def fire_tool() -> bool:
     check("selection didn't move to spawn", win.tab_view.get_selected_page() is state["caller_page"])
 
     results: dict = {}
-    first.watch(lambda ok, text: results.__setitem__("first", (ok, text)))
-    second.watch(lambda ok, text: results.__setitem__("second", (ok, text)))
+    for name, answer in (("first", first), ("second", second)):
+        if isinstance(answer, mcptools.DeferredResult):
+            answer.watch(lambda ok, text, name=name: results.__setitem__(name, (ok, text)))
+        else:  # refused on the spot: verify reports the refusal's text
+            results[name] = tuple(answer)
     state["results"] = results
     state["before"] = before
     GLib.timeout_add(9000, verify)  # both spawn, inject, resolve well within this
@@ -217,6 +242,7 @@ def fire_tool() -> bool:
 def verify() -> bool:
     win = app.get_active_window()
     results = state["results"]
+    os.environ["PATH"] = state["path"]  # the client sees the shim again (the cleanup below)
     check("the first call resolved", "first" in results, results)
     check("the second call resolved", "second" in results, results)
 
