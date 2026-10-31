@@ -149,7 +149,17 @@ itself is the subject (`test_api_client.py`, `test_service_main.py`),
 `tests/liveservice.py` starts a real `collins-service` subprocess on scratch
 directories. `tests/test_api_server.py` runs a real `Soup.Server` on a
 scratch socket; `test_connection.py` drives the connection manager's state
-machine with fakes. `tests/test_service_imports.py` imports every module of
+machine with fakes, its remote path included (a `FakeTransport` whose
+forward the test kills: the start's word, the lost road, a hello failing
+over a live forward, `switch`); `test_sshforward.py` the two ssh argv, exit
+255's report, the local socket unlinked first (a non-socket refused), a
+fake `Popen` whose stderr the test writes and whose exit is the
+transport's `lost`; `test_connections.py` the list in `ui-state.json`
+(rule 5's grammar, `find`, `last_connection`). The by-hand half of PR-3.1
+(the connect dialog's Add, Test and Connect against the ssh target of
+`~/specs/collins/assets/split-service/ssh-target/`, the forward killed, the
+banner and the reconnect) has no e2e check: it needs a container the CI
+lacks, and the record of a run lives in the PR. `tests/test_service_imports.py` imports every module of
 `collins.service` and `collins.api` in a fresh subprocess and fails on any
 `gi.repository` widget library (GLib, GObject and Gio are allowed): the
 service must run with no display. `tests/test_client_boundary.py` reads

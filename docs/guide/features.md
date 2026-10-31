@@ -141,6 +141,17 @@ Enter opens, Esc closes.
   shell's prompt, and `read_terminal` / `run_in_terminal` read and type
   through it. Nothing looks different by design, except what *quit* and
   *close* mean: see *Detach*, *Quit* and *Restart service* below.
+- **Connect to…** (the app menu) picks which service the window shows:
+  *This computer*, or a box reached over ssh. **Add ssh connection** takes
+  a name and `user@host[:port]`, **Test** runs `ssh -o BatchMode=yes TARGET
+  collins-service --print-socket` and shows the socket's path or ssh's
+  last line, **Connect** forwards the box's socket over `ssh -L` and
+  switches: every tab detaches with no question, the sidebar refills with
+  the box's sessions, and the tabs you last had open there come back. A
+  forward that dies shows *Reconnecting to \<name\>* with ssh's last line
+  and reconnects. `collins --connect NAME` does the same from a terminal
+  (`local` names this computer); the connection used last is the next
+  launch's. See [A service on another machine](/guide/remote).
 - **Local extras.** Every path Collins shows is a path on the service's
   machine. A window running on that same machine proves it when it
   connects, and keeps the things that hand such a path to something on

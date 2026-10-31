@@ -151,6 +151,26 @@ DEVICE = frozenset(
         "connection:systemctl_start:subprocess.run",
         "connection:unit_state:shutil.which",  # the systemctl show of a timed-out wait (604)
         "connection:unit_state:subprocess.run",
+        # -- the ssh forward (PR-3.1, §3.24): ssh is this device's program and the
+        # forward's local socket (<runtime dir>/collins/remote/<id>.sock) its file.
+        # The print-socket run and the -L child are the two ssh runs; the
+        # forward's own Popen goes through an injected `popen` the walker has
+        # no word for, and is listed here in spirit with `print_socket`.
+        "sshforward:ensure_remote_dir:os.chmod",
+        "sshforward:ensure_remote_dir:os.makedirs",
+        "sshforward:print_socket:subprocess.run",
+        "sshforward:unlink_socket:os.lstat",
+        "sshforward:unlink_socket:os.unlink",
+        # The pid file beside each forward's socket and the sweep of a crashed
+        # client's forwards (ruled 2026-10-29, the review of PR 623, Q2): this
+        # device's files under its own runtime dir, and its own /proc.
+        "sshforward:Forward.stop:os.unlink",
+        "sshforward:end_stale_forward:os.unlink",
+        "sshforward:is_our_forward:open",
+        "sshforward:pid_alive:open",
+        "sshforward:read_pid_file:os.open",
+        "sshforward:sweep_orphans:os.listdir",
+        "sshforward:write_pid_file:os.open",
         "prefs:PreferencesDialog._on_restart:subprocess.Popen",
         # -- which programs this device has, for the local extras' offers: Ghostty
         # on its PATH (the offer and the launch are LOCAL_EXTRAS' below), the

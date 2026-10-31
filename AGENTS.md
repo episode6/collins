@@ -177,7 +177,24 @@ collins-service.service` for the default app id, else a detached spawn of
 `collins-service`) → wait → connect → connected; on lost, backoff 1, 2, 5,
 10, 30 s, the mirrors `reset()` and resubscribed, every tab re-attached, the
 window's "Reconnecting" banner meanwhile; a protocol mismatch is its own
-state. `collins/window.py` (`MainWindow`) composes the sidebar with the tab
+state. **Remote** (§3.24, D2, D10): `collins/connections.py` (GTK-free) is
+the reader and validator of `ui-state.json`'s `connections` list and
+`last_connection` (`[user@]host[:port]`, bounded, a bad row dropped;
+`LOCAL` is the one local connection, never stored), and
+`collins/sshforward.py` (GTK-free) the two ssh runs — `ssh TARGET
+collins-service --print-socket` (10 s; exit 255 is "could not connect", its
+stderr's last line the word shown) and the `-N -L` child holding the
+forward of the Unix socket at `<runtime dir>/collins/remote/<id>.sock`
+(unlinked first; only ever a socket) — with `RemoteTransport`, the
+manager's find/start for a remote (`start_remote`, `switch`; the forward's
+exit is the manager's `lost`, a hello that fails over a live forward makes
+the next find `none` so `--print-socket` restarts the remote service). The
+connect dialog (`connectdialog.py`, the app menu's *Connect to…*), the
+`--connect NAME` main option (a running instance's `app.connect` action)
+and `App.switch_connection` (open_tabs recorded and frozen, every tab
+detached with no dialog, the mirrors reset and reopened on connect) sit on
+it; the banner reads "Reconnecting to <name>: <ssh's last line>". The
+`local` proof fails over a forward by construction (D11). `collins/window.py` (`MainWindow`) composes the sidebar with the tab
 view, installs every `win.*` action and owns the tab lifecycle: open,
 resolve, close (graceful exit / `/bg` / hide), **detach**, archive, quit and
 **restart service** flows. A tab opened on a running session attaches (`attach`

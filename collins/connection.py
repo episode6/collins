@@ -53,6 +53,25 @@ effect injectable so `tests/test_connection.py` drives it with fakes:
 exists yet to show a banner); the reconnects run on the main loop through
 the injected `schedule` (`GLib.timeout_add` in the app), never blocking
 longer than one connect's handshake.
+
+**Remote** (spec §3.24, PR-3.1): `start_remote(transport)` and
+`switch(transport)` put a `sshforward.RemoteTransport` where find and
+start were: *find* is the forward's local socket (`none` while no forward
+runs), *start* is `ssh TARGET collins-service --print-socket` and then the
+`-L` child, both bounded, and the forward's exit is this manager's `lost`
+(the transport calls it, landed on the owner's loop). The same backoff
+ladder follows, each attempt a fresh print-socket (which restarts a remote
+service that died) and a fresh forward; a hello that failed over a live
+forward tells the transport (`connect_failed`), so the next find says
+`none` instead of looping on a socket ssh accepts and nobody answers. A
+remote start can take the print-socket's 10 s, so on a reconnect it runs
+on the owner's thread (`run_async`) and lands; the first connect at
+startup blocks, as the local one does. `switch` is D2's one service at a
+time: the owner has detached every tab first; the manager closes the link,
+stops the old transport and goes down the lost road with no backoff. The
+`local` proof fails over a forward by construction (D11). `last_error` is
+the last reason given — a lost link's, a start's, a connect's — for the
+"Reconnecting to <name>" banner's detail.
 """
 
 from __future__ import annotations
@@ -76,6 +95,9 @@ UNIT = "collins-service.service"
 POLL_MS = 100
 WAIT_S = 10.0
 BACKOFF_S = (1, 2, 5, 10, 30)
+# How much of a reason the banner gets (`last_error`): ssh's line is cut to
+# `sshforward.DETAIL_MAX` already; a link's or a handshake's error is not.
+ERROR_MAX = 240
 
 IDLE = "idle"
 STARTING = "starting"
@@ -308,9 +330,19 @@ class ConnectionManager:
     ) -> None:
         self.app_id = app_id
         self.link = link
-        self._find = find or self._default_find
-        self._start = start or default_starter
-        self._fallback = fallback or spawn_starter
+        # The local service's find and start (the defaults, or what the
+        # owner injected), kept so a switch back from a remote restores them.
+        self._local_find = find or self._default_find
+        self._local_start = start or default_starter
+        self._local_fallback = fallback or spawn_starter
+        self._find = self._local_find
+        self._start = self._local_start
+        self._fallback = self._local_fallback
+        # The remote transport in use (sshforward.RemoteTransport), None
+        # for the local service; and the last reason given for a loss, a
+        # failed start or a failed connect (the banner's detail).
+        self._transport = None
+        self._last_error = ""
         self._unit_state = unit_state or globals()["unit_state"]
         self.on_notice = on_notice  # the owner's one-line word to the user (a toast)
         # Set when a systemd start was queued, the wait found no socket and
@@ -357,6 +389,25 @@ class ConnectionManager:
         import threading
 
         threading.Thread(target=fn, name="collins-reconnect", daemon=True).start()
+
+    @property
+    def last_error(self) -> str:
+        """The last reason given (a loss, a failed start, a failed connect),
+        bounded to `ERROR_MAX` for the banner."""
+        return self._last_error
+
+    @last_error.setter
+    def last_error(self, reason: str) -> None:
+        self._last_error = (reason or "")[:ERROR_MAX]
+
+    def _cancel_pending(self) -> None:
+        """Drop the scheduled retry or poll, if the owner's loop can."""
+        if self._pending is not None and self._cancel is not None:
+            try:
+                self._cancel(self._pending)
+            except Exception:
+                pass
+        self._pending = None
 
     @staticmethod
     def _default_find(app_id: str) -> tuple[str, str]:
@@ -471,11 +522,81 @@ class ConnectionManager:
     # -- the first connect, blocking ---------------------------------------------------
 
     def start_local(self, wait_s: float = WAIT_S) -> None:
-        """find → start → wait → connect, synchronously. Raises
-        `api.client.ConnectionLost` when no service can be reached, or
-        OSError from the starter — the systemd-or-spawn one, or the spawn
-        fallback taken once the unit was found over with no socket
+        """find → start → wait → connect, synchronously, for the local
+        service. Raises `api.client.ConnectionLost` when no service can be
+        reached, or OSError from the starter — the systemd-or-spawn one, or
+        the spawn fallback taken once the unit was found over with no socket
         (`spawn_service` could not exec `collins-service`)."""
+        self._use_transport(None)
+        self._start_blocking(wait_s)
+
+    def start_remote(self, transport, wait_s: float = WAIT_S) -> None:
+        """The same, synchronously, for a remote service behind *transport*
+        (`sshforward.RemoteTransport`: `find`, `start`, `connect_failed`,
+        `stop`, `name`). Raises `ConnectionLost` when the forward's socket
+        never answered and `sshforward.ForwardError` (an OSError) when the
+        print-socket run or the forward failed, with the person's word."""
+        self._use_transport(transport)
+        try:
+            self._start_blocking(wait_s)
+        except Exception as exc:
+            self.last_error = str(exc)
+            raise
+
+    @property
+    def is_remote(self) -> bool:
+        return self._transport is not None
+
+    @property
+    def transport(self):
+        return self._transport
+
+    def _use_transport(self, transport) -> None:
+        """Put *transport*'s find and start where the local ones were (or
+        the local ones back, for None); the old transport, if any, is
+        stopped."""
+        old = self._transport
+        if old is not None and old is not transport:
+            try:
+                old.stop()
+            except Exception:
+                log.exception("connection: the old transport did not stop")
+        self._transport = transport
+        self.last_error = ""
+        if transport is None:
+            if old is not None:  # back from a remote: the local ones again
+                self._find = self._local_find
+                self._start = self._local_start
+                self._fallback = self._local_fallback
+        else:
+            self._find = transport.find
+            self._start = transport.start
+            self._fallback = transport.start
+
+    def switch(self, transport, reason: str = "switching connections") -> None:
+        """Change services while running (D2: one at a time): the owner has
+        detached every tab and will reset its mirrors on `on_connected`.
+        The link is closed (no loss is reported for it), the old transport
+        stopped, and the lost road taken at once, without backoff: find,
+        start, wait, connect, the banner meanwhile."""
+        if self.stopped:
+            return
+        self._cancel_pending()
+        self._generation += 1  # a handshake or a start in flight is nobody's now
+        self.link.close()
+        self._use_transport(transport)
+        self.attempts = 0
+        self._restart_pid = None
+        self._restart_waited = 0
+        self._set_state(LOST)
+        if self.on_lost is not None:
+            try:
+                self.on_lost(reason)
+            except Exception:
+                log.exception("connection: on_lost failed")
+        self._retry()
+
+    def _start_blocking(self, wait_s: float) -> None:
         self.started_how = ""
         self.path, found = self._find(self.app_id)
         if found != "live":
@@ -517,8 +638,12 @@ class ConnectionManager:
 
     def _connect(self) -> None:
         self._set_state(CONNECTING)
+        self.link.path = self.path  # the socket find named: the local one's or the forward's
         self.link.connect()
-        self.link.prove_local()
+        if self._transport is None:
+            # The proof is this device's and names this device's service; over
+            # a forward it would only be refused (D11): it never leaves.
+            self.link.prove_local()
         self._connected_how(self._systemd_regained())
         first = not self.connected_once
         self.connected_once = True
@@ -530,14 +655,33 @@ class ConnectionManager:
     # -- loss and reconnect, on the owner's loop ----------------------------------------
 
     def lost(self, reason: str) -> None:
-        """The owner found the link dead (a resubscribe refused ``gone``):
-        the same road as the link's own `on_lost`."""
-        self._on_link_lost(reason)
+        """The owner found the link dead (a resubscribe refused ``gone``),
+        or the transport's forward ended: the same road as the link's own
+        `on_lost`."""
+        self._on_link_lost(reason, from_link=False)
 
-    def _on_link_lost(self, reason: str) -> None:
-        if self.stopped or self.state == LOST:
+    def _on_link_lost(self, reason: str, from_link: bool = True) -> None:
+        if self.stopped:
+            return
+        if self.state == LOST:
+            # Already lost: a second word for the same loss. Over a forward
+            # the socket's close and the ssh child's exit (with its stderr's
+            # last line, the word the person should read) land a beat
+            # apart, in either order: the forward's word is taken whenever
+            # it comes, the socket's never replaces it, and the state is
+            # said again so the banner shows it. The retry already
+            # scheduled stands.
+            if not from_link and self._transport is not None and reason and reason != self.last_error:
+                self.last_error = reason
+                self._set_state(LOST)
             return
         self._generation += 1  # a handshake in flight is nobody's now
+        # A poll chain still running from a WAITING round (the forward died
+        # before it bound) is cancelled too: two chains would find the
+        # retry's socket together and shake hands twice (S1 of PR 623's
+        # review); `_poll` also stops on its own when the generation moved.
+        self._cancel_pending()
+        self.last_error = reason
         self._set_state(LOST)
         if self.on_lost is not None:
             try:
@@ -574,32 +718,71 @@ class ConnectionManager:
                 return False
             self._restart_pid = None
         self._restart_waited = 0
+        self._generation += 1  # a start or a handshake still in flight is nobody's now
         try:
             self.path, found = self._find(self.app_id)
             if found != "live":
                 self._set_state(STARTING)
+                if self._transport is not None:
+                    # A remote start runs ssh twice (up to the print-socket's
+                    # 10 s): off the owner's loop, so the banner paints.
+                    self._start_async()
+                    return False
                 self._start_service()
         except Exception as exc:
-            log.warning("connection: could not start the service: %s", exc)
-            self._set_state(LOST)
-            self._retry_later()
+            self._start_failed(exc, None)
             return False
         self._set_state(WAITING)
-        self._poll(self._now() + WAIT_S, _Wait())
+        self._poll(self._now() + WAIT_S, _Wait(), self._generation)
         return False
 
-    def _poll(self, deadline: float, wait: _Wait) -> bool:
+    def _start_async(self) -> None:
+        generation = self._generation
+
+        def work() -> None:
+            try:
+                self._start_service()
+            except Exception as exc:
+                error = exc
+                self._land(lambda: self._start_failed(error, generation))
+                return
+            self._land(lambda: self._started(generation))
+
+        self._run_async(work)
+
+    def _started(self, generation: int) -> None:
+        if self.stopped or generation != self._generation or self.state != STARTING:
+            return  # a loss, a switch or a newer attempt moved on meanwhile
+        self._set_state(WAITING)
+        self._poll(self._now() + WAIT_S, _Wait(), generation)
+
+    def _start_failed(self, exc: BaseException, generation: int | None) -> None:
+        if self.stopped or (generation is not None and generation != self._generation):
+            return
+        log.warning("connection: could not start the service: %s", exc)
+        self._cancel_pending()
+        self.last_error = str(exc)
+        self._set_state(LOST)
+        self._retry_later()
+
+    def _poll(self, deadline: float, wait: _Wait, generation: int | None = None) -> bool:
         """One poll of the socket; at *deadline* the rule of `_timeout_ask`
         decides, asked off the main loop, and its verdict lands in
-        `_timeout_verdict`."""
+        `_timeout_verdict`. *generation* is the round this chain belongs
+        to: a chain whose round a loss or a switch has ended stops here
+        rather than finding the next round's socket beside it (S1)."""
         if self.stopped:
+            return False
+        self._pending = None  # the timer that ran this poll (if one did) is spent
+        if generation is None:
+            generation = self._generation
+        elif generation != self._generation or self.state != WAITING:
             return False
         self.path, found = self._find(self.app_id)
         if found == "live":
             self._try_connect()
             return False
         if self._now() >= deadline:
-            generation = self._generation
 
             def ask() -> None:
                 verdict, state = self._timeout_ask(wait)
@@ -607,14 +790,14 @@ class ConnectionManager:
 
             self._run_async(ask)
             return False
-        self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline, wait))
+        self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline, wait, generation))
         return False
 
     def _timeout_verdict(self, verdict: str, state: str, wait: _Wait, generation: int) -> None:
         if self.stopped or self.state != WAITING or generation != self._generation:
             return  # a loss or a newer attempt moved on meanwhile
         if verdict == EXTEND:
-            self._poll(self._now() + WAIT_S, wait)
+            self._poll(self._now() + WAIT_S, wait, generation)
             return
         if verdict == FAILED:
             self._mark_systemd_failed(state)  # the next attempt's start is the spawn fallback
@@ -629,8 +812,10 @@ class ConnectionManager:
 
         def handshake() -> None:
             try:
+                self.link.path = self.path
                 self.link.connect()
-                self.link.prove_local()
+                if self._transport is None:
+                    self.link.prove_local()  # never over a forward (D11): see _connect
                 regained = self._systemd_regained()  # may ask systemctl: here, off the loop
             except Exception as exc:
                 error = exc  # the except name is cleared before the landing runs
@@ -675,6 +860,12 @@ class ConnectionManager:
                     log.exception("connection: on_mismatch failed")
             return
         log.warning("connection: connect failed: %s", exc)
+        self.last_error = str(exc)
+        if self._transport is not None:
+            # The forward accepted and nobody answered the hello: the remote
+            # service is gone; the next find says so and the start runs
+            # --print-socket again, which brings it back.
+            self._transport.connect_failed()
         self._set_state(LOST)
         self._retry_later()
 
@@ -700,18 +891,19 @@ class ConnectionManager:
         the old service is gone): the lost path, with no backoff."""
         if self.stopped:
             return
-        if self._pending is not None and self._cancel is not None:
-            try:
-                self._cancel(self._pending)
-            except Exception:
-                pass
-        self._pending = None
+        self._cancel_pending()
         self.attempts = 0
         self._set_state(LOST)
         self._retry()
 
     def stop(self) -> None:
-        """The client is quitting: no more retries."""
+        """The client is quitting: no more retries. A forward ends with the
+        client (the remote service runs on)."""
         self.stopped = True
         self.link.on_lost = None
         self.link.close()
+        if self._transport is not None:
+            try:
+                self._transport.stop()
+            except Exception:
+                log.exception("connection: the transport did not stop")

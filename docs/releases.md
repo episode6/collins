@@ -38,6 +38,32 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The service can be on another machine.** **Connect to…** in the app
+  menu keeps a list of ssh connections (a name and `user@host[:port]`);
+  **Test** runs `ssh -o BatchMode=yes TARGET collins-service
+  --print-socket` and shows the socket's path or ssh's own last line (with
+  what batch mode needs: a key in the agent, the host in `known_hosts`);
+  **Connect** forwards that box's socket over `ssh -L` and switches the
+  window to it: every tab detaches with no question (its session keeps
+  running where it is), the sidebar refills with the box's sessions, and
+  the tabs last open there come back. A forward that dies — the network,
+  the box, a sleeping laptop — shows *Reconnecting to \<name\>* with ssh's
+  last line and reconnects at 1, 2, 5, 10, then every 30 s, restarting the
+  remote service when it is the one that stopped. `collins --connect NAME`
+  opens the window on a saved connection (`local` for this computer) or
+  switches a running one; the connection used last is the next launch's.
+  No port, no token: ssh's keys and host verification are all of it, and a
+  window reaching a service over ssh never gets the local extras, whatever
+  the far side says. `collins-service` is run through the box's login
+  shell, so a `pipx` install in `~/.local/bin` is found; a forward a
+  crashed window left behind is ended by the next window; and a box whose
+  Collins speaks another protocol gets a dialog naming the side to
+  upgrade, never a *Restart service*. See
+  [A service on another machine](/guide/remote).
+- **Restart service is in the app menu**, where the guide said it was:
+  the action existed since the service split, but no menu item offered
+  it, so a restart could only be reached from the protocol-mismatch
+  dialog or a custom keybinding.
 - **The service finds `claude` where its terminals do, and starts every
   session itself.** A service started over a non-interactive ssh command
   said it had no `claude` CLI while every session it launched found one:

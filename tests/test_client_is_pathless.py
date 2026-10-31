@@ -203,6 +203,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "updatecheck": 5,
         "buildinfo": 3,
         "connection": 7,
+        "sshforward": 12,  # the ssh forward: this device's ssh, its local socket and pid file (PR-3.1)
         "prefs": 1,
         "sidebar": 1,
         "openwith": 5,
@@ -212,7 +213,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "attachpanel": 2,
         "lightbox": 2,
     }
-    assert len(DEVICE) == 73
+    assert len(DEVICE) == 85
     # `openwith`'s five device sites are lookups of this device's terminal
     # preference; its launchers are local extras and nowhere else.
     assert {s for s in DEVICE if s.startswith("openwith:")} == {
@@ -276,13 +277,14 @@ def test_the_walker_tells_a_function_that_asks_from_one_that_does_not(monkeypatc
 def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
     """`DEVICE` is the device's own: the blob cache, a dropped file being
     uploaded, `ui-state.json`, the export's destination, the desktop entry, the update check, `buildinfo`,
-    the service's process, and which programs this device has. A site in
+    the service's process, the ssh forward (this device's ssh, its local
+    socket), and which programs this device has. A site in
     any other module belongs in another group, or behind the API."""
     modules = {site.split(":", 1)[0] for site in DEVICE}
     assert modules == {
         "app", "blobcache", "remoteimages", "remoteuploads", "uistate", "window", "desktopentry",
         "updatecheck", "buildinfo", "connection", "prefs", "sidebar", "openwith",
-        "copylabel", "terminal", "attachpanel", "lightbox",
+        "copylabel", "terminal", "attachpanel", "lightbox", "sshforward",
     }
     # The four modules the launchers brought (PR-3.0 item 7) are there for
     # a launcher each and nothing else: a web or mail address, or a file

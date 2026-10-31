@@ -125,7 +125,15 @@ builds the state with `migrate=True, device=False`; `start_store()` the
 store) and `service/storefeed.py` publishes them. Everything in the window
 — `app.state`, `app.store`, `window.state`, `window.store`, the sidebar,
 Preferences, the tabs' settings dict — holds the client's **mirrors** on one
-`api.client.SocketLink` the connection manager (`connection.py`) keeps up.
+`api.client.SocketLink` the connection manager (`connection.py`) keeps up —
+to the local service, or to one on another machine through the ssh forward
+of `sshforward.py` (the connect dialog's *Connect to…*, `--connect NAME`;
+the terminal-tab skill has the detail). A switch of connections empties
+nothing by hand: `App.switch_connection` detaches every tab, `_on_connected`
+resets the mirrors and the new service's snapshot reconciles the sidebar's
+rows, so the old rows stand under the "Reconnecting to <name>" banner until
+it lands; `last_connection` in `ui-state.json` is what the next launch
+connects to.
 The link has two WebSockets: the primary carries the subscription, every
 event, every output frame and `send`; the **sync channel** answers `call`,
 which blocks its caller (the main thread included) for up to 10 s. Never

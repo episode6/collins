@@ -112,3 +112,19 @@ def test_the_bodys_optional_sentences():
     assert body.index("Without a status icon") < body.index("status icon leaves")
     base = quit_body(other_windows=False, panel_busy=False, tray_present=True, first_notice=False)
     assert "Without a status icon" not in base and "leaves with the window" not in base
+
+
+def test_mismatch_over_a_forward_never_offers_restart():
+    """Q1 of PR 623's review (ruled 2026-10-29): a service reached over ssh
+    that speaks another protocol gets *Connect to This Computer* only,
+    whichever side is newer; the body names the connection and the side
+    to upgrade."""
+    heading, body, choices = quitrules.mismatch_words(remote_name="box", service=1, client=2)
+    assert "box" in heading
+    assert "upgrade Collins on box" in body and "protocol 1" in body and "protocol 2" in body
+    assert [c[0] for c in choices] == [quitrules.MISMATCH_LOCAL]
+    assert not any(c[0] == "restart" for c in choices)
+    _h, body, choices = quitrules.mismatch_words(remote_name="box", service=3, client=2)
+    assert "upgrade Collins here" in body and [c[0] for c in choices] == [quitrules.MISMATCH_LOCAL]
+    _h, body, choices = quitrules.mismatch_words(remote_name="box", service=None, client=2)
+    assert "protocol ?" in body and "restart" not in [c[0] for c in choices]

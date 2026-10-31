@@ -25,6 +25,7 @@ from . import (
     apilink,
     buildinfo,
     connection,
+    connections,
     desktopentry,
     dialogs,
     ghwelcome,
@@ -37,14 +38,18 @@ from . import (
     notifysound,
     prmenu,
     ptyclient,
+    quitrules,
     remotecli,
     remotediffs,
     remotefiles,
     remotegit,
+    remoteicons,
     sandboxstatus,
+    sshforward,
     statusicon,
     tooltipmute,
     traymodel,
+    uistate,
     updatecheck,
     welcome,
 )
@@ -60,6 +65,7 @@ from .remotenotify import RemoteNotifications
 from .remoteprs import RemotePrStore
 from .remotestate import RemoteState
 from .remotestore import RemoteStore
+from .state import _ui_state_file, device_defaults
 from .toolclient import ToolClient
 from .window import HIDE_NOTICE_ID, MainWindow, session_window
 
@@ -1564,6 +1570,18 @@ class App(Adw.Application):
             _("Install the desktop entry, app icon and metainfo for the current user"),
             None,
         )
+        # `--connect NAME` (split-service spec §3.24, PR-3.1): the connection
+        # to open, by its name in the connect dialog's list; "local" is the
+        # service on this machine. A running instance switches to it.
+        self.add_main_option(
+            "connect",
+            0,
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.STRING,
+            _("Connect to a saved connection by name (\"local\" for this computer)"),
+            "NAME",
+        )
+        self._connect_request: str | None = None
 
     def do_handle_local_options(self, options: GLib.VariantDict) -> int:
         """Handle --install-desktop here in the local process, and exit.
@@ -1571,9 +1589,25 @@ class App(Adw.Application):
         Returning a non-negative value is how a GApplication says "done, exit
         with this code" before anything registers or activates — no display is
         touched, so this works over ssh and on a machine with no session.
+
+        `--connect NAME` is kept for `_start_service` when this process
+        becomes the primary instance, and handed to the running one as its
+        `connect` action otherwise (the GApplication idiom: register here,
+        and `get_is_remote` says which this process is).
         """
         if options.contains("install-desktop"):
             return desktopentry.install_cli()
+        name = options.lookup_value("connect", GLib.VariantType("s"))
+        if name is not None:
+            self._connect_request = name.get_string()
+            try:
+                self.register(None)
+            except GLib.Error as exc:
+                log.warning("could not register the application: %s", exc)
+                return -1
+            if self.get_is_remote():
+                self.activate_action("connect", GLib.Variant.new_string(self._connect_request))
+                return 0
         return -1
 
     def do_startup(self) -> None:
@@ -1662,6 +1696,11 @@ class App(Adw.Application):
         new_window = Gio.SimpleAction.new("new-window", None)
         new_window.connect("activate", lambda *_: self._new_window())
         self.add_action(new_window)
+
+        # `collins --connect NAME` reaching a running instance (§3.24).
+        connect_action = Gio.SimpleAction.new("connect", GLib.VariantType("s"))
+        connect_action.connect("activate", self._on_connect_action)
+        self.add_action(connect_action)
 
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", lambda *_: self.quit_all_windows())
@@ -2188,10 +2227,201 @@ class App(Adw.Application):
         # A restart that waits for the sessions to be idle, by the pid of
         # the service asked (restart_service).
         self._restart_idle_pid: int | None = None
+        # The connections this device knows (§3.24): one UiState, shared
+        # with the state mirror so ui-state.json has one writer here.
+        self._ui = uistate.UiState(_ui_state_file(), device_defaults())
+        self.connections = connections.Connections(self._ui)
+        self.current_connection = connections.LOCAL
+        self._switched = False  # a switch_connection awaiting its connect
+        # A forward a crashed client of this device left behind (its pid
+        # file names a client that no longer lives) is ended now; another
+        # client's, still living, is left alone (§3.24, ruled 2026-10-29).
         try:
-            self._connection.start_local()
+            ended = sshforward.sweep_orphans(app_id=self.get_application_id())
+        except Exception:
+            log.exception("sweeping orphaned forwards failed")
+        else:
+            if ended:
+                log.info("ended %d orphaned ssh forward(s): %s", len(ended), ended)
+        self._start_connection(self._initial_connection())
+
+    def _initial_connection(self) -> connections.Connection:
+        """`--connect NAME` when given, else the connection used last
+        (`last_connection`), else the local service. An unknown name is
+        said and the local service taken."""
+        request = self._connect_request
+        if request:
+            connection = self.connections.find(request)
+            if connection is not None:
+                return connection
+            log.warning("--connect: no connection named %r; connecting locally", request)
+            return connections.LOCAL
+        return self.connections.last or connections.LOCAL
+
+    def _start_connection(self, connection: connections.Connection) -> None:
+        """The first connect, blocking (no window exists yet). A local
+        service that cannot be reached is fatal, as before; a remote one
+        that cannot be reached is asked about: connect to this computer
+        instead, or quit."""
+        if connection.is_local:
+            self.current_connection = connections.LOCAL
+            self.connections.set_last(None)
+            try:
+                self._connection.start_local()
+            except ProtocolMismatch as mismatch:
+                self._mismatch_at_startup(mismatch)
+            return
+        self.current_connection = connection
+        self.connections.set_last(connection)
+        try:
+            self._connection.start_remote(self._transport_for(connection))
         except ProtocolMismatch as mismatch:
             self._mismatch_at_startup(mismatch)
+        except Exception as exc:  # ConnectionLost, ForwardError
+            log.warning("could not connect to %s: %s", connection.name, exc)
+            answer = self._ask_before_any_window(
+                _("Could not connect to {name}").format(name=connection.name),
+                _("{detail}\n\nConnect to the Collins service on this computer instead?").format(
+                    detail=self._connection.last_error or str(exc)
+                ),
+                [("local", _("Connect to This Computer"), "suggested")],
+            )
+            if answer != "local":
+                log.info("quitting: the remote connection failed")
+                self._connection.stop()  # the forward, if one bound, goes with the client
+                sys.exit(0)
+            self._start_connection(connections.LOCAL)
+
+    def _transport_for(self, connection: connections.Connection) -> sshforward.RemoteTransport:
+        """The ssh forward for *connection*, its exit landing on the main
+        loop as the manager's `lost`."""
+        return sshforward.RemoteTransport(
+            connection,
+            app_id=self.get_application_id(),  # the socket's path is this app id's alone
+            on_lost=lambda text: self._connection.lost(text),
+            land=lambda fn: GLib.idle_add(
+                lambda: (fn(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT
+            ),
+        )
+
+    def switch_connection(self, connection: connections.Connection) -> None:
+        """Change services while running (D2: one at a time; the connect
+        dialog's *Connect*, the `connect` action): the open tabs are
+        recorded for the service they belong to, every tab detaches with no
+        question (its session runs on where it is), the connection manager
+        closes the link and connects to the new service, and
+        `_on_connected` resets the mirrors and reopens that service's
+        tabs. The banner says "Reconnecting to <name>" meanwhile."""
+        if connection.id == self.current_connection.id or self._connection is None:
+            return
+        log.info("switching to connection %r (%s)", connection.name, connection.kind)
+        # The transport first: its runtime directory can be refused (a
+        # squatted stand-in under the temp dir), and that must not cost the
+        # tabs (nit 7 of PR 623's review).
+        try:
+            transport = None if connection.is_local else self._transport_for(connection)
+        except OSError as exc:
+            log.warning("could not prepare the forward for %s: %s", connection.name, exc)
+            self._show_refused_write(_("Could not connect to {name}: {detail}").format(
+                name=connection.name, detail=str(exc)[: sshforward.DETAIL_MAX]))
+            return
+        # Unsaved editor buffers first, as the quit asks (Save / Don't Save /
+        # Cancel per window, in turn): the files are the old machine's and
+        # the old link is still up for the saves; Cancel aborts the switch
+        # (the verification of PR 623, N2).
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+
+        def ask(index: int) -> None:
+            if index >= len(windows):
+                self._switch_now(connection, transport)
+                return
+            window = windows[index]
+            tabs = [
+                window.tab_view.get_nth_page(i).get_child()
+                for i in range(window.tab_view.get_n_pages())
+            ]
+            tabs = [tab for tab in tabs if hasattr(tab, "editor_dirty_count")]
+
+            def cancelled() -> None:
+                if transport is not None:
+                    transport.stop()
+                log.info("the switch to %s was cancelled at the editor's ask", connection.name)
+
+            if self._connection.state == "connected":  # connection.CONNECTED; the name is shadowed here
+                window._ask_save_editors(tabs, lambda: ask(index + 1), cancelled)
+            else:
+                # The old link is down (a mismatch's *Connect to This
+                # Computer*, a switch away from "Reconnecting to …"): a
+                # save cannot reach the files, so the ask is Discard or
+                # Cancel, and says why (the second verification of PR 623,
+                # V3).
+                self._ask_discard_editors(window, tabs, lambda: ask(index + 1), cancelled)
+
+        ask(0)
+
+    def _ask_discard_editors(self, window, tabs, on_proceed, on_cancel) -> None:
+        names = [name for tab in tabs if tab.editor_dirty_count() for name in tab.editor_dirty_names()]
+        if not names:
+            on_proceed()
+            return
+        if len(names) == 1:
+            body = _(
+                "“{name}” contains unsaved changes, and the service they belong to is not "
+                "connected: they cannot be saved from here."
+            ).format(name=names[0])
+        else:
+            body = _(
+                "{n} files contain unsaved changes, and the service they belong to is not "
+                "connected: they cannot be saved from here."
+            ).format(n=len(names))
+        dialogs.answer_dialog(
+            window,
+            _("Discard unsaved changes?"),
+            body,
+            [("discard", _("Discard Changes"), "destructive")],
+            lambda response: on_proceed() if response == "discard" else on_cancel(),
+            default_response="cancel",
+        )
+
+    def _switch_now(self, connection: connections.Connection, transport) -> None:
+        """The switch itself, once every window's editors are settled."""
+        if connection.id == self.current_connection.id or self._connection is None:
+            if transport is not None:
+                transport.stop()
+            return
+        self._flush_open_tabs()
+        self._open_tabs_frozen = True
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.detach_all_tabs()
+        jobclient.reset(self._service_link)
+        self._set_restart_pending(None)
+        self.current_connection = connection
+        self.connections.set_last(connection)
+        self._switched = True  # the next connect is another machine's: see _on_connected
+        reason = (
+            _("Switching to this computer") if connection.is_local
+            else _("Switching to {name}").format(name=connection.name)
+        )
+        self._connection.switch(transport, reason)
+
+    def connection_label(self) -> str:
+        """The connection's name as the banner says it; "" for the local service."""
+        connection = getattr(self, "current_connection", None)
+        if connection is None or connection.is_local:
+            return ""
+        return connection.name
+
+    def _on_connect_action(self, _action, param: GLib.Variant) -> None:
+        """`app.connect NAME` (a second `collins --connect NAME` reaching the
+        running instance): switch, or say the name is unknown."""
+        name = param.get_string()
+        connection = self.connections.find(name)
+        self._present_main_window()  # a hidden window would show nothing of the switch
+        if connection is None:
+            self._show_refused_write(_("No connection is named {name}").format(name=name))
+            return
+        self.switch_connection(connection)
 
     def _find_service(self, app_id: str):
         from .api import server as api_server
@@ -2209,7 +2439,7 @@ class App(Adw.Application):
         # Every other ask of the service (PRs, jobs, tools, token use)
         # goes over the same connection (apilink.current).
         apilink.set_current(link)
-        self.state = RemoteState(link, on_refused=self._show_refused_write)
+        self.state = RemoteState(link, ui=self._ui, on_refused=self._show_refused_write)
         # The PR hub too is mirrored (remoteprs): the service keeps it, gh runs
         # there, and the same subscribe fills the copy.
         self.store = RemoteStore(link, self.state, pr_store=RemotePrStore(link))
@@ -2274,9 +2504,19 @@ class App(Adw.Application):
 
     def _on_connection_state(self, state: str) -> None:
         reconnecting = state not in ("connected", "mismatch") and getattr(self, "store", None) is not None
+        # A remote connection's banner names it and carries the last reason
+        # given (ssh's last line, a failed start's word: §3.24); the local
+        # service's banner reads as before.
+        name = self.connection_label()
+        detail = self._connection.last_error if name and self._connection is not None else ""
+        # A remote service that speaks another protocol: nothing is
+        # connected and nothing retries, so the banner says so with a
+        # *Connect to…* button (the verification of PR 623, N6).
+        mismatch = name if state == "mismatch" and name else ""
         for window in self.get_windows():
             if isinstance(window, MainWindow):
-                window.set_reconnecting(reconnecting)
+                window.set_mismatch(mismatch)
+                window.set_reconnecting(reconnecting, name=name, detail=detail)
 
     def _on_connection_notice(self, msgid: str) -> None:
         """The connection manager's one word to the user (the systemd unit
@@ -2341,6 +2581,16 @@ class App(Adw.Application):
         # notification comes down for a row the service still holds unread.
         self.notification_center.resynced()
         self._refresh_service_status()
+        if getattr(self, "_switched", False):
+            # Another machine's service (§3.24): the usage panel's numbers
+            # were the old login's; it asks the new service for its own.
+            self._switched = False
+            # And the project icons held by root path: the same path on
+            # both machines must not show the old machine's icon.
+            remoteicons.forget()
+            for window in self.get_windows():
+                if isinstance(window, MainWindow):
+                    window.sidebar.usage_panel.forget()
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.reattach_tabs()
@@ -2428,7 +2678,11 @@ class App(Adw.Application):
         if when == "now":
             self._flush_open_tabs()
             self._open_tabs_frozen = True
-            self._connection.expect_restart(pid)
+            if not self._connection.is_remote:
+                # The pid is the box's over a forward: nothing of this
+                # machine's /proc says when it is gone (the remote's own
+                # lock and the backoff carry the reconnect).
+                self._connection.expect_restart(pid)
         try:
             link.call({"t": "service.restart", "when": when})
         except RequestRefused as refusal:
@@ -2509,6 +2763,22 @@ class App(Adw.Application):
         that does not come up at all is the startup's fatal path, as for any
         first connect that fails."""
         log.warning("the service refused this client's protocol: %s", mismatch)
+        if self._connection.is_remote:
+            # A service reached over ssh (§3.24, ruled 2026-10-29): never
+            # *Restart Service* — the client cannot stop a process on
+            # another machine, and the local service is not the one that
+            # refused. *Connect to This Computer*, or Quit (Cancel); the
+            # forward is stopped before either.
+            heading, body, choices = quitrules.mismatch_words(
+                remote_name=self.current_connection.name,
+                service=mismatch.service, client=mismatch.client,
+            )
+            if self._ask_before_any_window(heading, body, choices) == quitrules.MISMATCH_LOCAL:
+                self._start_connection(connections.LOCAL)  # start_local stops the transport
+                return
+            log.info("quitting: the remote service speaks another protocol")
+            self._connection.stop()
+            sys.exit(0)
         heading, body, can_restart = self._mismatch_text(mismatch)
         choices = [("quit", _("Quit"), "")]
         if can_restart:
@@ -2545,6 +2815,25 @@ class App(Adw.Application):
         """A reconnect found a service this Collins cannot talk to (an
         upgrade restarted it): the same question, over the window."""
         window = self._main_window()
+        if self._connection.is_remote:
+            # Over a forward (§3.24, ruled 2026-10-29): *Connect to This
+            # Computer* switches; Cancel stays disconnected (the manager is
+            # in `mismatch`, no retry) until Connect to… is used.
+            heading, body, choices = quitrules.mismatch_words(
+                remote_name=self.current_connection.name,
+                service=mismatch.service, client=mismatch.client,
+            )
+            if window is None:
+                return
+
+            def answered_remote(response: str) -> None:
+                if response == quitrules.MISMATCH_LOCAL:
+                    self.switch_connection(connections.LOCAL)
+
+            dialogs.answer_dialog(
+                window, heading, body, choices, answered_remote, default_response=choices[-1][0]
+            )
+            return
         heading, body, can_restart = self._mismatch_text(mismatch)
 
         def answered(response: str) -> None:

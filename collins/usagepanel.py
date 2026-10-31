@@ -339,6 +339,16 @@ class UsagePanel(Gtk.Box):
         if self._stack.get_mapped() and not self._paused():
             self._refresh()
 
+    def forget(self) -> None:
+        """The window switched to another service (§3.24): the numbers
+        shown were that machine's login's. Drop them and ask the new
+        service, which answers with its own login's or with none."""
+        self._snapshot = None
+        self._stack.set_tooltip_text(None)
+        self._status.set_text("")
+        self._stack.set_visible_child_name("status")
+        self.refetch()
+
     def _refresh(self, manual: bool = False) -> None:
         # A click during an in-flight background fetch still claims its
         # result: the user asked, so a failure owes them the snackbar.

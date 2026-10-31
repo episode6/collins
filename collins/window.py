@@ -32,6 +32,7 @@ from . import (
     chats,
     checkouts,
     clonedialog,
+    connectdialog,
     contextmenu,
     desktopentry,
     dialogs,
@@ -369,6 +370,9 @@ class MainWindow(Adw.ApplicationWindow):
         # set_restart_pending).
         self._banner_reconnecting = False
         self._banner_restart_pending = False
+        # A remote service that speaks another protocol, after the dialog's
+        # Cancel: the name shown with a *Connect to…* button (set_mismatch).
+        self._banner_mismatch = ""
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -711,6 +715,9 @@ class MainWindow(Adw.ApplicationWindow):
         # from the link's loss until the connection manager is back,
         # over content that stays readable.
         self.reconnect_banner = Adw.Banner(title=_("Reconnecting to the Collins service"))
+        # Plain text, pinned: a connection's name and ssh's last line go in
+        # the title as they are (rule 5; the property's default is markup).
+        self.reconnect_banner.set_use_markup(False)
         self.reconnect_banner.set_revealed(False)
         # The same place says "Restarting when idle" while a restart waits
         # for the sessions, with the button that calls it off (§3.21).
@@ -1098,9 +1105,14 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._quit_requested = False
 
-    def set_reconnecting(self, reconnecting: bool) -> None:
-        """Raise or lower the reconnect banner (`App._on_connection_state`)."""
+    def set_reconnecting(self, reconnecting: bool, name: str = "", detail: str = "") -> None:
+        """Raise or lower the reconnect banner (`App._on_connection_state`).
+        *name* is a remote connection's ("Reconnecting to <name>", §3.24),
+        "" for the local service; *detail* the last reason given (ssh's
+        last line), shown after it."""
         self._banner_reconnecting = bool(reconnecting)
+        self._banner_name = name or ""
+        self._banner_detail = detail or ""
         self._sync_service_banner()
 
     def set_restart_pending(self, pending: bool) -> None:
@@ -1109,13 +1121,34 @@ class MainWindow(Adw.ApplicationWindow):
         self._banner_restart_pending = bool(pending)
         self._sync_service_banner()
 
+    def set_mismatch(self, name: str) -> None:
+        """A remote service that speaks another protocol, with the dialog
+        answered Cancel (§3.24): nothing is connected, so say so in the
+        banner with a *Connect to…* button; "" lowers it."""
+        self._banner_mismatch = name or ""
+        self._sync_service_banner()
+
     def _sync_service_banner(self) -> None:
         banner = getattr(self, "reconnect_banner", None)
         if banner is None:
             return
         if self._banner_reconnecting:
-            banner.set_title(_("Reconnecting to the Collins service"))
+            name = getattr(self, "_banner_name", "")
+            if name:
+                detail = getattr(self, "_banner_detail", "")
+                if detail:
+                    title = _("Reconnecting to {name}: {detail}").format(name=name, detail=detail)
+                else:
+                    title = _("Reconnecting to {name}").format(name=name)
+                banner.set_title(title)
+            else:
+                banner.set_title(_("Reconnecting to the Collins service"))
             banner.set_button_label(None)
+            banner.set_revealed(True)
+        elif self._banner_mismatch:
+            banner.set_title(_("{name} speaks another protocol; nothing is connected").format(
+                name=self._banner_mismatch))
+            banner.set_button_label(_("Connect to…"))
             banner.set_revealed(True)
         elif self._banner_restart_pending:
             banner.set_title(_("Restarting when idle"))
@@ -1126,6 +1159,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_banner_button(self, _banner) -> None:
         app = self.get_application()
+        if self._banner_mismatch and not self._banner_reconnecting:
+            self._open_connect_dialog()
+            return
         if self._banner_restart_pending and hasattr(app, "cancel_service_restart"):
             app.cancel_service_restart()
 
@@ -1669,6 +1705,8 @@ class MainWindow(Adw.ApplicationWindow):
             "undo-archive": lambda *_: self._undo_archive_now(),
             # The app menu's *Restart service* (§3.21).
             "restart-service": lambda *_: self._ask_restart_service(),
+            # The app menu's *Connect to…* (§3.24): the connections dialog.
+            "connect-to": lambda *_: self._open_connect_dialog(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
@@ -5871,6 +5909,49 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._ask_save_editors([tab], go)
         return True
+
+    def detach_all_tabs(self) -> None:
+        """A switch of connections (§3.24, D2: `App.switch_connection`):
+        every tab closes with no question and its session keeps running on
+        the service it belongs to — the quit's `do_detach` without the quit.
+        A page mid-close drains as it would; an unstarted New Thread or a
+        shell left after its CLI ends with the tab (quitrules). The app has
+        recorded and frozen `open_tabs` before this, so the closes write
+        nothing over the list that brings these tabs back."""
+        pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
+        for page in pages:
+            tab = page.get_child()
+            if not isinstance(tab, TerminalTab):
+                self._close_ok.add(page)
+                continue
+            # A page mid-close (a graceful exit draining, a /bg handoff, a
+            # close dialog open) leaves too: its close belonged to the old
+            # service and can never finish here, and a page kept would
+            # re-attach its old pty id on the new service (S2 of PR 623's
+            # review). Its session is left running, never ended: the
+            # settling state is dropped and the page detaches like the
+            # rest; a close dialog still open finds its page gone
+            # (`_page_alive`) and does nothing.
+            self._closing_pages.discard(page)
+            self._bg_closing.discard(page)
+            self._close_asking.discard(page)
+            self._bg_ok.discard(page)
+            if page in self._bg_queue:
+                self._bg_queue.remove(page)
+            self._close_ok.add(page)
+            fate = self._quit_fate(tab, "detach")
+            if fate == quitrules.DETACH:
+                self._detached_pages.add(page)
+            else:  # RELEASE, or no pty at all: closes as a plain close would, with no ask
+                self._confirmed_closes.add(page)
+        for page in pages:
+            self.tab_view.close_page(page)
+
+    def _open_connect_dialog(self) -> None:
+        app = self.get_application()
+        if not hasattr(app, "switch_connection"):
+            return
+        connectdialog.ConnectDialog(app).present(self)
 
     def _ask_restart_service(self) -> None:
         """*Restart service* (§3.21): the blast radius first — the sessions

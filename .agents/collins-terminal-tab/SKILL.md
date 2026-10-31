@@ -698,7 +698,94 @@ made of it, never of a client's VTE:
 to the service and a `connection.ConnectionManager` that finds or starts
 `collins-service` (the unit via `systemctl --user start` for the default app
 id, else a detached spawn), connects both channels, subscribes, and on a
-loss backs off (1, 2, 5, 10, then every 30 s) and reconnects. A tab's (and a
+loss backs off (1, 2, 5, 10, then every 30 s) and reconnects. **A remote
+service** (spec §3.24, PR-3.1) puts a `sshforward.RemoteTransport` where
+find and start were (`ConnectionManager.start_remote` at launch,
+`switch` while running): *find* probes the forward's local socket
+(`<runtime dir>/collins/remote/<connection id>.sock`, `none` while no
+forward runs), *start* runs `ssh TARGET collins-service --print-socket`
+(10 s, bounded; exit 255 is ssh's "could not connect" with stderr's last
+line, any other exit `collins-service`'s own) and then the `-N -L` child of
+§3.2 (`BatchMode=yes`, `ServerAliveInterval=15`, `ControlMaster=no` so the
+forward is a connection of its own), unlinking the local socket first and
+only ever a socket. The child's exit is the manager's `lost` (reported from
+its stderr-reader thread, landed on the main loop), its last stderr line
+the banner's detail: `MainWindow.set_reconnecting(True, name, detail)`
+reads "Reconnecting to <name>: <detail>". A hello that fails over a live
+forward (ssh accepts, the remote service is dead) tells the transport
+(`connect_failed`), whose next find says `none` so the next start runs
+`--print-socket` again, which restarts it; the local service's loop never
+loops on a socket nobody answers. On a reconnect the remote start runs on
+the owner's thread (`_start_async`) so the banner paints; at launch it
+blocks like `start_local`. Footguns: the manager sets `link.path` itself
+before every connect (the forward's socket or the local one); a `switch`
+closes the link deliberately (no loss reported) and takes the lost road
+with no backoff; the `local` proof is read from *this* device's proof file
+and refused by the remote service (D11), so a remote window is never
+`local`. `connections.py` (GTK-free) is the list in `ui-state.json`
+(`Connections` over the device's one `UiState`, which the app shares with
+`RemoteState` so the file has one writer; rule 5 on every row; a target
+ssh could read as an option cannot be spelled), `connectdialog.py` the
+*Connect to…* dialog (Test runs `print_socket` on a thread), and
+`App.switch_connection` the switch: `open_tabs` flushed and frozen, every
+window's `detach_all_tabs()` (the quit's detach loop without the quit),
+`jobclient.reset`, then `ConnectionManager.switch`; `_on_connected(False)`
+resets the mirrors and reopens the new service's `open_tabs`. **From the
+review of PR 623 (ruled 2026-10-29):** the remote command runs through the
+box's login shell (`exec "$SHELL" -lc 'exec collins-service
+--print-socket'`, one fixed string, the app id validated inside it), since
+`ssh host cmd` gets a non-login PATH without `~/.local/bin`; the printed
+path is taken only when it matches `sshforward.SOCKET_PATH_RE` (ssh
+expands `${VAR}` and `%u` of a `-L` path on the client, so an attacker's
+line would pick this device's variables); `RemoteCommand=none` and
+`RequestTTY=no` join `ControlMaster=no`; each forward writes
+`<id>.pid` beside its socket (ssh pid, client pid, socket) and
+`Forward.start` ends a recorded forward whose cmdline is still that `-L`
+before unlinking, while `sweep_orphans` at app start ends those whose
+client pid no longer lives (no `PR_SET_PDEATHSIG`: `preexec_fn` in a
+threaded client, and the signal is per parent thread); `RemoteTransport`
+takes a lock so a `stop` landing during `--print-socket` or right after
+the spawn leaves no child (`start` raises `ForwardError("stopped")`), and
+`self.forward` is set before `start()` so a death in the first instant is
+reported; a protocol mismatch over a forward never offers *Restart
+Service* (`quitrules.mismatch_words`: *Connect to This Computer*, the body
+names the side to upgrade; the forward is stopped before any exit); the
+`local` proof is not sent over a forward at all; `_on_link_lost` cancels
+a WAITING round's poll chain and `_poll` stops when its generation moved
+(two chains once shook hands twice); `detach_all_tabs` drops a page's
+settling state (`_closing_pages`, `_bg_closing`, `_close_asking`,
+`_bg_queue`) so every page leaves the old service instead of re-attaching
+its old pty id on the new one; `expect_restart` is skipped for a remote
+restart (the pid is the box's).
+**From its verification (ruled 2026-10-29):** the socket and pid file are
+`<runtime dir>/collins/remote/<app id>/<id>.{sock,pid}` — `ui-state.json`
+and so the connection ids are shared by the real and the debug instance,
+and two app ids on one path took over each other's forward on every
+reconnect; `end_stale_forward` leaves a record whose client lives
+(another process) alone, file included, and signals through
+`pidfd_open` + `pidfd_send_signal` after the cmdline check; the sweep
+ignores a record naming a socket that is not its own `<name>.sock`; the
+remote command is a POSIX `sh -c '…'` wrapper (single quotes only, so
+tcsh/nushell hand it on) running `$SHELL -lc` for the POSIX family and
+fish and, only on exit 127, `$SHELL -lic` (the interactive rc, where
+pipx's `ensurepath` writes bash's PATH behind Debian's guard) — never
+`-lic` first, since an rc that hands the shell on (`exec zsh`, auto-tmux)
+would run instead of the command (the second verification, V1; a `-lic`
+round that prints nothing is reported as that hand-over,
+`MSG_HANDOVER`); `sh -lc` for any other shell
+(`sshforward.remote_command`; the tests run the wrapper under a real
+bash with both rc shapes). The service's own capture (`$SHELL -lic 'env
+-0'`, `service/main.py`) has the same hand-over hazard and fails soft
+(an empty overlay); it is §3.10's and not this chunk's, reported rather
+than changed. `_signal_forward` falls through to check-then-`os.kill`
+when `pidfd_open` is refused (ENOSYS/EPERM/EINVAL; V2); a switch away
+from a dead link with dirty buffers asks Discard / Cancel and says why
+(`App._ask_discard_editors`, V3). `switch_connection`
+asks about unsaved editor buffers per window (`_ask_save_editors`; Cancel
+aborts the switch and stops the prepared transport) before `_switch_now`;
+a remote mismatch answered Cancel shows "{name} speaks another protocol;
+nothing is connected" with a *Connect to…* button (`set_mismatch`); the
+path grammar admits `@ + , =`. A tab's (and a
 panel shell's) client is an `api.client.PtyClient` from
 `terminal._pty_client`: `request`, `send_input`, `send_event`, `close`, fed the
 output frames and events of the ptys it spawned or attached. Tests and
