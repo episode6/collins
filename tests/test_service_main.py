@@ -564,6 +564,53 @@ def test_start_sigterm_records_resume_and_removes_the_socket(tmp_path):
         shutil.rmtree(live.runtime, ignore_errors=True)
 
 
+def test_a_sigterm_as_soon_as_the_socket_answers_runs_the_stop_sequence(tmp_path):
+    """The socket and the proof are how anyone finds a service, so its
+    SIGTERM handling is in place before either exists. The service is held
+    just after `listen`, before its main loop, for the signal to land in
+    the gap every start has (some 100 microseconds, when the handlers came
+    after `listen`: a full suite's run hit it, exit -15)."""
+    import shutil
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    from liveservice import LiveService
+
+    held = (
+        "import sys, time\n"
+        "from collins.api import server\n"
+        "from collins.service import main\n"
+        "listen = server.ApiServer.listen\n"
+        "def held(self):\n"
+        "    path = listen(self)\n"
+        "    time.sleep(1.0)\n"
+        "    return path\n"
+        "server.ApiServer.listen = held\n"
+        "sys.exit(main.main(sys.argv[1:]))\n"
+    )
+    live = LiveService(tmp_path, app_id="com.example.StopEarly")
+    try:
+        live.proc = subprocess.Popen(
+            [sys.executable, "-c", held, "--app-id", live.app_id],
+            env=live.env, cwd=live.env["PYTHONPATH"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )  # fmt: skip
+        socket_path = live.socket
+        proof = api_server.proof_path(live.app_id)
+        deadline = time.monotonic() + 20
+        while not os.path.exists(proof):
+            assert live.proc.poll() is None and time.monotonic() < deadline
+            time.sleep(0.005)
+        assert api_server.probe_socket(socket_path) == "live"
+        assert live.stop(signal.SIGTERM) == 0
+        assert not os.path.exists(socket_path) and not os.path.exists(proof)
+    finally:
+        live.stop()
+        shutil.rmtree(live.runtime, ignore_errors=True)
+
+
 def test_a_second_service_exits_zero_on_the_lock(tmp_path):
     import shutil
     import subprocess

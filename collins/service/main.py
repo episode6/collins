@@ -667,9 +667,13 @@ class Service:
         config = core.start_mcp(self.app_id)
         if config is not None:
             providers.MCP_CONFIG_PATH = config
-        path = self.server.listen()
+        # Before the socket exists: whoever can find this service can stop it,
+        # and a SIGTERM still at its default action would skip the stop
+        # sequence and leave the socket and the proof behind. One that lands
+        # before the loop runs waits for it, with everything above up.
         for number in (signal.SIGTERM, signal.SIGINT):
             GLib.unix_signal_add(GLib.PRIORITY_HIGH, number, self._on_signal, number)
+        path = self.server.listen()
         sd_notify("READY=1", self.notify_socket)
         # As systemd's NotifyAccess/unset_environment would: a spawned shell
         # must not inherit the manager's socket (the core strips it too).

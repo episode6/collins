@@ -177,6 +177,10 @@ downloads of each version, see the
   hands the shell on is still not seen (put it in `~/.profile` or
   `~/.zprofile`). `collins-service --check` has a `shell:` line saying
   which was read. See [The service](/guide/service#collins-service-check).
+- **A service stopped the moment it starts still stops cleanly.** A
+  `SIGTERM` in the instant after the service began listening killed it
+  outright, skipping the stop sequence and leaving its socket and proof
+  behind. It now handles the signal before the socket exists.
 - **The last of the window's reads of the service's machine move to the
   service** (the split's Phase 3, first chunk). Where a session resumes
   (its transcript's last folder) is worked out by the service and sent with
