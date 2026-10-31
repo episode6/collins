@@ -97,6 +97,9 @@ other half.
 | AUR (`PKGBUILD`) | `pkgname=('collins' 'collins-service')`; `build()` stages one `python -m installer` run, each `package_*()` takes its half; `.SRCINFO`'s `depends = collins-service=<pkgver>-<pkgrel>` is checked by `verify_versions.py` | python-installer's console scripts | `install -Dm644` to `/usr/lib/systemd/user/` |
 | pip / pipx | one wheel | the console scripts | `collins --install-desktop` |
 | checkout (`data/install.sh`) | — | none: `connection.service_argv` falls back to `python3 -m collins.service.main`, the service to `python3 -m collins.service.keeper` | none |
+| checkout, as a user install (`scripts/install-service.sh`) | one wheel | pipx's console scripts | written by the script under `$XDG_DATA_HOME/systemd/user/` (`--install-desktop` imports GTK, which a headless box lacks) |
+
+`scripts/install-service.sh` stops every running `collins-service` of the user before it installs and again after (a connected window may have restarted the old one meanwhile). It signals only what `SERVICE_RE` matches, a command line that is the service itself, and `tests/test_install_service_script.py` pins that pattern: a loose one would signal a shell, a `journalctl` or an agent that merely mentions the name. **It stops debug and e2e services too, so never run it on a machine to test it**: run it in a container (pipe the tree in, since a bind mount of the repo trips the worktree guard).
 
 CI: the `packaging` job runs `verify_package_split.py` on `build_deb.sh`'s
 two debs, extracts both, imports `collins.app` and the service from them,

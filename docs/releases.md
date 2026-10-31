@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-30. Full change history: git log for this file.
+fork. Last modified: 2026-10-31. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -113,6 +113,10 @@ downloads of each version, see the
   died in the middle of copying a folder in the editor's file tree now
   removes exactly the unfinished copy at its next start (the copies in
   flight are recorded in `state.json`).
+- **`scripts/install-service.sh` installs the service from a checkout.**
+  Whatever is checked out goes in with pipx, for your user, with both
+  systemd user units, after every running `collins-service` of yours is
+  stopped (see [Install the service](/guide/remote#install-the-service)).
 - **A `collins-service` package in every channel.** The PPA, the COPR, the
   `.deb` and `.rpm` downloads and the AUR recipe now build two packages
   from the one wheel: `collins-service` (the `collins-service` and
