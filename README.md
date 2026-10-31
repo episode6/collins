@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-30. Full change history: git log for this file.
+fork. Last modified: 2026-10-31. Full change history: git log for this file.
 -->
 
 # Collins
@@ -255,6 +255,16 @@ by Máté Molnár, which did all the heavy lifting — see the
 [original project's website](https://r4nd3l.github.io/agent-session-manager/)
 for the app Collins grew out of. Released under
 [GPL-3.0-or-later](LICENSE), same as the original.
+
+**The service API is MIT.** The protocol `collins-service` speaks over its
+socket is specified in [docs/api](https://episode6.github.io/collins/api/)
+and defined by `collins/api/protocol.py`; the spec, the module and the
+script that renders the message reference from it are MIT-licensed
+([docs/api/LICENSE](docs/api/LICENSE)) so that another development
+environment can be a client. A program that talks to the service only
+through that documented API is, in our view, an independent work and not a
+derivative of Collins, whatever its own license; the service and the window
+themselves stay GPL.
 
 The sandbox's mount plan (`collins/sandboxplan.py`) is a port of
 [**aibox**](https://github.com/EricKuck/dotfiles/tree/main/packages/aibox)

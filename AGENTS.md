@@ -190,6 +190,19 @@ spawns are exempt), and the client attaches instead.
 direction, fields and bounds), `validate` / `validate_response`, JSON
 framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
 window (a client speaks the service's protocol or the one before it).
+**The API is published and MIT-licensed**: `docs/api/index.md` is the
+prose spec (transport, frames, handshake, errors, the client's life),
+`docs/api/messages.md` the message reference that
+`scripts/gen_api_reference.py` renders from the table (run it after any
+table edit; `tests/test_api_reference.py` fails on a stale copy, and pins
+the four MIT files — the two pages, the generator and `protocol.py` — to
+their SPDX tags and everything else to none; `debian/copyright` has the
+stanza). Keep `protocol.py` standard-library only and free of
+Collins-private references in what the generator prints (a section
+comment's text up to its first colon is a heading of the public spec;
+spec-section and PR references are stripped). The spec says a program
+that talks to the service only through the documented API is, in the
+authors' view, an independent work; the service and the window stay GPL.
 `api/server.py` (Gio and libsoup) is the service's `Soup.Server` on
 `api.sock`: a `SocketClient` per `client_id`, grouping its two WebSockets
 (the **primary** carries the subscription, every event and every output and

@@ -38,6 +38,16 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The service's API is published, under MIT.** The protocol
+  `collins-service` speaks over its socket has a spec of its own at
+  [docs/api](/api/): the transport, the frames, the handshake and the
+  rules, and a [message reference](/api/messages) generated from the
+  message table in `collins/api/protocol.py` (a unit test fails when the
+  two disagree). The spec, the reference, its generator and the protocol
+  module are MIT-licensed, so another development environment can vendor
+  the module or read the spec and be a client; the service and the window
+  stay GPL, and a program that talks to the service only through the
+  documented API is, in our view, an independent work.
 - **The service can be on another machine.** **Connect to…** in the app
   menu keeps a list of ssh connections (a name and `user@host[:port]`);
   **Test** runs `ssh -o BatchMode=yes TARGET collins-service
