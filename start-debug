@@ -1,6 +1,34 @@
 #!/bin/bash
+# A debug instance of this checkout: the window and the service it spawns
+# both import collins from here (cwd and PYTHONPATH), and any service
+# already running for the debug app id is stopped first, so the window
+# never attaches to a service left over from another checkout.
 set -e
 
-export COLLINS_APP_ID=com.episode6.Collins.Debug 
-python3 -m collins
+cd "$(dirname "$(readlink -f "$0")")"
+export COLLINS_APP_ID=com.episode6.Collins.Debug
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
+# SIGTERM every process of ours whose command line matches, wait for them
+# to go, SIGKILL what remains.
+stop_matching() {
+    local pattern="$1" what="$2" pids
+    pids=$(pgrep -u "$(id -u)" -f -- "$pattern" || true)
+    [ -z "$pids" ] && return 0
+    echo "start-debug: stopping the running $what ($(echo "$pids" | tr '\n' ' '))" >&2
+    kill -TERM $pids 2>/dev/null || true
+    for _ in $(seq 50); do
+        pgrep -u "$(id -u)" -f -- "$pattern" >/dev/null || return 0
+        sleep 0.2
+    done
+    echo "start-debug: $what still up after 10 s; killing" >&2
+    kill -KILL $pids 2>/dev/null || true
+}
+
+# The service first (its stop sequence ends or hands over its sessions),
+# then the keeper it may have left holding ptys: a keeper stopped before
+# the service would only be started again.
+stop_matching "(collins\.service\.main|collins-service) --app-id $COLLINS_APP_ID" "$COLLINS_APP_ID service"
+stop_matching "(collins\.service\.keeper|collins-keeper) --app-id $COLLINS_APP_ID" "$COLLINS_APP_ID keeper"
+
+exec python3 -m collins
