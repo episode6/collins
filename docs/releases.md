@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-30. Full change history: git log for this file.
+fork. Last modified: 2026-10-31. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -154,6 +154,10 @@ downloads of each version, see the
   hands the shell on is still not seen (put it in `~/.profile` or
   `~/.zprofile`). `collins-service --check` has a `shell:` line saying
   which was read. See [The service](/guide/service#collins-service-check).
+- **A service stopped the moment it starts still stops cleanly.** A
+  `SIGTERM` in the instant after the service began listening killed it
+  outright, skipping the stop sequence and leaving its socket and proof
+  behind. It now handles the signal before the socket exists.
 - **The last of the window's reads of the service's machine move to the
   service** (the split's Phase 3, first chunk). Where a session resumes
   (its transcript's last folder) is worked out by the service and sent with
