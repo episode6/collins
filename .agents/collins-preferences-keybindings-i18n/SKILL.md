@@ -90,7 +90,9 @@ service page's description names `apilink.service_host()`, the hello's
 (WIDE) in the header; `_pages` is the pair, `_group(name, side)` the group
 of a name on a page (None when it has no half there) and there is no single
 `_page`. `show_group` shows the page of the group's side (This device for a
-mixed group). `_apply_filter` spans both pages: each tab's badge counts its
+mixed group: `show_group("notifications")`, the notification panel's
+caller, lands on This device, where the in-app rows are, though the group
+has a Service half too: the *Notification command* row, PR-3.4, D62). `_apply_filter` spans both pages: each tab's badge counts its
 matched rows while a query is typed, and the other page is shown when the
 shown one has none and the other has (clearing never switches back); an
 `Adw.ViewStack` maps one page, so a row on the other page takes no focus

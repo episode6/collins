@@ -192,6 +192,14 @@ DEFAULT_SETTINGS = {
     # exactly as picked, symlinks unexpanded, so the installer's stable
     # launcher survives the CLI's self-updates. "" = rely on PATH alone.
     "claude_cli_path": "",
+    # The command the service runs for a notify_user call or a counted
+    # finish when no client is attached (service/notifications.py, split
+    # spec section 3.13): an argv template, split with shlex and never
+    # run through a shell, with COLLINS_NOTIFY_KIND, _TITLE, _BODY, _SESSION
+    # and _PROJECT in its environment. "" = nothing runs. Read by
+    # notifications.ServiceNotifications; Preferences -> Service has the row
+    # and a Send test button.
+    "notify_command": "",
     # Whether the "better with the GitHub CLI" notice has been waved off for
     # good. Set only by its own "Don't show this again" box — until that is
     # ticked it appears on every launch that finds gh missing or signed out,
@@ -456,6 +464,7 @@ DEFAULT_SETTINGS = {
 # DEFAULT_SETTINGS: a new setting has to be put on one side here.
 SERVICE_SETTINGS: frozenset[str] = frozenset({
     "claude_cli_path",
+    "notify_command",
     "title_model",
     "icon_model",
     "auto_renew_login",

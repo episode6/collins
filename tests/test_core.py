@@ -2637,3 +2637,71 @@ def test_the_first_sweep_waits_for_the_stores_first_scan(app_state, projects_dir
     finally:
         core.shutdown()
         assert not core._sweep_source
+
+
+def test_a_counted_finish_runs_the_notify_command_only_with_no_client(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    """PR-3.4: the finish the clients would be told of goes to the
+    notify_command instead when none is subscribed (§3.13)."""
+    _root, ids = projects_dir
+    monkeypatch.setenv("COLLINS_DEBUG_API", "1")
+    monkeypatch.setenv("NOTIFY_SOCKET", "/run/fake-notify")
+    service_state = app_state.AppState(migrate=True, device=False)
+    service_state.set_setting("notify_command", "notify-me --flag")
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    runs = []
+    core.notifications._run_async = lambda fn: fn()
+    core.notifications._run = lambda template, env: runs.append((template, env)) or (0, "")
+    item = store.get_item(ids["alpha1"])
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        core._announce_finished(ids["alpha1"])
+        assert runs == []  # a client is attached: it gets the `notify` event
+        assert any(e.get("kind") == "finished" for e in ends.of("notify"))
+        client.close()
+        assert core._subscribers == []
+        core._announce_finished(ids["alpha1"])
+        ((template, env),) = runs
+        assert template == "notify-me --flag"
+        assert env["COLLINS_NOTIFY_KIND"] == "finished"
+        assert env["COLLINS_NOTIFY_SESSION"] == ids["alpha1"]
+        assert env["COLLINS_NOTIFY_TITLE"] == item.display_name
+        assert env["COLLINS_NOTIFY_PROJECT"] == item.session.project_name
+        assert env["COLLINS_NOTIFY_BODY"] == "Finished a run"
+        # The spawn environment, as a shell gets it (D27): the probe's flag
+        # and the unit's notify socket are not handed on.
+        assert "COLLINS_DEBUG_API" not in env and "NOTIFY_SOCKET" not in env and "PATH" in env
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_notify_test_is_served_with_a_client_attached(app_state, tmp_path):
+    """`notify.test` runs the command it carries whether or not anyone is
+    subscribed (the saved setting is empty here), and the reply carries the
+    exit status or the error."""
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    core.start_store(SessionStore(service_state))
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        reply = client.request({"t": "notify.test", "command": "true"})
+        assert reply["status"] == 0 and "error" not in reply
+        assert client.request({"t": "notify.test", "command": "false"})["status"] == 1
+        with pytest.raises(loopback.RequestRefused) as refused:
+            client.request({"t": "notify.test", "command": "  "})
+        assert refused.value.error == protocol.ERROR_INVALID
+    finally:
+        srv.shutdown()
+        pump(0.3)

@@ -662,3 +662,19 @@ def test_show_image_of_a_url_that_lands_cancels_its_bound(world):
     attach(world)
     got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/x.png"})
     assert got == (True, "done") and world["timers"].due == {}
+
+
+def test_notify_user_with_no_client_runs_the_notify_command(world):
+    runs = []
+    world["tools"].notifications = ServiceNotifications(
+        world["state"],
+        get_setting=lambda key: "notify-me" if key == "notify_command" else None,
+        run_async=lambda fn: fn(),
+        run=lambda template, env: runs.append((template, env)) or (0, ""),
+    )
+    got = world["tools"].dispatch(4242, "notify_user", {"message": "Done"})
+    assert got == (True, tools_mod.NOTIFY_RECORDED)
+    ((template, env),) = runs
+    assert template == "notify-me"
+    assert env["COLLINS_NOTIFY_KIND"] == "message" and env["COLLINS_NOTIFY_BODY"] == "Done"
+    assert env["COLLINS_NOTIFY_SESSION"] == "sid-1"

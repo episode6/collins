@@ -36,7 +36,8 @@ which the snapshot never re-sent; held, the one `changed` sees the whole
 history and only a row read elsewhere meanwhile comes down. A row the
 service posted with no client (a `notify_user` from a detached session)
 arrives in that snapshot unread and is never announced on the desktop:
-the snapshot never delivers (D29's command sink is PR-3.4's). Each client
+the snapshot never delivers (the `notify_command` sink, below, is what
+runs for it). Each client
 applies the delivery table below with its own
 focus; the card, sound, desktop notification, flash, tray, dock badge and
 Caffeine are pure client. **A row's text is a msgid and args** (§3.14):
@@ -46,7 +47,47 @@ args)` (no args: never formatted — an agent's `notify_user` text is its own
 msgid). Collins' own words are `BELL_MSGID`, `FINISHED_MSGID` and the
 update's body. A record from before has its body read as its msgid.
 `notify_user` with no client attached is recorded unread with its session
-flagged (`service/tools.py`); the command sink for that case is PR-3.4's.
+flagged (`service/tools.py`), and goes to the command sink.
+
+**The command sink** (`notify_command`, PR-3.4, spec §3.13/§3.24). A
+`SERVICE_SETTINGS` string, default `""`: an argv template.
+`ServiceNotifications.sink(kind, session, title, project, body)` runs it
+when the setting is non-empty and `has_clients()` is false (the core
+passes `lambda: bool(self._subscribers)`; a bare instance uses its own
+subscribers). Two producers call it: `SessionTools._headless_notify_user`
+(kind `message`, the agent's text as the body) and
+`ServiceCore._announce_finished` when `_subscribers` is empty (kind
+`finished`, body `Finished a run`, the item's name and project). The
+run (`run_command`) is `shlex.split` and a `Popen` argv, **never a
+shell and never expanded** (the values are in the environment only:
+`COLLINS_NOTIFY_KIND/_TITLE/_BODY/_SESSION/_PROJECT`, bounded and
+NUL-free by `command_env`) on top of the service's spawn environment
+(`ServiceNotifications(environment=core._spawn_env)`: the login-shell
+overlay less `SPAWN_ENV_STRIPPED`, never `os.environ`), `stdin=DEVNULL`,
+stdout and stderr to /dev/null, waited on the program (`proc.wait`, never a
+pipe: a backgrounded or daemonized child neither reads as a timeout nor holds
+the thread), its own session so a
+timeout (10 s, `COMMAND_TIMEOUT_S`) kills the group. It runs on a
+daemon thread (`run_async`), never the loop, and fails soft: an empty
+or unsplittable template, a missing program, a timeout, a non-zero
+exit are logged and skipped. `notify.test {command}` (the Preferences *Send test* button, D62) runs the
+**text it carries** (the box's, not the saved setting, so a refused save
+cannot test the old command) regardless of clients, on a worker thread: an
+empty or unsplittable command is `invalid`, a run replies `{status}`, one
+that won't start or times out replies `{error}` (one line, at most ARG_TEXT_MAX), never
+both. Its variables are the test values (`KIND=test`, TITLE "Collins test
+notification", BODY "Sent from Preferences", SESSION and PROJECT empty). A test injects `get_setting`, `has_clients`,
+`run_async`, `run`, `dispatch` and `environment` into the constructor.
+
+The row is the Notifications group's Service half (the group is `mixed`,
+`prefs._build_notify_command_rows`): an `Adw.EntryRow` "Notification
+command" saved by the parent-branch entry's helpers (`_save_git_word` and
+friends, validator `remotenotify.command_ok`: `shlex.split` does not raise),
+a *Send test* suffix button and a caption row. *Send test* commits the box,
+then `remotenotify.run_test(text, on_result)` sends `notify.test {command}`
+with `link.send`; the caption shows `Exit status N` or the service's `error`
+(error style for non-zero or an error) until the box changes.
+`scripts/check_notify_command.py` drives it against a real service.
 
 ## The center (`notifycenter.py`, GTK-free)
 
