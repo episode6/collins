@@ -1,7 +1,7 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-30. Full change history: git log for this file.
+# fork. Last modified: 2026-10-31. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -53,7 +53,9 @@ with your sessions organized around it. It is **native** — GTK4, libadwaita,
 and VTE, not a webview — and it is also, deliberately, a tool for
 **Claude**: there are no plans to support other agents. And to be upfront
 about it: Collins is itself entirely vibecoded — the code is written by
-[Claude Code](https://claude.com/claude-code). GPL-3.0, open source.
+[Claude Code](https://claude.com/claude-code). GPL-3.0, open source, with
+the [service's API](/api/) specified under MIT so other tools can be its
+clients.
 
 ## Why "Collins"?
 

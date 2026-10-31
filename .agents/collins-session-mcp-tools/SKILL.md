@@ -138,6 +138,17 @@ import it. It holds:
 - **Versioning is additive.** `PROTOCOL` and `MIN_PROTOCOL` (both 1,
   pinned) bound what a peer speaks; the window is at most two wide, so an
   upgraded client still talks to a service with running agents.
+- **The module is MIT and the API is published.** `docs/api/index.md` is
+  the prose spec, `docs/api/messages.md` the reference
+  `scripts/gen_api_reference.py` renders from `TYPES` (every type under
+  the heading of its `# -- section` comment, the text up to the first
+  colon with the §/PR/D references stripped; `_TITLES` renames the odd
+  one). After any edit to the table run the script and commit the page:
+  `tests/test_api_reference.py` fails on a stale copy. The same test pins
+  the SPDX tag on exactly four files (the two pages, the generator,
+  `protocol.py`): a new module under `collins/api/` is GPL, and nothing
+  of the private design spec belongs in a `MessageType.summary`, which
+  the public page prints verbatim.
   `negotiate(own, own_min, peer, peer_min)` gives both sides the same
   answer, None being the mismatch dialog. Also here: `QUEUE_BYTES` (4 MiB),
   the keepalive pair (10 s, 10 s), `LOCAL_PROOF_BYTES`.

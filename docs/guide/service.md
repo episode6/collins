@@ -18,6 +18,10 @@ on another machine is reached over ssh, with the socket forwarded — see
 [A service on another machine](./remote).
 :::
 
+The window is not the only possible client. The protocol the socket speaks
+is specified in [The service API](../api/), under the MIT license, for any
+other tool that wants to drive a service.
+
 ## What runs where
 
 | The service | The window |

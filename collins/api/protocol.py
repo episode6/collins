@@ -1,4 +1,30 @@
-# New in the ghackett fork of agent-session-manager (GPL-3.0).
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 episode6, Inc.
+#
+# New in the ghackett fork of agent-session-manager. Unlike the rest of
+# Collins (GPL-3.0-or-later), this module is MIT-licensed, together with the
+# published API specification it defines (docs/api/) and the script that
+# renders the message reference from it (scripts/gen_api_reference.py), so
+# that another development environment can vendor it to talk to
+# collins-service. Keep it standard-library only for the same reason.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 """The message table of the service/client API, kept free of GTK.
 
 What `mcptools` is for the session MCP tools, this module is for the API
@@ -1534,7 +1560,7 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "debug.local",
-        "Set whether the service treats the asking client as local (a check's stand-in for ssh, D60).",
+        "Set whether the service treats the asking client as local (a check's stand-in for ssh).",
         request=_request({"local": _req(_BOOL)}),
     ),
     MessageType(
@@ -2378,7 +2404,7 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.trash",
-        "Move files to the trash on the service's machine (§3.23).",
+        "Move files to the trash on the service's machine.",
         request=_request(
             {"paths": _req(Field(K_LIST, low=1, high=REPO_PATHS_MAX, item=_PATH))},
             reply={

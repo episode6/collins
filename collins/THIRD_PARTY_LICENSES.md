@@ -3,7 +3,11 @@
 Collins is free software licensed under the GNU General Public License v3.0 or later
 ([LICENSE](https://github.com/episode6/collins/blob/main/LICENSE)). It is a fork of, and
 is built with, the third-party components below. The app ships this document and shows it
-on the **Legal** page of its About dialog.
+on the **Legal** page of its About dialog. One part of Collins is licensed more
+permissively: the service's API — its specification, the message table in
+`collins/api/protocol.py` and the script that renders the reference from it — is MIT, so
+that other tools can be clients of `collins-service`
+([docs/api](https://episode6.github.io/collins/api/)).
 
 ## Upstream project
 
