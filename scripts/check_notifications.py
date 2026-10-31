@@ -92,10 +92,13 @@ for path in (
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
-# A `claude` on PATH, never run: the store only lists sessions for providers
-# whose CLI it can find, and CI has none.
+# A `claude` on PATH: the store only lists sessions for providers whose CLI
+# it can find, and CI has none. Its helper runs (`agents`, `-p`) end at
+# once; a session's launch sleeps, as the command the tabs below were
+# handed did before the service assembled every command itself (PR-3.0
+# item 1).
 with open(f"{E2E}/bin/claude", "w", encoding="utf-8") as fh:
-    fh.write("#!/bin/sh\nexit 0\n")
+    fh.write('#!/bin/sh\ncase "$1" in agents|-p) exit 0;; esac\nexec sleep 300\n')
 os.chmod(f"{E2E}/bin/claude", 0o755)
 os.environ["PATH"] = f"{E2E}/bin:{os.environ['PATH']}"
 # The project ships an icon, so a row can be seen wearing it.
@@ -554,8 +557,8 @@ def steps(app: App):
         store.set_unread(SESSION_B, False)
         # A real terminal tab for session B: notify_session and _on_bell
         # take a TerminalTab, and the tab's session id is what a row is
-        # filed under. The shell runs `sleep`, never the CLI.
-        tab_b = TerminalTab(cwd=PROJECT_DIR, session_id=SESSION_B, command_override="sleep 300")
+        # filed under. The shell runs the staged `claude`, which sleeps.
+        tab_b = TerminalTab(cwd=PROJECT_DIR, session_id=SESSION_B)
         page = win.tab_view.append(tab_b)
         page.set_title("Router profiling")
         win._pages[SESSION_B] = page
@@ -826,7 +829,7 @@ def steps(app: App):
     def placeholder_card():
         # A tab with no session id yet: its message is filed under the
         # placeholder id, and its card holds the page.
-        tab_p = TerminalTab(cwd=PROJECT_DIR, command_override="sleep 300")
+        tab_p = TerminalTab(cwd=PROJECT_DIR)
         page = win.tab_view.append(tab_p)
         page.set_title("New Thread")
         win._placeholder_pages[page] = "placeholder-90"

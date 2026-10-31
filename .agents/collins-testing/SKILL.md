@@ -47,12 +47,12 @@ own body, or inside `if apilink.is_local():`, or after the ask in the
 same `and`. The ask is `apilink`'s function, called: not the bare
 attribute, not another object's `is_local()`, not one after the read, in
 another branch, inside a lambda or bound to a name first; a closure does
-not inherit its parent's ask); `UNRULED` is pinned to the three sites
-reported for a ruling and only shrinks; `RECORDED` is four `gitloads`
-default arguments (`run=subprocess.run`, `exists=os.path.exists`),
-pinned the same way. Every function a qualname names is held to the ask
-(a property's getter and its setter), and a function that binds
-`apilink` itself has none.
+not inherit its parent's ask). Every function a qualname names is held
+to the ask (a property's getter and its setter), and a function that
+binds `apilink` itself has none. Since PR-3.0 (D59) the list is those
+two groups and `NOT_A_SITE` only: `UNRULED` (three sites) and
+`RECORDED` (four `gitloads` default arguments) were ruled and moved, and
+importing either from `pathless_allowlist` fails a test.
 
 **When the test names a site that is no read.** The any-receiver words
 and the name hints match by name: `entry.is_dir()` on a service fact,
@@ -84,20 +84,25 @@ the keyword-property constructors of the GTK file openers
 and `set_property("file", …)`, `io.FileIO` / `io.open_code` /
 `posixpath.*`, and a `Gio.File` renamed, re-moded or made
 (`set_display_name`, `set_attribute*`, `new_tmp`): the five families the
-2026-10-18 Fable pass found missing. `test_the_walker_catches` and
+2026-10-18 Fable pass found missing. And, since PR-3.0, the launchers:
+`Gtk.FileLauncher.new`, `Gtk.UriLauncher.new`,
+`Gio.AppInfo.launch_default_for_uri(_async)`, `open_containing_folder`
+and `launch_uris*` on any receiver, and `launch` on a receiver named for
+an app's info (`info`, `app_info`): a launch of a web address or of a
+file this device has is `DEVICE`, anything else a local extra behind the
+ask. `test_the_walker_catches` and
 `test_the_walker_is_known_to_miss` are tables of both: add a row when
 the vocabulary changes. It does **not** follow calls: a site is named by
 the function the read is written in, so a widget calling a disk-reading
 function of `sessions`, `providers`, `clonerepo`, `panelhistory` or a
 helper of its own module is invisible to it. Nor does it see a hintless
 receiver for the method names other objects share (`p.exists()`,
-`self._thing.unlink()`, `write_text`), the launchers (`Gtk.FileLauncher`,
-`Gtk.UriLauncher`, `AppInfo.launch`), `expanduser` / `abspath`, a star
+`self._thing.unlink()`, `write_text`), `launch` on an app's info whose
+name does not say so, `expanduser` / `abspath`, a star
 import, `asyncio` / `pty` / `multiprocessing`, or a read through
 another library. Check those by hand when adding one. The
-ones known today, with the `UNRULED` and `RECORDED` sites, are recorded
-and not moved (spec D50; D54 rules what Phase 3 does with the first
-list): the record is the comment at `UNRULED` in
+ones known today are recorded (spec D50; D54 ruled and PR-3.0 moved the
+first list's): the record is the comment in
 `tests/pathless_allowlist.py`, which names every form the walker misses.
 
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
@@ -174,9 +179,10 @@ never calls `prove_local` (`check_drop_upload.py`,
 every gate follows at once; widgets that decided at build time (the
 footer) are read on a tab built afterwards. `check_local_extras.py` is
 the pattern for anything that would start a program or open the file
-manager: it replaces `Gtk.FileLauncher.new` and `Gtk.UriLauncher.new`
-with a recorder before importing `collins` (an assignment on the GI
-class; every module sees it), wraps `footerapps.launch_app`, stages its
+manager: it replaces `Gtk.FileLauncher.new`, `Gtk.UriLauncher.new` and
+`Gio.AppInfo.launch_default_for_uri` with a recorder before importing
+`collins` (an assignment on the GI class; every module sees it), clicks
+links of each scheme both ways, wraps `footerapps.launch_app`, stages its
 own `ghostty` and footer-app stubs on `PATH` and under a scratch
 `XDG_DATA_HOME`, and gives the service a scratch `$HOME` (`start_service
 ({**os.environ, "HOME": ...})`), so nothing reaches the desktop even
@@ -283,9 +289,16 @@ methods you just added "don't exist". Give the script its own deadline
 (`GLib.timeout_add` + `os._exit`): an exception inside a GLib callback is
 swallowed and the app runs forever.
 
-Sidebar headers need staging: discovery skips a provider whose CLI
-`shutil.which` can't find (CI has no real `claude`; a dev box does, so the
-miss only shows in CI) — put a shim on `PATH` first. A group the sidebar
+Sidebar headers need staging: put a `claude` shim on `PATH` first (CI
+has no real `claude`; a dev box does). **No check types a command of its
+own** since PR-3.0: the service assembles every agent command from its
+own `claude` (the `spawn` request has no `command_override`), so a check
+or a unit test that wants a session's command to sleep or to exit stages
+a `claude` that does (`check_notifications.py`, `check_root_name_links.py`;
+`tests/test_core.py`'s `stage_cli`, which also answers `agents` with
+none so a resume's background-agents probe does not wait). The service
+looks it up on its session environment's PATH, which starts with the
+check's own PATH entries. A group the sidebar
 never showed starts collapsed (`AppState().set_group_expanded("proj:<name>",
 True)` before `App()`), and the Favorites header exists only once something
 is starred.

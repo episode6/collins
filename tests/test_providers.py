@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 import os
 import shutil
@@ -66,7 +66,7 @@ def test_default_provider_falls_back_when_nothing_installed(monkeypatch):
 
 
 def test_resume_and_new_commands(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(
         ClaudeProvider, "background_agents", lambda self, include_finished=False: []
     )
@@ -76,7 +76,7 @@ def test_resume_and_new_commands(monkeypatch):
 
 
 def test_resume_attaches_to_running_background_session(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(
         ClaudeProvider,
         "background_agents",
@@ -94,7 +94,7 @@ def test_resume_attaches_to_running_background_session(monkeypatch):
 
 
 def test_resume_attaches_to_finished_resident_background_job(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
 
     class Result:
         stdout = _agents_json_payload("done")
@@ -114,7 +114,7 @@ def test_background_agents_never_hands_the_cli_our_tty(monkeypatch):
     # it only on a clean exit — an inherited stdin is the terminal the app
     # was launched from, and one timeout-killed poll left that terminal
     # raw/no-echo. stdin must be /dev/null so the CLI never touches it.
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     seen = {}
 
     class Result:
@@ -132,7 +132,7 @@ def test_background_agents_never_hands_the_cli_our_tty(monkeypatch):
 def test_background_agents_parses_agents_json(monkeypatch):
     import json
 
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     payload = json.dumps(
         [
             {"sessionId": "fg-id", "kind": "interactive"},  # no job id: not detached
@@ -162,7 +162,7 @@ def test_background_agents_reads_the_jobs_busy_status(monkeypatch):
     # CLI's progress emission is gated on.
     import json
 
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     payload = json.dumps(
         [
             {
@@ -222,7 +222,7 @@ def _agents_json_payload(finished_state: str) -> str:
 
 @pytest.mark.parametrize("state", sorted(providers._BACKGROUND_TERMINAL_STATES))
 def test_background_agents_excludes_finished_jobs(monkeypatch, state):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
 
     class Result:
         stdout = _agents_json_payload(state)
@@ -233,7 +233,7 @@ def test_background_agents_excludes_finished_jobs(monkeypatch, state):
 
 
 def test_background_agents_include_finished_keeps_finished_jobs(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
 
     class Result:
         stdout = _agents_json_payload("done")
@@ -246,7 +246,7 @@ def test_background_agents_include_finished_keeps_finished_jobs(monkeypatch):
 
 
 def test_background_agents_empty_on_error(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
 
     def boom(*a, **k):
         raise OSError("exec failed")
@@ -256,25 +256,25 @@ def test_background_agents_empty_on_error(monkeypatch):
 
 
 def test_commands_none_when_cli_missing(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: None)
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: None)
     assert ClaudeProvider().resume_command("abc") is None
     assert ClaudeProvider().new_command() is None
 
 
 def test_chat_variants(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     claude = [v for v in ClaudeProvider().chat_variants()]
     assert [(v.key, v.writeable, v.gated) for v in claude] == [("default", True, True)]
 
 
 def test_chat_variants_empty_when_cli_missing(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: None)
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: None)
     assert ClaudeProvider().chat_variants() == []
 
 
 def test_new_command_options(monkeypatch):
     from collins.providers import SessionOptions
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
     opts = SessionOptions(model="opus", permission_mode="plan", add_dirs=("/extra",))
     assert claude.new_command(opts) == (
@@ -287,7 +287,7 @@ def test_new_command_options(monkeypatch):
 def test_new_command_effort_flag(monkeypatch):
     # The effort rides after the model; "" — the CLI's default — passes nothing.
     from collins.providers import SessionOptions
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
     assert claude.new_command(SessionOptions(model="opus", effort="xhigh")) == (
         "/usr/bin/claude --model opus --effort xhigh"
@@ -319,7 +319,7 @@ def test_model_switch_command():
 
 
 def test_claude_chat_command_resume(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     cmd = ClaudeProvider().chat_command("sess-42")
     assert cmd[-2:] == ["--resume", "sess-42"]
     # no resume id → no --resume flag
@@ -874,7 +874,7 @@ def test_claude_file_reference_refuses_control_characters():
 
 @pytest.fixture
 def mcp_config_set(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/user/1/collins/id/mcp.json")
     monkeypatch.setattr(
         ClaudeProvider, "background_agents", lambda self, include_finished=False: []
@@ -901,13 +901,13 @@ def test_chat_command_carries_the_mcp_config(mcp_config_set):
 
 
 def test_a_spaced_config_path_is_quoted(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/tmp/my dir/mcp.json")
     assert ClaudeProvider().new_command().endswith(" --mcp-config '/tmp/my dir/mcp.json'")
 
 
 def test_no_mcp_config_flag_while_unset(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(
         ClaudeProvider, "background_agents", lambda self, include_finished=False: []
     )
@@ -926,7 +926,7 @@ def test_base_providers_never_carry_the_mcp_config(monkeypatch):
     class OtherAgent(Provider):
         cli = "other"
 
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/collins/mcp.json")
     assert OtherAgent().new_command() == "/usr/bin/other"
     assert OtherAgent().resume_command("abc") == "/usr/bin/other --resume abc"
@@ -935,7 +935,7 @@ def test_base_providers_never_carry_the_mcp_config(monkeypatch):
 def test_attach_carries_no_mcp_config(monkeypatch):
     """`claude attach` accepts no flags at all — and needs none: it joins a
     daemon process that already has the servers from its own launch."""
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/collins/mcp.json")
     monkeypatch.setattr(
         ClaudeProvider,
@@ -949,7 +949,7 @@ def test_attach_carries_no_mcp_config(monkeypatch):
 
 def test_new_command_worktree_flag(monkeypatch):
     from collins.providers import SessionOptions
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
     assert claude.new_command(SessionOptions(worktree=True)) == "/usr/bin/claude -w"
     assert claude.new_command(SessionOptions()) == "/usr/bin/claude"
@@ -960,7 +960,7 @@ def test_new_command_names_the_worktree_it_was_given(monkeypatch):
     the CLI makes it, so it names it: `-w <name>`. Only a name that can't
     read as anything else is typed, and never one without the flag."""
     from collins.providers import SessionOptions
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/mcp.json")
     claude = ClaudeProvider()
     named = SessionOptions(worktree=True, worktree_name="calm-heron-3f9a")
@@ -984,7 +984,7 @@ def test_sandbox_prefix_names_the_launcher_by_file(monkeypatch):
 
     from collins.providers import SessionOptions, sandboxrun_path
 
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
     launcher = sandboxrun_path()
     assert launcher.endswith("/collins/sandboxrun.py")
@@ -1006,7 +1006,7 @@ def test_resume_keeps_the_permission_mode_of_a_sandboxed_session(monkeypatch):
     existing conversation."""
     from collins.providers import SessionOptions
 
-    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     monkeypatch.setattr(ClaudeProvider, "background_agents", lambda self, include_finished=False: [])
     claude = ClaudeProvider()
     opts = SessionOptions(

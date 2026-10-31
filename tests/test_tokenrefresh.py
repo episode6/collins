@@ -81,7 +81,7 @@ def test_live_token_is_valid(credentials):
 
 def test_refresh_without_cli_is_false(credentials, monkeypatch):
     _write_credentials(credentials, expires_in_s=-60)
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr("shutil.which", lambda name, **_: None)
     ran = []
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a))
     assert tokenrefresh.refresh() is False
@@ -101,7 +101,7 @@ def test_refresh_runs_cli_in_scratch_and_reads_the_file(
         _write_credentials(credentials)
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr("shutil.which", lambda name, **_: "/usr/bin/claude")
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert tokenrefresh.refresh() is True
     assert calls["argv"][:2] == ["/usr/bin/claude", "-p"]
@@ -123,14 +123,14 @@ def test_refresh_trusts_the_file_over_the_exit_code(credentials, scratch, monkey
         _write_credentials(credentials)
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
 
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr("shutil.which", lambda name, **_: "/usr/bin/claude")
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert tokenrefresh.refresh() is True
 
 
 def test_refresh_that_changes_nothing_is_false(credentials, scratch, monkeypatch):
     _write_credentials(credentials, expires_in_s=-60)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr("shutil.which", lambda name, **_: "/usr/bin/claude")
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -145,7 +145,7 @@ def test_refresh_timeout_is_false(credentials, scratch, monkeypatch):
     def fake_run(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, kwargs.get("timeout") or 0)
 
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr("shutil.which", lambda name, **_: "/usr/bin/claude")
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert tokenrefresh.refresh() is False
 

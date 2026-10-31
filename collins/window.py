@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-18. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -88,9 +88,10 @@ from .licenses import legal_sections
 from .models import SessionItem
 from .notifycenter import Notification, NotificationCenter, sound_display_name
 from .prefs import PreferencesDialog
-from .providers import SessionOptions, available_providers, default_provider, get_provider
+from .providers import SessionOptions, get_provider
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
+from .remotecli import available_providers, default_provider
 from .remotestate import RemoteState
 from .remotestore import RemoteStore, transcript_export
 from .replayview import ReplayTab
@@ -98,7 +99,6 @@ from .sessions import (
     Session,
     path_within,
     project_name_for_cwd,
-    resume_cwd,
     session_from_file,
     worktree_project_root,
 )
@@ -310,6 +310,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_icon_name(_app_icon_name(self))
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
+        # Whether each session's project directory is there, the service's
+        # answer (`fs.stat`): session id -> (the directory asked about, is a
+        # directory); and the asks still out (PR-3.0 item 9).
+        self._project_dirs_there: dict[str, tuple[str, bool]] = {}
+        self._project_dirs_asked: set[tuple[str, str]] = set()
         self._confirmed_closes: set[Adw.TabPage] = set()
         # Graceful closes in progress (their polls are the tabs' sessions':
         # Session.begin_close), and which of them are /bg handoffs.
@@ -522,7 +527,12 @@ class MainWindow(Adw.ApplicationWindow):
                 _("Continue last {name} session…").format(name=provider.name),
                 f"win.continue-session::{provider.id}",
             )
-        for provider in available_providers():
+        # Native streaming chat runs the agent in this process, on this
+        # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
+        # client that is not on the service's machine, and slated for
+        # removal. Its variants are this device's CLI's.
+        chat_providers = available_providers() if apilink.is_local() else []
+        for provider in chat_providers:
             for variant in provider.chat_variants():  # native streaming chat
                 if variant.label:
                     text = _("New {name} native chat ({mode}) (experimental)").format(
@@ -2124,7 +2134,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._update_active_row()
                 return
 
-        cwd = resume_cwd(session)
+        cwd = session.resume_at  # the service's answer (PR-3.0 item 3)
         # A session the Collins service already runs is shown, not resumed
         # a second time (D31): a tab over its pty, its facts arriving with
         # the attach. A fork always starts its own.
@@ -2214,26 +2224,76 @@ class MainWindow(Adw.ApplicationWindow):
         return f"{emoji} {name}" if emoji else name
 
     def _default_provider(self):
-        """First installed agent (Claude when present), used by the quick button."""
+        """The agent a plain new session starts, used by the quick button: the
+        service's word on its CLI (remotecli), never this process's PATH."""
         return default_provider()
 
-    def _visible_project_dir(self) -> str | None:
-        """Project directory of the session in the visible tab. A session's
-        recorded cwd can itself be a Claude-managed worktree (worktree-entry
-        forks rewrite every cwd in the copied transcript), so it is mapped
-        back to the repository — new sessions belong in the project proper,
-        or they cascade into the worktree. None when the visible tab has no
-        bound session or the directory no longer exists."""
+    def _visible_project_candidate(self) -> tuple[str, str] | None:
+        """(session id, project directory) of the session in the visible
+        tab, whether or not the directory is there. A session's recorded
+        cwd can itself be a Claude-managed worktree (worktree-entry forks
+        rewrite every cwd in the copied transcript), so it is mapped back
+        to the repository — new sessions belong in the project proper, or
+        they cascade into the worktree."""
         session_id = self._active_session_id()
         if session_id is None:
             return None
         session = self.store.get_session(session_id)
         if session is None or not session.cwd:
             return None
-        cwd = worktree_project_root(session.cwd) or session.cwd
-        if Path(cwd).is_dir():
-            return cwd
-        return None
+        return session_id, worktree_project_root(session.cwd) or session.cwd
+
+    def _visible_project_dir(self) -> str | None:
+        """Project directory of the session in the visible tab
+        (`_visible_project_candidate`). None when the visible tab has no
+        bound session or the directory is not known to be there: whether it
+        is, is the service's answer (`fs.stat`, PR-3.0 item 9), asked on tab
+        selection (`_refresh_visible_project_dir`) and read here with no
+        round trip; until it answered the directory counts as gone, which
+        is the safe direction (the chooser opens, at the service's home)."""
+        candidate = self._visible_project_candidate()
+        if candidate is None:
+            return None
+        session_id, cwd = candidate
+        known = self._project_dirs_there.get(session_id)
+        if known is None or known[0] != cwd:
+            self._refresh_visible_project_dir()  # asked now, for the next time
+            return None
+        return cwd if known[1] else None
+
+    def _ask_visible_project_dir_if_unknown(self) -> None:
+        """`_refresh_visible_project_dir` when the visible session's
+        directory has no answer yet: a tab that resolved its session while
+        selected, or whose row the store has only now (the Fable review of
+        PR 622, S1), so the next new session started from it finds the
+        answer rather than opening the chooser."""
+        candidate = self._visible_project_candidate()
+        if candidate is None:
+            return
+        session_id, cwd = candidate
+        known = self._project_dirs_there.get(session_id)
+        if known is None or known[0] != cwd:
+            self._refresh_visible_project_dir()
+
+    def _refresh_visible_project_dir(self) -> None:
+        """Ask the service whether the visible session's project directory
+        is a directory (`fs.stat`, off the main loop), and keep the answer
+        for `_visible_project_dir`: once per session and directory while an
+        ask is out."""
+        candidate = self._visible_project_candidate()
+        if candidate is None:
+            return
+        session_id, cwd = candidate
+        if (session_id, cwd) in self._project_dirs_asked:
+            return
+        self._project_dirs_asked.add((session_id, cwd))
+
+        def landed(kind: str, value) -> None:
+            self._project_dirs_asked.discard((session_id, cwd))
+            there = kind == "ok" and value.is_dir
+            self._project_dirs_there[session_id] = (cwd, there)
+
+        remotefiles.off_main(lambda: remotefiles.stat_path(cwd), landed, name="window-project-dir")
 
     def _new_session(self, provider=None) -> None:
         """Start in the visible session's project directory, else ask."""
@@ -3009,7 +3069,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         tab = TerminalTab(
             cwd=cwd, settings=self.state.settings, provider=provider,
-            command_override=provider.continue_command(options), options=options,
+            continue_recent=True, options=options,
         )
         self._add_tab(tab, GLib.path_get_basename(cwd), f"continue {provider.name} — {cwd}")
 
@@ -3318,6 +3378,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_status(session_id)
         self._update_active_row()  # the resolved tab may be the selected one
         self._apply_resolved_sessions()
+        # The visible tab's session is known now: whether its project
+        # directory is there is asked at once (PR-3.0 item 9, review S1).
+        self._ask_visible_project_dir_if_unknown()
         # Half of registering: the id is known. The gate stays shut until the
         # store gives it a row, which _on_store_refreshed picks up.
         self._refresh_background_affordances()
@@ -3387,6 +3450,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         self._sync_trash_archived_action()
+        # A resolved session's row may land after the resolve itself.
+        self._ask_visible_project_dir_if_unknown()
         if self._reopen_waiting:
             self._apply_reopen_waiting()
         if self._restore_session_id is not None:
@@ -3612,6 +3677,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _launch_new_chat_session(self, cwd: str, provider, variant_key: str = "") -> None:
+        if not apilink.is_local():
+            # A local extra (D54 (3)): the chat runs on this device, in a
+            # folder of the service's. The menus hide the entries too.
+            return
         variants = provider.chat_variants()
         variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
         if variant is None:
@@ -3628,13 +3697,16 @@ class MainWindow(Adw.ApplicationWindow):
         session = self.store.get_session(session_id)
         if session is None:
             return
+        if not apilink.is_local():
+            # A local extra (D54 (3)), as in _launch_new_chat_session.
+            return
         provider = get_provider(session.provider)
         variants = provider.chat_variants()
         variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
         if variant is None:
             return
         tab = ChatSessionTab(
-            cwd=resume_cwd(session), provider=provider, variant=variant,
+            cwd=session.resume_at, provider=provider, variant=variant,
             resume_session_id=session_id,
         )
         page = self.tab_view.append(tab)
@@ -5056,6 +5128,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
         self._update_active_row()
+        # Whether its project directory is still there, asked now so the
+        # next new session started from this tab knows (PR-3.0 item 9).
+        self._refresh_visible_project_dir()
         self._update_close_buttons(page)
         self._sync_window_title()
         if page is None:
@@ -6017,7 +6092,7 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         if shutil.which(provider.cli) is None:
             return
-        cwd = resume_cwd(session)
+        cwd = session.resume_at  # the service's answer (PR-3.0 item 3)
         cwd = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
         subprocess.Popen(
             [_GHOSTTY, f"--working-directory={cwd}", "-e",

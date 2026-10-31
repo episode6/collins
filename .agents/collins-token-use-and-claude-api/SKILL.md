@@ -155,6 +155,16 @@ PATH or disk, nor changes its PATH. A desktop-launched window's PATH lacks
 `~/.local/bin` while the service, with the login shell's, runs `claude`
 fine: gating on the window's PATH showed the ask on every launch. A service
 that never said (`cli` absent) counts as found. Browse is a local extra.
+**Where the service looks** (PR-3.0 item 10): on its session
+environment's PATH (the login shell's, merged), the one its shells spawn
+with, not its own process's: `collins-service` installs it as
+`clisetup`'s search base at start (`clisetup.set_search_base`), so
+`clisetup.which` / `found_at` / `on_path` (and `Provider.cli_path`,
+`titles`, `icongen`, `tokenrefresh`, `sandboxplan.resolved_claude`)
+search it with a stored answer's entry on the end; `ServiceCore.
+cli_found` (`service.status`'s `cli`, `cli.check`'s `found`) searches the
+core's own environment. A service started by a non-interactive ssh
+command used to answer `cli: ""` while its sessions found the CLI.
 Width 640 to match Preferences; ComboRow values get a 160 px minimum
 (`_keep_value_readable`). Toggles write immediately; Continue records
 `welcome_seen`. E2E checks and capture scenes seed `welcome_seen: true`.

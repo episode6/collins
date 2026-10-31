@@ -8,7 +8,10 @@ refused without the flag and served with it, and `store.flags busy` is
 refused from a client."""
 
 import os
+import shlex
+import shutil
 import sys
+import tempfile
 import time
 
 import inproc as loopback
@@ -53,6 +56,50 @@ def pump(seconds=0.5, until=None):
     return until() if until is not None else True
 
 
+# The staged `claude` (PR-3.0 item 1: the service assembles every agent
+# command from its own lookup, so no test types a command of its own; it
+# stages the CLI the command runs instead).
+_CLI: dict = {}
+
+
+def stage_cli(body: str | None = "exit 0") -> str:
+    """Make the staged `claude` run *body* (a line of sh) for anything but
+    `agents`, which answers no background agent at once; None takes it
+    away (no `claude` on the PATH at all: a CLI that never comes up)."""
+    path = _CLI["path"]
+    if body is None:
+        if os.path.exists(path):
+            os.unlink(path)
+        return path
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(f'#!/bin/sh\nif [ "$1" = agents ]; then echo "[]"; exit 0; fi\n{body}\n')
+    os.chmod(path, 0o755)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def fake_cli(monkeypatch):
+    """A `claude` on the PATH the service looks it up on (the process's,
+    in a test: no search base installed), the only one there (a dev box's
+    own is taken off), in a short directory of its own so the typed command
+    fits one row; it exits at once unless a test stages a body
+    (`stage_cli`)."""
+    from collins import clisetup
+
+    monkeypatch.setattr(clisetup, "_search_base", None)
+    directory = tempfile.mkdtemp(prefix="c-")
+    _CLI["path"] = os.path.join(directory, "claude")
+    _CLI["mark"] = os.path.basename(directory) + "/claude"
+    stage_cli()
+    rest = [
+        d for d in os.environ.get("PATH", "").split(os.pathsep)
+        if d and not os.path.exists(os.path.join(d, "claude"))
+    ]
+    monkeypatch.setenv("PATH", os.pathsep.join([directory, *rest]))
+    yield _CLI["path"]
+    shutil.rmtree(directory, ignore_errors=True)
+
+
 @pytest.fixture
 def server(tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", CAT)
@@ -65,10 +112,10 @@ def server(tmp_path, monkeypatch):
 
 
 def spawn_agent(client, cwd, **extra):
-    """An agent whose typed command is `true`: the session's road with no
-    CLI on PATH needed (a command override is typed as it is)."""
+    """An agent whose command the service assembles from the staged
+    `claude` (`stage_cli`: it exits at once unless a test says otherwise)."""
     message = {"t": "spawn", "kind": "agent", "cwd": str(cwd), "cols": 80, "rows": 24}
-    return client.request({**message, "command_override": "true", **extra})
+    return client.request({**message, **extra})
 
 
 # -- the spawn and the facts ----------------------------------------------------------------
@@ -83,10 +130,40 @@ def test_an_agent_spawn_builds_a_session_and_answers_its_handle(server, tmp_path
     record = server.core.sessions[pty]
     session = record.session
     assert session.handle == reply["handle"] and session.cwd == str(tmp_path)
-    assert session.command_override == "true" and session.initial_command == "true"
+    # The service assembled the command from its own `claude` (PR-3.0 item 1).
+    assert session.continue_recent is False
+    assert session.initial_command.startswith(shlex.quote(_CLI["path"]))
     assert server.core.ptys.get(pty).kind == "agent"
     # The command was typed into the shell (cat echoes it back).
-    assert pump(2, lambda: b"true" in server.core.ptys.get(pty).screen.capture_contents().encode())
+    assert pump(2, lambda: _CLI["mark"] in server.core.ptys.get(pty).screen.capture_contents())
+
+
+def test_the_service_assembles_every_launch_from_its_own_cli(server, tmp_path):
+    """PR-3.0 item 1: no client sends a command. A fresh start with its
+    options, a resume, a fork and a --continue are each typed from the
+    service's own `claude` lookup and the request's facts."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    cli = shlex.quote(_CLI["path"])
+    sid = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+
+    def typed(**extra):
+        pty = spawn_agent(client, tmp_path, **extra)["pty"]
+        return server.core.sessions[pty].session.initial_command
+
+    fresh = typed(model="opus", permission_mode="plan", worktree=True, worktree_name="feat")
+    assert fresh.startswith(f"{cli} --model opus --permission-mode plan -w feat")
+    assert typed(session=sid).startswith(f"{cli} --resume {sid}")
+    assert typed(session="1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", fork=True).startswith(
+        f"{cli} --resume 1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0 --fork-session"
+    )
+    resumed = typed(continue_recent=True, permission_mode="acceptEdits")
+    assert resumed.startswith(f"{cli} --continue")
+    assert resumed.endswith(" --permission-mode acceptEdits")
+    # A command sent by a client is no field of the request any more: it is
+    # dropped, and the service types its own.
+    dropped = typed(command_override="rm -rf /")
+    assert "rm -rf" not in dropped and dropped.startswith(cli)
 
 
 def test_an_attach_is_sent_the_sessions_facts_whole(server, tmp_path):
@@ -97,8 +174,8 @@ def test_an_attach_is_sent_the_sessions_facts_whole(server, tmp_path):
     facts = ends.of("session")
     assert facts and facts[0]["pty"] == pty and facts[0]["handle"].startswith("s-")
     first = facts[0]
-    assert first["cwd"] == str(tmp_path) and first["command_override"] == "true"
-    assert first["initial_command"] == "true"
+    assert first["cwd"] == str(tmp_path) and first["continue_recent"] is False
+    assert first["initial_command"].startswith(shlex.quote(_CLI["path"]))
     assert first["pid"] == server.core.ptys.get(pty).child_pid()
     assert first["takes_prompt"] is False and first["sandboxed"] is False
     assert first["provider"] == "claude" and first["busy"] is False
@@ -127,11 +204,11 @@ def test_the_box_facts_move_with_the_screen(server, tmp_path):
     before = len(ends.of("session"))
     record.refresh_facts()
     assert len(ends.of("session")) == before  # nothing moved: nothing sent
-    # The typed `true` is echoed twice: by the line discipline at once and
+    # The typed command is echoed twice: by the line discipline at once and
     # by cat when it gets to run. Wait for cat's copy, or the mark sent next
     # lands on the line cat's output then ends, leaving the cursor below it.
     screen = server.core.ptys.get(pty).screen
-    assert pump(3, lambda: screen.capture_contents().count("true") >= 2)
+    assert pump(3, lambda: screen.capture_contents().count(_CLI["mark"]) >= 2)
     client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")  # the CLI's prompt mark, drawn by cat's echo
     assert pump(3, lambda: any(e.get("takes_prompt") for e in ends.of("session")))
     moved = [e for e in ends.of("session") if "takes_prompt" in e][-1]
@@ -306,7 +383,7 @@ def test_a_write_flagged_as_a_mention_keeps_its_distance(server, tmp_path):
     pty = spawn_agent(client, tmp_path)["pty"]
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     screen = server.core.ptys.get(pty).screen
-    assert pump(3, lambda: screen.capture_contents().count("true") >= 2)
+    assert pump(3, lambda: screen.capture_contents().count(_CLI["mark"]) >= 2)
     client.send_input(pty, b"look at")  # the line discipline echoes it at once
     assert pump(3, lambda: "look at" in screen.capture_contents())
     client.request({"t": "write", "pty": pty, "text": "@a.py ", "mention": True})
@@ -526,7 +603,7 @@ def _ready_agent(server, client, tmp_path):
     pty = spawn_agent(client, tmp_path)["pty"]
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     screen = server.core.ptys.get(pty).screen
-    assert pump(3, lambda: screen.capture_contents().count("true") >= 2)
+    assert pump(3, lambda: screen.capture_contents().count(_CLI["mark"]) >= 2)
     return pty, screen
 
 
@@ -1254,7 +1331,8 @@ def test_a_second_spawn_of_a_running_session_is_refused_with_its_pty(tmp_path, m
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event, device="laptop")
     session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-    first = spawn_agent(client, tmp_path, session=session_id, command_override="sleep 300")
+    stage_cli("exec sleep 300")
+    first = spawn_agent(client, tmp_path, session=session_id)
     assert pump(5, lambda: server.core.ptys.get(first["pty"]).has_running_command())
     with pytest.raises(loopback.RequestRefused) as refused:
         spawn_agent(client, tmp_path, session=session_id)
@@ -1275,13 +1353,17 @@ def test_a_fork_of_a_running_session_is_spawned_not_refused(tmp_path, monkeypatc
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event, device="laptop")
     session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-    origin = spawn_agent(client, tmp_path, session=session_id, command_override="sleep 300")
+    stage_cli("exec sleep 300")
+    origin = spawn_agent(client, tmp_path, session=session_id)
     assert pump(5, lambda: core.ptys.get(origin["pty"]).has_running_command())
-    fork = spawn_agent(client, tmp_path, session=session_id, fork=True, command_override="sleep 300")
+    stage_cli("exec sleep 300")
+    fork = spawn_agent(client, tmp_path, session=session_id, fork=True)
     assert fork["pty"] != origin["pty"]
     assert pump(5, lambda: core.ptys.get(fork["pty"]).has_running_command())
     assert origin["pty"] in core.ptys.ptys  # the origin's pty is not closed for it
     # The fork's pty names no session in the table: no stand-in for its origin.
+    # (The table is the facts' word, re-read a moment after the pty's own.)
+    assert pump(5, lambda: fork["pty"] in core.agent_pty_sessions())
     assert core.agent_pty_sessions()[fork["pty"]] is None
     server.shutdown()
     pump(0.3)
@@ -1294,7 +1376,8 @@ def test_opening_the_origin_while_its_fork_runs_is_not_the_forks_pty(tmp_path, m
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event, device="laptop")
     session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-    fork = spawn_agent(client, tmp_path, session=session_id, fork=True, command_override="sleep 300")
+    stage_cli("exec sleep 300")
+    fork = spawn_agent(client, tmp_path, session=session_id, fork=True)
     assert pump(5, lambda: core.ptys.get(fork["pty"]).has_running_command())
     origin = spawn_agent(client, tmp_path, session=session_id)
     assert origin["pty"] != fork["pty"]
@@ -1320,7 +1403,8 @@ def test_a_session_whose_cli_exited_leaves_the_table(app_state, projects_dir, tm
         ends = Client()
         client = srv.connect(ends.on_output, ends.on_event, device="laptop")
         client.request({"t": "subscribe"})
-        pty = spawn_agent(client, tmp_path, session=ids["alpha1"], command_override="sleep 2")["pty"]
+        stage_cli("exec sleep 2")
+        pty = spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]
         record = core.sessions[pty]
         assert pump(5, lambda: record.session.has_running_command())
         record.refresh_process_facts()
@@ -1378,9 +1462,9 @@ def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup
     client = srv.connect(ends.on_output, ends.on_event, device="laptop")
     # The agent's typed command ignores HUP, INT and TERM in a process
     # group of its own (the shell's job control) and sits there.
+    stage_cli("trap '' HUP INT TERM; while :; do sleep 1; done")
     reply = client.request({
         "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
-        "command_override": "sh -c 'trap \"\" HUP INT TERM; while :; do sleep 1; done'",
     })
     pty = reply["pty"]
     assert pump(5, lambda: core.ptys.get(pty).has_running_command())
@@ -1421,9 +1505,9 @@ def _closing_server(tmp_path, monkeypatch):
     srv = loopback.LoopbackServer(core)
     ends = Client()
     client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    stage_cli("trap '' INT; exec sleep 300")
     reply = client.request({
         "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
-        "command_override": "sh -c 'trap \"\" INT; exec sleep 300'",
     })
     pty = reply["pty"]
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
@@ -1526,11 +1610,12 @@ def test_a_shell_alone_nobody_shows_is_closed_at_the_holds_end(tmp_path, monkeyp
     may still be the shell's rc before it forks the typed command."""
     srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch)
     try:
-        # The typed command is `true`: the "CLI" never comes up, the shell is alone.
+        # No `claude` at all: the CLI never comes up, the shell is alone.
+        stage_cli(None)
         pty = spawn_agent(client, tmp_path)["pty"]
         client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
         screen = core.ptys.get(pty).screen
-        assert pump(3, lambda: "true" in screen.capture_contents())
+        assert pump(3, lambda: "not found in PATH" in screen.capture_contents())
         assert not core.ptys.get(pty).has_running_command()
         record = core.sessions[pty]
         if leave == "detach":
@@ -1560,7 +1645,8 @@ def test_a_launch_whose_cli_comes_up_inside_the_hold_is_kept(tmp_path, monkeypat
     slow.chmod(0o755)
     srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch, shell=str(slow))
     try:
-        pty = spawn_agent(client, tmp_path, command_override="sleep 300")["pty"]
+        stage_cli("exec sleep 300")
+        pty = spawn_agent(client, tmp_path)["pty"]
         client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
         client.request({"t": "detach", "pty": pty})
         record = core.sessions[pty]
@@ -1582,7 +1668,8 @@ def test_a_detached_sessions_cli_leaving_by_itself_closes_the_shell(tmp_path, mo
     ever close it."""
     srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch, hold_s=600.0)
     try:
-        pty = spawn_agent(client, tmp_path, command_override="sleep 2")["pty"]
+        stage_cli("exec sleep 2")
+        pty = spawn_agent(client, tmp_path)["pty"]
         client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
         assert pump(5, lambda: core.ptys.get(pty).has_running_command())
         assert core.sessions[pty].cli_ever_ran
@@ -1599,6 +1686,7 @@ def test_a_detached_sessions_cli_leaving_by_itself_closes_the_shell(tmp_path, mo
 def test_an_attach_inside_the_hold_cancels_the_recheck(tmp_path, monkeypatch):
     srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch)
     try:
+        stage_cli(None)  # the CLI never comes up
         pty = spawn_agent(client, tmp_path)["pty"]
         client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
         client.request({"t": "detach", "pty": pty})
@@ -1721,8 +1809,10 @@ def test_the_pty_table_names_the_sessions_and_goes_to_subscribers(
         client = srv.connect(ends.on_output, ends.on_event, device="laptop")
         client.request({"t": "subscribe"})
         assert all(e.get("running") is False for e in ends.of("item"))
-        resumed = spawn_agent(client, tmp_path, session=ids["alpha1"], command_override="sleep 300")["pty"]
-        fresh = spawn_agent(client, tmp_path, command_override="sleep 300")["pty"]
+        stage_cli("exec sleep 300")
+        resumed = spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]
+        stage_cli("exec sleep 300")
+        fresh = spawn_agent(client, tmp_path)["pty"]
         # No row until the CLI runs (the /proc poll's word, read by hand here).
         for pty in (resumed, fresh):
             record = core.sessions[pty]
@@ -2181,6 +2271,54 @@ def test_service_status_says_whether_gh_is_ready(server, monkeypatch):
     server.core.check_gh(fresh=True)
     assert pump(3, lambda: server.core.gh_status is not None)
     assert server.core.gh_status == ghsetup.LOGGED_OUT
+
+
+def test_service_status_says_the_services_home(server, tmp_path, monkeypatch):
+    """PR-3.0 item 3: what a client abbreviates the service's paths with."""
+    monkeypatch.setenv("HOME", str(tmp_path / "svc-home"))
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    assert client.request({"t": "service.status"})["home"] == str(tmp_path / "svc-home")
+
+
+def test_the_cli_is_looked_up_on_the_session_environments_path(tmp_path, monkeypatch):
+    """PR-3.0 item 10: `service.status`'s `cli` and `cli.check`'s `found`
+    are a lookup on the PATH the service spawns its shells with (the login
+    shell's, merged), not on the process's own: a service started by a
+    non-interactive ssh command has no `~/.local/bin` on its own PATH and a
+    shell that finds the CLI there."""
+    from collins import clisetup
+
+    monkeypatch.setattr(clisetup, "_appended", None)
+    monkeypatch.setattr(clisetup, "_search_base", None)
+    bare = tmp_path / "process-bin"
+    bare.mkdir()
+    monkeypatch.setenv("PATH", str(bare))  # the process's PATH: no claude on it
+    captured = tmp_path / "login-bin"
+    captured.mkdir()
+    cli = captured / "claude"
+    cli.write_text("#!/bin/sh\nexit 0\n")
+    cli.chmod(0o755)
+    environment = {**os.environ, "PATH": f"{bare}{os.pathsep}{captured}"}
+    core = ServiceCore(state_dir=tmp_path / "pty", environment=lambda: dict(environment))
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        assert clisetup.found_at() is None  # the process's own lookup misses
+        assert client.request({"t": "service.status"})["cli"] == str(cli)
+        assert client.request({"t": "cli.check"})["found"] == str(cli)
+        # An environment without it: "" (none), whatever the process has.
+        environment["PATH"] = str(bare)
+        assert client.request({"t": "service.status"})["cli"] == ""
+        # A stored answer applied on the service is searched too, on top of
+        # the captured environment (a snapshot taken before it was applied).
+        assert clisetup.apply(str(cli)) is True
+        assert client.request({"t": "service.status"})["cli"] == str(cli)
+    finally:
+        clisetup.apply("")
+        srv.shutdown()
+        pump(0.3)
 
 
 def test_the_archive_sweep_runs_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):

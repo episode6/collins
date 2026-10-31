@@ -601,7 +601,7 @@ class ServiceCore:
             session_id=message.get("session"),
             fork=bool(message.get("fork")),
             options=options,
-            command_override=message.get("command_override"),
+            continue_recent=bool(message.get("continue_recent")),
             cwd=message.get("cwd"),
             jsonl_path=message.get("jsonl_path"),
             # The service's ProgressWatch reads the stream's Progress events,
@@ -944,7 +944,10 @@ class ServiceCore:
     def _req_cwd_settle(self, message: protocol.Message, client: Client) -> dict:
         session = self._record(message).session
         judge = session.judge_cwd if message.get("judge") else session.settle_cwd
-        scope = judge(message.get("cwd"), message.get("root"))
+        cwd = message.get("cwd")
+        if isinstance(cwd, str):
+            cwd = files_mod.expand_home(cwd)  # a `~` is this machine's home (PR-3.0 item 4)
+        scope = judge(cwd, message.get("root"))
         return protocol.reply(message.id, scope=scope.name.lower() if scope is not None else "")
 
     def _req_shells_follow(self, message: protocol.Message, client: Client) -> dict:
@@ -1055,8 +1058,11 @@ class ServiceCore:
             "clients": len(self._clients),
             "started": self._started,
             "pid": os.getpid(),
-            "cli": _cli_found(),
+            "cli": self.cli_found(),
         }
+        home = str(Path.home())
+        if home.startswith("/") and len(home) <= protocol.PATH_MAX:
+            fields["home"] = home
         reason = sandboxplan.probe_reason()
         if reason is not None:
             fields["sandbox"] = reason[: protocol.ARG_TEXT_MAX]
@@ -1066,6 +1072,21 @@ class ServiceCore:
             fields["gh"] = self.gh_status[: protocol.SHORT_MAX]
         return protocol.reply(message.id, **fields)
 
+    def cli_search_path(self) -> str:
+        """The PATH the service looks the claude CLI up on: its session
+        environment's (§3.10: the login shell's merged over the process's,
+        what every shell it spawns has), with a stored answer's entry
+        (`clisetup.apply`). Not this process's own PATH: a service started
+        by a non-interactive ssh command has one without `~/.local/bin`
+        while its shells find the CLI there (PR-3.0 item 10)."""
+        return clisetup.search_path(self._environment().get("PATH", ""))
+
+    def cli_found(self) -> str:
+        """Where the service's `claude` lookup lands, "" for none (or for a
+        path too long to carry, which is no path anyone answered)."""
+        found = clisetup.found_at(self.cli_search_path()) or ""
+        return found if len(found) <= protocol.PATH_MAX else ""
+
     def _req_cli_check(self, message: protocol.Message, client: Client) -> dict:
         """The claude CLI on this machine, for the welcome dialog and
         Preferences: where a lookup lands now, and either the pre-fill
@@ -1073,7 +1094,7 @@ class ServiceCore:
         clisetup's, judged here, where the CLI runs; the client's own PATH
         and disk say nothing about it."""
         path = message.get("path")
-        fields: dict = {"found": _cli_found()}
+        fields: dict = {"found": self.cli_found()}
         if path is None:
             detected = clisetup.detect()
             fields["detected"] = detected if len(detected) <= protocol.PATH_MAX else ""
@@ -2737,13 +2758,6 @@ def transcript_path_allowed(path: object) -> bool:
         if real.startswith(base.rstrip(os.sep) + os.sep):
             return True
     return False
-
-
-def _cli_found() -> str:
-    """Where this process's `claude` lookup lands, "" for none (or for a
-    path too long to carry, which is no path anyone answered)."""
-    found = clisetup.found_at() or ""
-    return found if len(found) <= protocol.PATH_MAX else ""
 
 
 def _jsonable(value):

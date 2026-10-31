@@ -288,6 +288,7 @@ def test_table_shapes_are_sound():
         p.K_JSON,
         p.K_JSON_OBJECT,
         p.K_PATH,
+        p.K_HOME_PATH,
         p.K_URL,
         p.K_SCALAR,
     }
@@ -342,7 +343,7 @@ SESSION_EVENT = {
     "provider": "claude",
     "options": {"model": "opus", "effort": "", "permission_mode": "", "add_dirs": [], "worktree": False,
                 "worktree_name": "", "sandbox": True, "sandbox_plan": "/run/p.json", "sandbox_box": BOX},
-    "command_override": "claude --continue",
+    "continue_recent": True,
     "cwd": "/home/u/project",
     "agent_cwd": "/home/u/project/.claude/worktrees/x",
     "pid": 4242,
@@ -414,7 +415,7 @@ SAMPLES = {
         "sandbox": True,
         "sandbox_box": BOX,
         "fork": False,
-        "command_override": "claude --continue",
+        "continue_recent": True,
         "jsonl_path": "/home/u/.claude/projects/-home-u-project/" + ID + ".jsonl",
         "sandbox_plan": "/run/user/1000/collins/app/sandbox/plan.json",
         "fork_resolve": False,
@@ -490,6 +491,7 @@ SAMPLES = {
         "removed": False,
         "project": "/home/u/project",
         "cwd": "/home/u/project",
+        "resume_cwd": "/home/u/project/.claude/worktrees/fix",
         "display_name": "Fix the build",
         "cli_title": "Build fix",
         "subtitle": "2 minutes ago",
@@ -945,7 +947,9 @@ REPLIES = {
     "fs.write": {"mtime": 1700000000000000, "size": 4, "encoding": "latin-1"},
     "fs.watch": {},
     "fs.unwatch": {},
-    "fs.stat": {"kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True},
+    "fs.stat": {
+        "kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True, "path": "/home/u/a.txt",
+    },
     "fs.list": {
         "entries": [{"name": "a.txt", "kind": "file", "ignored": False}],
         "truncated": False,
@@ -994,6 +998,7 @@ REPLIES = {
         "pid": 4242,
         "gh": "logged-out",
         "cli": "/home/u/.local/bin/claude",
+        "home": "/home/u",
     },
     "cli.check": {"found": "", "detected": "/home/u/.local/bin/claude", "status": "versioned"},
 }
@@ -1144,6 +1149,13 @@ def _spec_cases(path, spec, sample_value):
         yield path, "/" + "a" * p.PATH_MAX, "{field} must be at most {max} characters", label
         yield path, "relative/path", "{field} must be an absolute path", label
         yield path, "/with\0nul", "{field} must be an absolute path", label
+    elif kind == p.K_HOME_PATH:
+        yield path, 5, "{field} must be a string", label
+        yield path, "/" + "a" * p.PATH_MAX, "{field} must be at most {max} characters", label
+        yield path, "relative/path", "{field} must be an absolute path", label
+        yield path, "~user/x", "{field} must be an absolute path", label
+        yield path, "~relative", "{field} must be an absolute path", label
+        yield path, "~/with\0nul", "{field} must be an absolute path", label
     elif kind == p.K_URL:
         yield path, 5, "{field} must be a string", label
         yield path, "https://" + "a" * p.PATH_MAX, "{field} must be at most {max} characters", label
@@ -1817,7 +1829,7 @@ def _full_bound_session_event() -> dict:
             "sandbox_plan": "/" + "s" * (p.PATH_MAX - 1),
             "sandbox_box": BOX,
         },
-        "command_override": _heavy(p.PATH_MAX),
+        "continue_recent": True,
         "cwd": _heavy_path(),
         "agent_cwd": _heavy_path(),
         "pid": p.PID_MAX,

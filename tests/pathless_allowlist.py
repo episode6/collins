@@ -1,6 +1,6 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """The pathless allowlist (split-service spec §3.23, Phase 2's rule): the
-final list, as PR-2.8 leaves it.
+final list, as PR-2.8 made it and PR-3.0 closed it (D59).
 
 Every filesystem and subprocess site `tests/pathless.py` finds in the
 client's modules, named ``module:qualname:call``. Created in PR-2.1 with
@@ -8,9 +8,11 @@ every site the client had then; each chunk of Phase 2 took off the sites
 it moved to the service (git in PR-2.1 and PR-2.2, the editor's files in
 PR-2.3, the tree, quick open and roots in PR-2.4, the file operations in
 PR-2.5, the links and the worktree checks in PR-2.6, the pictures in
-PR-2.7, the tab's and the shells' cwd checks in PR-2.8, D39). What is
-left is in four groups, and `tests/test_client_is_pathless.py` holds
-each to its rule:
+PR-2.7, the tab's and the shells' cwd checks in PR-2.8, D39; PR-3.0
+took the four `gitloads` sites of `RECORDED` off by D54 (6) and the three
+of `UNRULED` by its item 9, and filed the launchers the walker reads
+since its item 7). What is left is two groups and one table, and
+`tests/test_client_is_pathless.py` holds each to its rule:
 
 - `DEVICE`: this device's own files and programs. Nothing here names a
   path of the service's.
@@ -24,22 +26,25 @@ each to its rule:
   accepts and what it does not prove). **Ruled D49** (2026-10-05): the
   group is part of the final list, and the acceptance's "only device
   files" reads "device files and gated local extras".
-- `UNRULED`: three sites that are neither. **Ruled D50** (2026-10-05):
-  recorded, not moved; Phase 2 closes with them. **D54** (2026-10-12)
-  rules what Phase 3 does with the list. The test pins the group so it
-  can only shrink.
-- `RECORDED`: four more that are neither, in `gitloads`, which the walker
-  could not see until it learned to read a function handed on without
-  being called (the 2026-10-13 round, below). Under D50 they are
-  recorded, not moved, and no ruling names them yet. Pinned the same way.
+- `NOT_A_SITE`: what the walker names a site and is none (below).
+
+Gone in PR-3.0 (D59: Phase 3's first chunk ends with the two groups and
+the table only): `UNRULED`, three sites that were neither (recorded by
+D50, ruled by D54 and moved: the clone dialog's folder check and its
+`gh` lookup are the service's `fs.stat` and `service.status`'s `gh`,
+the visible project's directory a per-session `fs.stat` answer the
+window keeps), and `RECORDED`, four `gitloads` sites the walker saw from
+2026-10-13 on (the local runner's `run=subprocess.run` defaults and
+show_diff's `exists`, D54 (6): the service resolves the tool's `file`,
+and a client has no local git runner to fall back on).
 
 **What the tests enforce** (`tests/test_client_is_pathless.py`). A new
 site in a GTK module or a client helper fails the suite until it is
 filed here, and so does an entry nothing matches any more (a site that
 moved comes off the list in the same PR). Filing is a deliberate,
 reviewed edit, not a way round the rule: each group is pinned by its
-exact size (`DEVICE` 67 and per module, `LOCAL_EXTRAS` 16, `UNRULED` at
-most its three, `RECORDED` at most its four), so a site cannot be added
+exact size (`DEVICE` 73 and per module, `LOCAL_EXTRAS` 27), so a site
+cannot be added
 to any of them without that test changing in the same diff, where a
 reviewer sees it. And a match that is **no read at all** — the walker's
 any-receiver words landing on an object that is no path and no file (a
@@ -59,7 +64,9 @@ generator's `p.is_dir()`, `realpath`, `mkstemp`) and the four of
 S2) with `remoteuploads._read`'s two reads of the dropped file it is
 uploading, which the walker could not see while a `Gio.File` method
 needed a receiver it had watched being made. No code moved for any of
-the eighteen. What does not change
+the eighteen. PR-3.0 took the seven of `RECORDED` and `UNRULED` off and
+filed the seventeen launchers it taught the walker to read (six `DEVICE`,
+eleven `LOCAL_EXTRAS`): 100. What does not change
 is what may be on the list: this device's own files and programs, and
 local extras behind the proof.
 """
@@ -156,6 +163,24 @@ DEVICE = frozenset(
         "openwith:_alternatives_terminal:shutil.which",
         "openwith:_configured_terminal_ids:Path.read_text",
         "openwith:_from_command:shutil.which",
+        # -- the launchers (PR-3.0 item 7) handing a program of this device's
+        # something of this device's own: a web or mail address, or a file
+        # this device has. `copylabel.open_uri` opens GitHub, the releases
+        # page and the `gh` install page; `terminal._launch_web` a clicked
+        # http(s) or mailto link (any other scheme is `_launch_local_uri`,
+        # below: PR-3.0 item 8). The attachments panel's `_launch` and
+        # `_launch_default` and the lightbox's Open With… hand an app the
+        # path their callers chose: this device's cached copy (D51, a
+        # picture or a document only: `blobcache.DOCUMENT_SUFFIXES`, PR-3.0
+        # item 6), or the service's own file, which only a `local` client
+        # is handed (the ask is the callers': `AttachmentsView._with_file`,
+        # `lightbox.show_image`) and which is then a file on this device.
+        "copylabel:open_uri:UriLauncher.new",
+        "terminal:_launch_web:UriLauncher.new",
+        "attachpanel:AttachmentsView._launch:FileLauncher.new",
+        "attachpanel:AttachmentsView._launch_default:FileLauncher.new",
+        "lightbox:ImageLightbox._on_open_with_clicked:FileLauncher.new",
+        "lightbox:ImageLightbox.present_over:FileLauncher.new",
     }
 )
 
@@ -170,19 +195,33 @@ LOCAL_EXTRAS = frozenset(
         # service's handed to a program of this device's ------------------------------
         "footerapps:launch_app:Path.is_dir",
         "footerapps:launch_app:subprocess.Popen",
+        "footerapps:launch_app:Launcher.launch",  # the app's info launched on the folder (PR-3.0 item 7)
         "footerapps:launch_app_file:Path.is_file",
+        "footerapps:launch_app_file:Launcher.launch",
         "openwith:launch_terminal:Path.is_dir",
         "openwith:launch_terminal:subprocess.Popen",
         "openwith:open_file_default:Path.is_file",
         "openwith:open_file_default:shutil.which",  # xdg-open
         "openwith:open_file_default:subprocess.Popen",
+        "openwith:open_file_default:AppInfo.launch_default_for_uri",  # with no xdg-open (PR-3.0 item 7)
         # -- the attachments panel's Open With… and Show in Folder ----------------------
         "attachpanel:AttachmentsView._on_show_folder:os.path.exists",
+        "attachpanel:AttachmentsView._on_show_folder:FileLauncher.new",
+        "attachpanel:AttachmentsView._on_show_folder:Launcher.open_containing_folder",
         "attachpanel:AttachmentsView._with_local_file:os.path.isfile",
         # -- Open in Ghostty ---------------------------------------------------------
         "window:MainWindow._on_open_ghostty:Path.is_dir",
         "window:MainWindow._on_open_ghostty:shutil.which",
         "window:MainWindow._on_open_ghostty:subprocess.Popen",
+        # -- the launchers (PR-3.0 item 7): the file manager on a folder, the
+        # transcript revealed, a clicked folder's default app, and a clicked
+        # link of any scheme but http(s) and mailto (PR-3.0 item 8) ----------------
+        "window:MainWindow._on_open_folder:FileLauncher.new",
+        "window:MainWindow._on_reveal_transcript:FileLauncher.new",
+        "window:MainWindow._on_reveal_transcript:Launcher.open_containing_folder",
+        "terminal:_launch_default:FileLauncher.new",
+        "terminal:_launch_local_uri:FileLauncher.new",
+        "terminal:_launch_local_uri:UriLauncher.new",
         # -- a native chooser's starting folder (§3.11: the native choosers are a
         # `local` client's; PR-3.2 gives the others the path picker) --------------------
         "clonedialog:CloneDialog._browse_target:os.path.isdir",
@@ -191,40 +230,41 @@ LOCAL_EXTRAS = frozenset(
     }
 )
 
-# Not this device's files and not local extras: a path of the service's
-# read on this device, in code no chunk of Phase 2 was given.
+# The record (D50): the client's reads of the service's facts the walker
+# cannot see, because they sit in modules it does not walk or go through
+# a helper the service runs too. They are NOT on any list and no test pins
+# them, so this comment is where they are written down. (Until PR-3.0 it
+# stood beside `UNRULED`, the three sites that were neither this device's
+# files nor local extras; D54 ruled them and the record's first items,
+# and PR-3.0 moved them: each says so below.)
 #
 # D50 (split-service spec §6; the PR-2.8 entry's "Rulings of 2026-10-05 on
 # the implementer's questions" has the full text): recorded, not moved.
-# Phase 2 closes with this list. D54 (2026-10-12) rules what Phase 3 does
-# with it, in order: `command_override` leaves the client's resume path
-# (item 2 below; PR-3.1), `resume_cwd` becomes a field of the `item` the
-# service computes (item 1, and `sidebar._abbreviate_path` with it;
-# PR-3.2), native chat is not ported (item 3), and a short allow-list of
-# document suffixes decides what a client that is not local hands to a
-# desktop app. Nothing may be added to `UNRULED`. The same record covers
-# the reads the walker cannot see, because they sit in modules it does
-# not walk or go through a helper the service runs too; they are NOT on
-# any list and no test pins them, so this comment is where they are
-# written down.
+# D54 (2026-10-12; re-homed to PR-3.0 by D59) ruled, in order:
+# `command_override` leaves the client's resume path (item 2 below),
+# `resume_cwd` becomes a field of the `item` the service computes (item
+# 1, and `sidebar._abbreviate_path` with it), native chat is not ported
+# (item 3), a short allow-list of document suffixes decides what a client
+# that is not local hands to a desktop app, the client's `~` expansions
+# go to the service, and the service resolves show_diff's `file`. A read
+# no ruling names is recorded here, not moved.
 #
 # Line numbers are as of 2026-10-13 (the round after the Fable review of
-# PR 615, on PR 614's `3aaed7b`; the thirteen fix rounds below this PR
-# moved most of them, and a later rebase may move them again by a few
-# lines). Record only: under
-# D50 nothing here was moved or gated.
+# PR 615, on PR 614's `3aaed7b`); a later rebase moves them.
 #
 # From the first report:
 # - `toolclient.resolve_file` (`os.path.isfile`, toolclient.py:514) and
 #   `toolclient.start_session` (`os.path.isdir`, `expanduser`,
-#   toolclient.py:878-879)
+#   toolclient.py:878-879). PR-3.0 (D54 (5)): the `expanduser`s went, a
+#   `~` path is the service's `fs.stat`, and start_session's `isdir` is
+#   one; `resolve_file`'s `isfile` of a path that is no `~` is left.
 # - `dialogs.details_dialog` through `provider.parse_details(jsonl_path)`
 #   (dialogs.py:846)
 # - the replay (`replaymodel.read_session_turns`, replayview.py:32) and
 #   `window._open_session_file` through `sessions.session_from_file`
 #   (window.py:7072)
 # - `clonerepo.destination_status` (disk reads per keystroke in the clone
-#   dialog, clonedialog.py:337)
+#   dialog, clonedialog.py:337; PR-3.2's path picker by §3.11)
 # - `panelhistory.load_all` (terminal.py:5629) and `panelhistory.delete`
 #   (terminal.py:5709, window.py:2761, 2871, 2952)
 # - `pkgrepos` (sidebar.py:2049, window.py:6275); `clisetup.validate`
@@ -242,7 +282,9 @@ LOCAL_EXTRAS = frozenset(
 #    the only use of the answer: the read (the transcript's tail and an
 #    `is_dir`, on every row right-click) is ahead of its gate. Asking it
 #    only when `local` would be a gate, not a move; D54 (2) takes the read
-#    off the client instead, so it is recorded and left.
+#    off the client instead. **Moved in PR-3.0 (item 3)**: the service's
+#    scan works it out (`Session.resume_dir`, the `item`'s `resume_cwd`)
+#    and the five callers read `Session.resume_at`.
 # 2. This device's `shutil.which("claude")` standing in for the service's
 #    CLI (providers.py:359 `Provider.available()`): through
 #    `available_providers()` (window.py:501, 517, 522) and
@@ -251,10 +293,14 @@ LOCAL_EXTRAS = frozenset(
 #    `new_command()` (toolclient.py:999), and `continue_command()` at
 #    window.py:3006, whose result goes to the service as the spawn's
 #    `command_override`: this device's `claude` path typed into the
-#    service's shell.
+#    service's shell. **Moved in PR-3.0 (item 1)**: the service assembles
+#    every command (`continue_recent` on the spawn), and the client offers
+#    what `remotecli` says the service has.
 # 3. Native chat runs the agent in the client process:
 #    `chatsession.py:193` (`subprocess.Popen(argv, cwd=self.cwd)`, with
 #    `chats.chat_cwd_or_fallback`), built from window.py:3613, 3630.
+#    **Gated in PR-3.0 (item 2)**: a local extra, hidden for a client that
+#    is not local; slated for removal.
 # 4. `~/.claude.json` read by the client: `sessions.read_mcp_config()`
 #    (dialogs.py:712) and `sessions.configured_mcp_servers(session.cwd)`
 #    (dialogs.py:848).
@@ -292,7 +338,10 @@ LOCAL_EXTRAS = frozenset(
 #    (sidebar.py:158-168: the "New session in {path}" labels at :301,
 #    :315 and :652, and every session row's path label at :878, the one
 #    every row shows; missed until the Fable review of PR 615, and D54
-#    sends it with item 1).
+#    sends it with item 1). **PR-3.0 (item 3)**: `service.status`'s `home`
+#    is kept on the link (`apilink.service_home`), the three abbreviate
+#    with it and sidebar.py:2414's shell row falls back to it; the
+#    terminal's and window.py:2006's cwd fallbacks are left (D39).
 # For the ruling, not a read: `footer_apps` is a `SERVICE_SETTINGS` key
 #    (state.py:330, :517) whose values are desktop-entry ids of the apps
 #    of the device that set them. Preferences hides the group from a
@@ -312,19 +361,20 @@ LOCAL_EXTRAS = frozenset(
 #   reference printed in the terminal), `gitloads.py:457` (show_diff's
 #   path argument), and `clonerepo.parent_directory` / `destination`
 #   (clonedialog.py:118, 331, 336, 338, 385; prefs.py:464, 477: the
-#   `clone_directory` setting, a service setting holding `~/…`).
+#   `clone_directory` setting, a service setting holding `~/…`). PR-3.0:
+#   the first two are the service's (`fs.stat` takes a `~`; the diff
+#   tools' files are resolved on the service), and `parent_directory`
+#   expands with the service's home once it said.
 # - `gitinfo`'s `.git` reads (`gitfiles.*`, some thirty call sites in
 #   gitinfo.py) and every `gitops.*` call of `gitpage`, `gitsidebar`,
 #   `gitinfo` and `window` (some fifty: `read_diff`, `side_bytes` and
 #   `tree_state_signature` at gitpage.py:1315, 1316, 1389, `read_status`,
 #   `run_plan`, `commit`, …; each takes the transport when one is
-#   installed) run on this
-#   device when the service's hello lacks the `git` capability
-#   (`App` logs "git runs locally" and installs no transport). Every
-#   service since PR-2.1 has the capability, so this is a fallback for an
-#   older service, which the protocol window does not admit today. The
-#   three `subprocess.run` sites of `RECORDED` below are the same
-#   fallback, seen by the walker.
+#   installed) ran on this device when the service's hello lacked the
+#   `git` capability. Gone in PR-3.0 (D54 (6)): the app installs the
+#   transport on every hello, so a client has no local git runner left
+#   (a service without the capability refuses each ask), and the three
+#   `gitloads` `run=subprocess.run` defaults the walker saw went with it.
 # - Seen and judged the device's own (not service facts): the update
 #   check's `prstatus.gh_succeeds` / `gh_json` (updatecheck.py:169, 191:
 #   this device's `gh` asking GitHub about Collins' releases),
@@ -403,15 +453,12 @@ LOCAL_EXTRAS = frozenset(
 # - **A star import** (`from os.path import *`, then a bare `isdir(p)`),
 #   and a module or `os.path` itself bound to a name (`sp = subprocess;
 #   sp.run(a)`).
-# - **The launchers**: `Gtk.FileLauncher`, `Gtk.UriLauncher`,
-#   `Gio.AppInfo.launch` / `launch_uris` / `launch_default_for_uri`,
-#   `open_containing_folder`. They open nothing themselves; they hand a
-#   path to a program of this device's, which is what a local extra is.
-#   Every one today is gated by hand or works on this device's cached
-#   copy (D51): attachpanel.py:507-524, lightbox.py:339, 776,
-#   terminal.py:319-322, 813, window.py:6098, 6398, footerapps.py:92,
-#   120, openwith.py:163, copylabel.py:59 (GitHub, releases, the `gh`
-#   install page).
+# - **The launchers** are seen since PR-3.0 (item 7: `Gtk.FileLauncher.new`,
+#   `Gtk.UriLauncher.new`, `Gio.AppInfo.launch_default_for_uri`,
+#   `open_containing_folder` and `launch_uris*` on any receiver) and filed
+#   above; what stays unseen of them is `launch` on an app's info whose
+#   name does not say so (`app.launch(files, ctx)`: `launch` is a
+#   `Gtk.FileLauncher`'s word too, whose `new` is the site).
 # - **A property store**: `picture.props.file = g` / `.props.filename =`
 #   (an `ast.Attribute` store, not a call); the constructor and
 #   `set_property` forms are seen.
@@ -453,59 +500,13 @@ LOCAL_EXTRAS = frozenset(
 # anything about a helper the function calls before it asks, about a
 # rebinding the AST does not show (`globals()`, a `global` statement in
 # another function, `setattr` with a name it cannot read),
-# nor about a read of the kinds above. All sixteen were read by hand as
-# well.
+# nor about a read of the kinds above. The sixteen of PR-2.8 were read by
+# hand as well, and so were PR-3.0's eleven launchers.
 #
 # Whether the walker should cover the unwalked modules is part of the
 # same ruling.
-UNRULED = frozenset(
-    {
-        # The clone dialog: whether the clone's folder is there once the job
-        # says it is done, and whether `gh` (the service's, which does the
-        # clone) is installed, for the destination note's "with gh / git".
-        "clonedialog:CloneDialog._clone_done:os.path.isdir",
-        "clonedialog:CloneDialog._refresh_destination:shutil.which",
-        # "Is the visible session's project directory still there", asked
-        # synchronously by the five ways a new session picks its folder.
-        "window:MainWindow._visible_project_dir:Path.is_dir",
-    }
-)
 
-# Neither this device's files nor local extras, and seen by the walker
-# only since 2026-10-13: each is a site's function named as a default
-# argument, not called where it is written (`run=subprocess.run`,
-# `exists=os.path.exists`), which the walker did not read before. D50's
-# rule for what is neither: recorded, not moved. No ruling names these
-# four (D54 was made on the three above); they go with the next one.
-RECORDED = frozenset(
-    {
-        # The local runner `gitops.run_git` falls back to when no transport
-        # is installed (a service whose hello lacks the `git` capability:
-        # the fallback recorded above for `gitinfo` and `gitpage`). With the
-        # transport, which every service since PR-2.1 has, `run` is unused
-        # and git runs on the service. Callers: gitpage.py:1210, 1322
-        # (the breadcrumb's subject, the commit card), toolclient.py:160.
-        "gitloads:commit_message:subprocess.run",
-        "gitloads:commit_subject:subprocess.run",
-        "gitloads:resolve_commit:subprocess.run",
-        # show_diff's `file` argument: a relative path is taken against the
-        # agent's cwd when it is only there, and "there" is asked of this
-        # device's disk when the client's half runs it (toolclient.py:566,
-        # :620); the service's half asks its own (service/diffs.py:200).
-        # **What goes wrong for a client on another machine**: an agent that
-        # `cd`ed into `sub/` and names `foo.py` (meaning `sub/foo.py`) gets
-        # `foo.py`, which is not in the diff, so show_diff reveals nothing
-        # or refuses and annotate_diff / highlight_diff add nothing, where
-        # the same call with no client attached resolves right. If this
-        # device has a checkout at the same path, its disk decides instead.
-        # And `gitloads.py:457`'s `expanduser` puts this device's home into
-        # a `~/…` argument on the same path. It fails soft (a refusal, a
-        # mark not placed); read, not driven.
-        "gitloads:diff_file_path:os.path.exists",
-    }
-)
-
-ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED | RECORDED
+ALLOWLIST = DEVICE | LOCAL_EXTRAS
 
 # What the walker names a site and is none: no file of anyone's is opened
 # and no program started, because the receiver is not a path, not a

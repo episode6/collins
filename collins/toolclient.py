@@ -56,8 +56,11 @@ from . import (
     editorfiles,
     gitinfo,
     gitloads,
+    linkpatterns,
     mcptools,
     notifycenter,
+    remotecli,
+    remotefiles,
     remoteimages,
 )
 from .api.protocol import RequestRefused
@@ -67,6 +70,11 @@ from .sessions import worktree_project_root
 from .terminal import TerminalTab
 
 log = logging.getLogger(__name__)
+
+# How long a tool's `fs.stat` of a path the agent named may hold the main
+# loop (a `~` path, start_session's cwd): the service answers a stat on a
+# worker at once, so this only bounds a service that went away mid-call.
+STAT_TIMEOUT_S = 5.0
 
 # The start_session tool holds its reply until the spawned session has taken
 # the prompt and reported its id (see _BackgroundSpawn). This is the deadline
@@ -503,13 +511,20 @@ class ToolClient:
         Relative paths try the running agent's cwd first (it may have cd'd
         into a worktree), then the tab's project root — the same order
         clickable file references resolve in (terminal._reference_roots).
+        A `~` is the service's home: the service expands it (`fs.stat`,
+        PR-3.0 item 4), never this device.
         """
-        expanded = os.path.expanduser(raw)
-        if os.path.isabs(expanded):
-            trials = [expanded]
+        if linkpatterns.home_led(raw):
+            try:
+                found = remotefiles.stat_path(raw, timeout=STAT_TIMEOUT_S)
+            except RequestRefused:
+                return None
+            return os.path.normpath(found.path) if found.is_file and found.path else None
+        if os.path.isabs(raw):
+            trials = [raw]
         else:
             roots = [tab.current_agent_cwd(), tab.editor_root]
-            trials = [os.path.join(root, expanded) for root in roots if root]
+            trials = [os.path.join(root, raw) for root in roots if root]
         for trial in trials:
             if os.path.isfile(trial):
                 return os.path.normpath(trial)
@@ -563,7 +578,9 @@ class ToolClient:
             )
         path = None
         if "file" in args:
-            path = gitloads.diff_file_path(args["file"], str(root), cwd)
+            # The service resolved `file` before it sent the call (the
+            # agent's cwd, a `~`: PR-3.0 item 5).
+            path = gitloads.diff_file_path(args["file"], str(root))
             if path is None:
                 return False, f"'file' must be a path inside the repository: {args['file']!r}"
         else:
@@ -612,12 +629,13 @@ class ToolClient:
         """The tool's file → repo-relative path (gitloads.diff_file_path)
         against the repository *page* shows — not the tab's live cwd,
         which an agent may have `cd`ed out of since show_diff — or None
-        while the page is on its card. The cwd only breaks a tie for a
-        relative path that exists there and not under the root."""
+        while the page is on its card. A relative path only there against
+        the agent's cwd was made absolute by the service before the call
+        came (`service.diffs.resolve_file_arg`, PR-3.0 item 5)."""
         root = page.repo_root
         if root is None:
             return None
-        return lambda raw: gitloads.diff_file_path(raw, str(root), tab.current_agent_cwd())
+        return lambda raw: gitloads.diff_file_path(raw, str(root))
 
     def diff_context(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         _window, tab = found
@@ -875,9 +893,23 @@ class ToolClient:
 
         raw_cwd = args.get("cwd")
         if raw_cwd:
-            cwd = os.path.abspath(os.path.expanduser(raw_cwd))
-            if not os.path.isdir(cwd):
+            # Whether it is a directory is the service's answer, a `~`
+            # expanded there with its home (`fs.stat`, PR-3.0 item 4); a
+            # relative path is taken against the agent's own cwd, the
+            # directory the agent would mean by it.
+            asked = raw_cwd
+            if not (os.path.isabs(asked) or linkpatterns.home_led(asked)):
+                base = tab.current_agent_cwd()
+                asked = os.path.join(base, asked) if base else ""
+            found = None
+            if asked:
+                try:
+                    found = remotefiles.stat_path(os.path.normpath(asked), timeout=STAT_TIMEOUT_S)
+                except RequestRefused:
+                    found = None
+            if found is None or not found.is_dir:
                 return False, f"No such directory: {raw_cwd}"
+            cwd = os.path.normpath(found.path or asked)
         else:
             # The agent's live cwd — a worktree, once the CLI has moved — the
             # same root open_in_editor resolves relative paths against.
@@ -995,8 +1027,9 @@ class ToolClient:
             options = replace(options, sandbox_plan=sibling_plan, sandbox_box=sibling_box)
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
-        # anything is spawned.
-        if provider.new_command(options) is None:
+        # anything is spawned. The CLI is the service's (it assembles the
+        # command, PR-3.0 item 1): its word, never this process's PATH.
+        if remotecli.missing():
             _drop_sibling_box(sibling_plan, sibling_box)
             return False, f"The {provider.name} CLI isn't available to start a session."
 

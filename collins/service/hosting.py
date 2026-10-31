@@ -409,7 +409,7 @@ class SessionRecord:
             "fork": bool(session.fork),
             "provider": str(getattr(session.provider, "id", "") or "")[: protocol.SHORT_MAX],
             "options": options_record(session.options),
-            "command_override": session.command_override,
+            "continue_recent": bool(session.continue_recent),
             "cwd": session.cwd,
             "agent_cwd": self._sent.get("agent_cwd", session.cwd),
             "pid": session.child_pid(),
@@ -539,6 +539,17 @@ class SessionRecord:
 
     def alive(self) -> bool:
         return not self.exited
+
+    def recorded_cwd(self) -> str | None:
+        """The store row's starting directory for the session, None with no
+        store or no row (a fresh spawn)."""
+        store = getattr(self.core, "store", None)
+        session_id = self.session.session_id
+        if store is None or not session_id:
+            return None
+        row = store.get_session(session_id)
+        cwd = getattr(row, "cwd", None) if row is not None else None
+        return cwd if isinstance(cwd, str) and cwd else None
 
     def paint(self, text: str) -> None:
         line = paint_line(text)

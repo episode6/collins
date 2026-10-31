@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-20. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -2220,9 +2220,9 @@ class App(Adw.Application):
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
         # Git goes over the link too (PR-2.1, §3.23): gitinfo reads the
-        # per-cwd mirror and gitops' runners send builders by name — when
-        # the service says it serves them (the `git` capability); against
-        # an older service git stays this machine's, as before.
+        # per-cwd mirror and gitops' runners send builders by name, always
+        # (PR-3.0 item 5: no local fallback; a service without the `git`
+        # capability refuses each ask).
         self._install_git_transport()
         # And the editor's files (PR-2.3): behind the `files` capability,
         # decided on every hello like git's.
@@ -2231,15 +2231,15 @@ class App(Adw.Application):
         self._refresh_service_status()
 
     def _install_git_transport(self) -> None:
-        """Route git through the service when its hello lists the `git`
-        capability, locally otherwise — decided on every hello (the first
-        connect and each reconnect: the service may be another build)."""
+        """Route git through the service, on every hello (the first connect
+        and each reconnect: the service may be another build). There is no
+        local fallback any more (PR-3.0 item 5): the repositories are the
+        service's, and every service since PR-2.1 has the `git`
+        capability; one without it refuses each ask, which fails soft."""
         link = self._service_link
-        if protocol.CAP_GIT in (link.hello.get("caps") or ()):
-            remotegit.install(link)
-        else:
-            log.warning("the service has no git capability: git runs locally")
-            remotegit.uninstall()
+        if protocol.CAP_GIT not in (link.hello.get("caps") or ()):
+            log.warning("the service has no git capability: its git asks will be refused")
+        remotegit.install(link)
 
     def _install_file_transport(self) -> None:
         """The editor's reads, writes and file watches go to the service
@@ -2265,6 +2265,10 @@ class App(Adw.Application):
             status = {}
         sandboxstatus.set_probe_reason(status.get("sandbox"))
         remotecli.set_found(status.get("cli"))
+        # The service's home, kept on the link (PR-3.0 item 3): what the
+        # service's paths are abbreviated with, never this device's.
+        home = status.get("home")
+        self._service_link.service_home = home if isinstance(home, str) else None
 
     # -- the connection's life (§3.20) ------------------------------------------
 

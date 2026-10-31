@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check for the local extras' gate (split-service spec §3.12,
-PR-2.8), the Markdown export over the API and where a spawn lands (D39).
+PR-2.8; PR-3.0), the Markdown export over the API and where a spawn lands
+(D39).
 
 A window on the service's machine has proved it (`local`, D11) and keeps
 the things that hand a path of the service's to something on this device:
@@ -24,9 +25,9 @@ copy otherwise, fetched whole from the service (`kind=file&as=file`), which
 serves it only when the session's agent named it. Those fetches are made
 over a second link that never proved `local`, since the service's own
 view of the app's link cannot be taken away from here: a file the session
-was sent opens from the cache, a `.desktop` among them is cached as
-`.bin` and goes to the app chooser, a project file nobody named is
-refused and said so.
+was sent opens from the cache, a `.desktop` among them is handed to no app
+and has no Open With… row (PR-3.0 item 6: only pictures and plain
+documents are), a project file nobody named is refused and said so.
 
 Then D39: a session whose project directory is gone is opened; the tab
 passes the cwd it has, the service's `spawn` falls back to its home and
@@ -167,6 +168,11 @@ class _Launcher:
 
 Gtk.FileLauncher.new = staticmethod(lambda gfile: _Launcher(gfile.get_path() or gfile.get_uri()))
 Gtk.UriLauncher.new = staticmethod(lambda uri: _Launcher(uri))
+# GIO's default handler for a URI (`openwith.open_file_default` without an
+# xdg-open; a launcher the walker reads since PR-3.0 item 7): recorded too.
+Gio.AppInfo.launch_default_for_uri = staticmethod(
+    lambda uri, _context=None: LAUNCHER_CALLS.append(("default", uri)) or True
+)
 
 import collins.attachpanel as attachpanel_mod  # noqa: E402
 import collins.terminal as terminal_mod  # noqa: E402
@@ -316,6 +322,9 @@ def surfaces(win, local: bool) -> None:
     row_labels, row_icons, group_labels, group_icons = sidebar_menus(win)
     for label in ("Open in Ghostty", "Open In…", "Reveal transcript"):
         check(f"[{say}] the session menu's {label}", (label in row_labels) is local, row_labels)
+    # Native chat runs the agent in this process (D54 (3), PR-3.0 item 2).
+    native = "Continue in native chat (experimental)"
+    check(f"[{say}] the session menu's {native}", (native in row_labels) is local, row_labels)
     check(f"[{say}] the project menu's Open In…", ("Open In…" in group_labels) is local, group_labels)
     # The submenu's rows are widgets (an icon each): the footer app, the
     # file manager, and a terminal where the desktop names one.
@@ -344,6 +353,19 @@ def surfaces(win, local: bool) -> None:
     readme = f"{PROJECT}/README.md"
     entries = openwith.file_open_with_entries([APP_ID], readme)
     check(f"[{say}] a file's Open In… rows", bool(entries) is local, entries)
+    # The default app for a file of the service's, through GIO's own handler
+    # (PR-3.0 item 7: a launcher site, behind the ask): this device's
+    # xdg-open is hidden for the call so the recorded handler is the road.
+    before = len(LAUNCHER_CALLS)
+    real_which = openwith.shutil.which
+    openwith.shutil.which = lambda name, *a, **k: None if name == "xdg-open" else real_which(name, *a, **k)
+    try:
+        opened = openwith.open_file_default(readme)
+    finally:
+        openwith.shutil.which = real_which
+    made = LAUNCHER_CALLS[before:]
+    expected = [("default", Gio.File.new_for_path(readme).get_uri())] if local else []
+    check(f"[{say}] a file's default app (GIO's handler)", made == expected and opened is local, made)
 
     # The attachments panel: a bare view on the session, its menu read off
     # the popover. The file is one the session was sent (its uploads): a
@@ -462,17 +484,22 @@ def _not_local_attachments(view, document: Attachment, notes: list[str]) -> None
         made = LAUNCHER_CALLS[before:]
         check("[not local] Open With… asks which app, for the cached copy",
               made == [("ask", copy), ("launch", copy)], made)
-        # A file whose name would make a desktop run it: cached as `.bin`,
-        # and the chooser is shown instead of a default app.
+        # A file whose name would make a desktop run it, or that is no
+        # picture or plain document at all: no app is handed it (PR-3.0
+        # item 6, `blobcache.DOCUMENT_SUFFIXES`), there is no Open With…
+        # row for it, and opening the row says why.
         launcher = Attachment(key=state["launcher"], kind="file")
         view._records[launcher.key] = launcher
-        before = len(LAUNCHER_CALLS)
+        labels = attachment_menu(view, launcher)
+        check("[not local] a .desktop file has no Open With… row", "Open With…" not in labels, labels)
+        before, said = len(LAUNCHER_CALLS), len(notes)
         view.open(launcher)
-        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) >= before + 2, timeout_s=5.0)
+        view._on_open_with(None, GLib.Variant("s", launcher.key))
+        e2e_service.wait_until(lambda: len(notes) >= said + 2, timeout_s=5.0)
         made = LAUNCHER_CALLS[before:]
-        check("[not local] a .desktop file is never opened by its name",
-              len(made) == 2 and made[0][0] == "ask" and made[1][0] == "launch"
-              and made[1][1].startswith(cache) and made[1][1].endswith(".bin"), made)
+        check("[not local] a .desktop file is never handed to an app",
+              made == [] and len(notes) == said + 2 and "plain documents" in notes[-1],
+              (made, notes[said:]))
         # A file inside the project that the session's agent never named is
         # not the blob GET's to hand over: said out loud, nothing launched.
         unnamed = Attachment(key=f"{PROJECT}/notes.pdf", kind="file")
@@ -503,6 +530,19 @@ def footer(tab, local: bool) -> None:
     terminal_mod._launch_uri(tab.terminal, "https://example.test/")
     check(f"[{say}] a clicked web link opens either way",
           LAUNCHER_CALLS[before:] == [("launch", "https://example.test/")], LAUNCHER_CALLS[before:])
+    # The schemes (PR-3.0 item 8): a mail address opens either way; any
+    # other scheme only on the service's machine.
+    for uri in ("mailto:someone@example.test", "HTTP://example.test/upper"):
+        before = len(LAUNCHER_CALLS)
+        terminal_mod._launch_uri(tab.terminal, uri)
+        check(f"[{say}] a clicked {uri.split(':')[0]} link opens either way",
+              LAUNCHER_CALLS[before:] == [("launch", uri)], LAUNCHER_CALLS[before:])
+    for uri in ("ssh://host.example.test/home/u", "vscode://file/etc/hosts", "smb://host/share"):
+        before = len(LAUNCHER_CALLS)
+        terminal_mod._launch_uri(tab.terminal, uri)
+        made = LAUNCHER_CALLS[before:]
+        wanted = [("launch", uri)] if local else []
+        check(f"[{say}] a clicked {uri.split(':')[0]}: link", made == wanted, made)
 
 
 seed = AppState()

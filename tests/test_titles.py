@@ -556,7 +556,7 @@ def test_submit_hands_the_runner_its_setting():
 def test_run_claude_refuses_a_none_preference(app_state, monkeypatch):
     # The store queues nothing under None, so a run that reads the preference
     # and finds it is a bug — and a fatal one, not a model to fall back to.
-    monkeypatch.setattr(titles.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(titles.shutil, "which", lambda _name, **_: "/usr/bin/claude")
     monkeypatch.setattr(
         titles.subprocess, "run", lambda *a, **k: pytest.fail("claude must not run")
     )
@@ -569,7 +569,7 @@ def test_run_claude_refuses_a_none_preference(app_state, monkeypatch):
 def test_run_claude_takes_an_explicit_setting_over_a_none_preference(app_state, monkeypatch):
     # A regenerate under None: the store passes "" and the run resolves the
     # automatic Haiku without ever reading the preference.
-    monkeypatch.setattr(titles.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(titles.shutil, "which", lambda _name, **_: "/usr/bin/claude")
     monkeypatch.setattr(titles, "pick_model", lambda setting, prefer: f"{prefer}:{setting!r}")
     argv = []
 
@@ -593,7 +593,7 @@ def test_run_claude_takes_an_explicit_setting_over_a_none_preference(app_state, 
 def test_a_title_run_is_pinned_at_low_effort(monkeypatch, app_state):
     # A five-word summary gains nothing from thinking, and the pin keeps
     # whatever /effort saved in the user's settings out of every title.
-    monkeypatch.setattr(titles.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(titles.shutil, "which", lambda _name, **_: "/usr/bin/claude")
     monkeypatch.setattr(titles, "pick_model", lambda setting, prefer: "haiku")
     argv = []
 

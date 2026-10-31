@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -35,7 +34,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import apilink, clonerepo, ghsetup, jobclient  # noqa: E402
+from . import apilink, clonerepo, ghsetup, jobclient, remotefiles  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -61,6 +60,9 @@ class CloneDialog(Adw.Dialog):
         self._job: str | None = None  # the clone job in flight
         self._list_job: str | None = None
         self._closed = False
+        # The service's word on its gh (`service.status`'s `gh`: "ready",
+        # "missing", "logged-out"), None until it said (PR-3.0 item 9).
+        self._service_gh: str | None = None
         self.set_content_width(600)
         self.set_content_height(640)
         self.set_follows_content_size(False)
@@ -175,6 +177,23 @@ class CloneDialog(Adw.Dialog):
         self.connect("closed", self._on_closed)
         self._refilter()
         self._start_fetch()
+        self._ask_service_gh()
+
+    def _ask_service_gh(self) -> None:
+        """Whether the service has a gh to clone with (`service.status`'s
+        `gh`, off the main loop): the destination note's "with gh / git"
+        says what the service will run, so it is the service's answer, not
+        this device's PATH (PR-3.0 item 9). The note says "git" until it
+        lands."""
+
+        def landed(kind: str, value) -> None:
+            if self._closed or kind != "ok" or not isinstance(value, dict):
+                return
+            gh = value.get("gh")
+            self._service_gh = gh if isinstance(gh, str) else None
+            self._refresh_destination()
+
+        remotefiles.off_main(lambda: apilink.call({"t": "service.status"}), landed, name="clone-gh")
 
     # -- the repository list -------------------------------------------------
 
@@ -356,7 +375,10 @@ class CloneDialog(Adw.Dialog):
             note = _("A file is in the way: part of that path isn't a folder")
         else:
             origin = source.github_name or source.spec
-            tool = "gh" if source.kind == clonerepo.GITHUB and shutil.which("gh") else "git"
+            # The service clones with its gh when it has one (`service.status`'s
+            # `gh`, PR-3.0 item 9; `_ask_service_gh`), else with git.
+            has_gh = self._service_gh in ("ready", "logged-out")
+            tool = "gh" if source.kind == clonerepo.GITHUB and has_gh else "git"
             note = _("A new folder, cloned from {origin} with {tool}").format(
                 origin=origin, tool=tool
             )
@@ -438,13 +460,26 @@ class CloneDialog(Adw.Dialog):
         self._job = None
         if self._closed:
             return
-        self._set_busy(False)
         dest = event.result.get("path")
-        if event.ok and isinstance(dest, str) and os.path.isdir(dest):
-            self.close()
-            self._on_cloned(dest)
+        if not (event.ok and isinstance(dest, str) and os.path.isabs(dest)):
+            self._set_busy(False)
+            self._show_error(event.text or _("The clone failed"))
             return
-        self._show_error(event.text or _("The clone failed"))
+
+        # Whether the clone's folder is there is the service's answer
+        # (`fs.stat` on the job's `done`, PR-3.0 item 9): the folder is on
+        # its machine, not necessarily on this one.
+        def landed(kind: str, value) -> None:
+            if self._closed:
+                return
+            self._set_busy(False)
+            if kind == "ok" and value.is_dir:
+                self.close()
+                self._on_cloned(dest)
+                return
+            self._show_error(event.text or _("The clone failed"))
+
+        remotefiles.off_main(lambda: remotefiles.stat_path(dest), landed, name="clone-done")
 
     def _show_error(self, text: str) -> None:
         self._error.set_text(text)

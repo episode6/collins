@@ -297,13 +297,23 @@ def test_resolve_skips_none_roots(project) -> None:
     assert resolved == (str(project / "collins" / "foo.py"), None, None)
 
 
-def test_resolve_expands_home(project, monkeypatch) -> None:
+def test_a_home_led_path_is_expanded_by_whoever_owns_the_disk(project, monkeypatch) -> None:
+    """PR-3.0 item 4: a `~` is handed to *exists* as written; the answer's
+    path (the owner's expansion) is what comes back. The attachment log's
+    `attachrecords.here` expands with the service's home; a gate that does
+    not expand finds nothing, so no client ever expands with its own."""
+    from collins import attachrecords
+
     monkeypatch.setenv("HOME", str(project))
-    assert resolve_file_reference("~/collins/foo.py", []) == (
+    assert resolve_file_reference("~/collins/foo.py", [], attachrecords.here) == (
         str(project / "collins" / "foo.py"),
         None,
         None,
     )
+    asked = []
+    assert resolve_file_reference("~/collins/foo.py", [str(project)], lambda p: asked.append(p)) is None
+    assert asked == ["~/collins/foo.py"]  # as written, never joined to a root
+    assert linkpatterns.resolve_path("~/x", [], lambda p: "/srv/u/x") == "/srv/u/x"
 
 
 def test_resolve_normalizes_dot_segments(project) -> None:
@@ -699,3 +709,32 @@ def test_the_gates_use_the_callers_exists_and_never_the_local_disk() -> None:
         "collins/fo", "  collins/fo", [], ["o.py"], ["/srv/project"], exists
     )
     assert stitched == ("/srv/project/collins/foo.py", None, None)
+
+
+# -- the schemes a client that is not local opens (PR-3.0 item 8) ------------------------
+
+_REMOTE_SAFE = {
+    "http://example.test/a": True,
+    "https://example.test/a": True,
+    "HTTPS://example.test/a": True,  # a scheme is one however it is cased
+    "mailto:someone@example.test": True,
+    "MailTo:someone@example.test": True,
+    "file:///etc/passwd": False,
+    "FILE:///etc/passwd": False,
+    "ssh://host/home/u": False,
+    "sftp://host/x": False,
+    "ftp://host/x": False,
+    "vscode://file/home/u/a.py": False,
+    "javascript:alert(1)": False,
+    "data:text/html,hi": False,
+    "smb://host/share": False,
+    "x-terminal-emulator:ls": False,
+    "httpx://example.test/": False,  # a prefix is not the scheme
+    "www.example.test": False,  # no scheme: the caller makes it http first
+    "": False,
+}
+
+
+@pytest.mark.parametrize("uri", sorted(_REMOTE_SAFE))
+def test_only_the_web_and_mail_schemes_are_remote_safe(uri) -> None:
+    assert linkpatterns.scheme_is_remote_safe(uri) is _REMOTE_SAFE[uri]

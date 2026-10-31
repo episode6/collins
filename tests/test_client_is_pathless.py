@@ -12,14 +12,14 @@ reviewer sees). The git page's, gitinfo's and window._run_git's sites are gone
 since PR-2.1 (git goes over the API), and the walker covers the modules
 PR-2.1 added for it.
 
-The final list (PR-2.8) is four groups with a rule each: `DEVICE` (this
-device's own files and programs), `LOCAL_EXTRAS` (each behind
-`apilink.is_local()` in its own function; kept on the list by ruling
-D49), `UNRULED` (pinned, so it only shrinks; recorded and not moved by
-ruling D50, with the reads the walker cannot see listed beside the group
-in `tests/pathless_allowlist.py`) and `RECORDED` (four `gitloads` sites
-the walker has seen only since it reads a function handed on without
-being called; pinned the same way).
+The final list (PR-2.8, closed by PR-3.0: D59) is two groups with a
+rule each: `DEVICE` (this device's own files and programs, the launchers
+of a web address or of a file this device has among them) and
+`LOCAL_EXTRAS` (each behind `apilink.is_local()` in its own function;
+kept on the list by ruling D49), and `NOT_A_SITE`. The reads the walker
+cannot see are recorded in `tests/pathless_allowlist.py` (the D50
+record). `UNRULED` (three sites) and `RECORDED` (four `gitloads`
+default arguments) are gone since PR-3.0 (D54).
 
 The walker's own reach is pinned at the end of this file: a table of
 spellings of a read it must catch, and a table of the ones it is known
@@ -32,7 +32,7 @@ import ast
 
 import pathless
 import pytest
-from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE, RECORDED, UNRULED
+from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE
 
 WHAT_TO_DO = """
 Each is a call the walker reads as the client opening a file or starting a
@@ -55,8 +55,7 @@ so one of these is the answer, in this order:
 
 The lists are in tests/pathless_allowlist.py. Each is pinned in this file
 (`test_each_group_is_pinned…`, `test_what_is_no_site_is_pinned…`), so filing
-means editing the pin in the same diff. `UNRULED` and `RECORDED` take nothing
-new."""
+means editing the pin in the same diff."""
 
 
 def test_no_site_outside_the_allowlist():
@@ -91,10 +90,10 @@ def test_the_git_pages_sites_are_gone():
     for prefix in ("gitpage:", "gitinfo:", "remotegit:", "gitpatch:"):
         left = sorted(s for s in found if s.startswith(prefix))
         assert not left, left
-    # `gitloads` calls nothing itself; what the walker finds there are its
-    # default arguments (the local runner behind `gitops`' transport, and
-    # show_diff's `exists`), which D50 records: `RECORDED`, and no other.
-    assert {s for s in found if s.startswith("gitloads:")} == RECORDED
+    # `gitloads` calls nothing itself, and since PR-3.0 (D54 (6)) names
+    # no site's function as a default argument either: no local runner,
+    # no `exists` of this device's.
+    assert {s for s in found if s.startswith("gitloads:")} == set()
     # The sidebar's last one, the file row's "is there a file to open"
     # check, is `fs.stat`'s since PR-2.4.
     assert sorted(s for s in found if s.startswith("gitsidebar:")) == []
@@ -170,9 +169,15 @@ def test_the_walker_covers_the_gtk_modules_and_the_helpers():
 # -- the final list (PR-2.8) ------------------------------------------------------------------
 
 
-def test_the_list_is_four_groups_that_do_not_overlap():
-    groups = (DEVICE, LOCAL_EXTRAS, UNRULED, RECORDED)
-    assert ALLOWLIST == DEVICE | LOCAL_EXTRAS | UNRULED | RECORDED
+def test_the_list_is_two_groups_that_do_not_overlap():
+    """D59: Phase 3's first chunk ends the list with `DEVICE`,
+    `LOCAL_EXTRAS` and `NOT_A_SITE` only; nothing else is importable."""
+    import pathless_allowlist
+
+    groups = (DEVICE, LOCAL_EXTRAS)
+    assert ALLOWLIST == DEVICE | LOCAL_EXTRAS
+    assert not hasattr(pathless_allowlist, "UNRULED")
+    assert not hasattr(pathless_allowlist, "RECORDED")
     assert len(ALLOWLIST) == sum(len(group) for group in groups)
 
 
@@ -182,9 +187,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
     them. So each group's size is pinned, and `DEVICE`'s per module: a
     new site means editing these numbers in the same diff, where the
     question "is this really the device's own file" gets asked."""
-    assert len(LOCAL_EXTRAS) == 16
-    assert len(UNRULED) <= 3
-    assert len(RECORDED) <= 4
+    assert len(LOCAL_EXTRAS) == 27  # 16, and eleven launchers since PR-3.0 (items 7, 8)
     per_module: dict[str, int] = {}
     for site in DEVICE:
         module = site.split(":", 1)[0]
@@ -203,8 +206,13 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "prefs": 1,
         "sidebar": 1,
         "openwith": 5,
+        # The launchers handing a URL or a file this device has (PR-3.0 item 7).
+        "copylabel": 1,
+        "terminal": 1,
+        "attachpanel": 2,
+        "lightbox": 2,
     }
-    assert len(DEVICE) == 67
+    assert len(DEVICE) == 73
     # `openwith`'s five device sites are lookups of this device's terminal
     # preference; its launchers are local extras and nowhere else.
     assert {s for s in DEVICE if s.startswith("openwith:")} == {
@@ -274,6 +282,19 @@ def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
     assert modules == {
         "app", "blobcache", "remoteimages", "remoteuploads", "uistate", "window", "desktopentry",
         "updatecheck", "buildinfo", "connection", "prefs", "sidebar", "openwith",
+        "copylabel", "terminal", "attachpanel", "lightbox",
+    }
+    # The four modules the launchers brought (PR-3.0 item 7) are there for
+    # a launcher each and nothing else: a web or mail address, or a file
+    # this device has (a cached copy, or the service's own file handed
+    # only to a `local` client by the callers' ask).
+    assert {s for s in DEVICE if s.startswith(("copylabel:", "terminal:", "attachpanel:", "lightbox:"))} == {
+        "copylabel:open_uri:UriLauncher.new",
+        "terminal:_launch_web:UriLauncher.new",
+        "attachpanel:AttachmentsView._launch:FileLauncher.new",
+        "attachpanel:AttachmentsView._launch_default:FileLauncher.new",
+        "lightbox:ImageLightbox._on_open_with_clicked:FileLauncher.new",
+        "lightbox:ImageLightbox.present_over:FileLauncher.new",
     }
     # `remoteuploads` is there for the dropped file it reads to upload, and nothing else.
     assert {s for s in DEVICE if s.startswith("remoteuploads:")} == {
@@ -291,43 +312,52 @@ def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
     }
 
 
-def test_the_unruled_group_only_shrinks():
-    """Three sites PR-2.8 reported for a ruling (neither device files nor
-    local extras, and no chunk's by the spec). Pinned: ruling one takes it
-    off here and off the list; nothing joins it."""
-    assert UNRULED <= {
+def test_the_three_unruled_sites_are_gone():
+    """PR-3.0 item 9 (D54, D59): the clone dialog's folder check and its
+    `gh` lookup, and the visible project's directory, are the service's
+    answers (`fs.stat`, `service.status`'s `gh`)."""
+    found = pathless.walk()
+    for site in (
         "clonedialog:CloneDialog._clone_done:os.path.isdir",
         "clonedialog:CloneDialog._refresh_destination:shutil.which",
         "window:MainWindow._visible_project_dir:Path.is_dir",
-    }
-
-
-def test_the_recorded_group_only_shrinks():
-    """Four `gitloads` sites the walker has seen since 2026-10-13 (a
-    site's function as a default argument). Neither device files nor local
-    extras; D50's rule is to record them. Pinned like `UNRULED`."""
-    assert RECORDED <= {
-        "gitloads:commit_message:subprocess.run",
-        "gitloads:commit_subject:subprocess.run",
-        "gitloads:resolve_commit:subprocess.run",
-        "gitloads:diff_file_path:os.path.exists",
-    }
+    ):
+        assert site not in found, site
 
 
 def test_the_cwd_checks_and_the_terminals_sites_are_gone():
     """D39 (PR-2.8): the tab and its panel shells do not ask this device's
     disk whether a cwd is a directory; the service's `spawn` falls back and
-    says where the pty started. `terminal` has no site left at all."""
+    says where the pty started. `terminal` and `lightbox` have no site left
+    but their launchers (PR-3.0 item 7), the ones a click opens with."""
     found = pathless.walk()
-    assert not sorted(s for s in found if s.startswith(("terminal:", "lightbox:")))
+    assert sorted(s for s in found if s.startswith(("terminal:", "lightbox:"))) == [
+        "lightbox:ImageLightbox._on_open_with_clicked:FileLauncher.new",
+        "lightbox:ImageLightbox.present_over:FileLauncher.new",
+        "terminal:_launch_default:FileLauncher.new",
+        "terminal:_launch_local_uri:FileLauncher.new",
+        "terminal:_launch_local_uri:UriLauncher.new",
+        "terminal:_launch_web:UriLauncher.new",
+    ]
+
+
+def test_a_clicked_link_of_any_scheme_but_the_webs_is_a_local_extra():
+    """PR-3.0 item 8: `_launch_web` is the one launch a client that is not
+    local makes for a clicked link (a web or mail address); every other
+    scheme goes through `_launch_local_uri`, which asks first."""
+    assert "terminal:_launch_web:UriLauncher.new" in DEVICE
+    assert {s for s in LOCAL_EXTRAS if s.startswith("terminal:_launch_local_uri:")} == {
+        "terminal:_launch_local_uri:FileLauncher.new",
+        "terminal:_launch_local_uri:UriLauncher.new",
+    }
 
 
 # -- the walker's reach (the Fable review of PR 615, should-fix 1 and 2) -----------------------
 #
 # The reviewer's probe wrote one read 48 ways and the walker caught 17.
 # These tables are that probe, kept: every spelling the walker catches now,
-# and every one it is known to miss (each a form the D50 record beside
-# `UNRULED` names). A real site written any of the first ways is found; one
+# and every one it is known to miss (each a form the D50 record in
+# `tests/pathless_allowlist.py` names). A real site written any of the first ways is found; one
 # written any of the second ways is a reviewer's to find.
 
 _HEADER = (
@@ -342,6 +372,37 @@ _HEADER = (
 )
 
 CAUGHT = {
+    # -- the launchers (PR-3.0 item 7; on the "unseen" record until then) -------------------
+    "Gtk.FileLauncher": (
+        "def f(p):\n"
+        "    Gtk.FileLauncher.new(Gio.File.new_for_path(p)).launch(None, None, None)\n",
+        "FileLauncher.new",
+    ),
+    "Gtk.UriLauncher": (
+        "def f(u):\n    Gtk.UriLauncher.new(u).launch(None, None, None)\n",
+        "UriLauncher.new",
+    ),
+    "Gio.AppInfo.launch_default_for_uri": (
+        "def f(u):\n    return Gio.AppInfo.launch_default_for_uri(u, None)\n",
+        "AppInfo.launch_default_for_uri",
+    ),
+    "Gio.AppInfo.launch_default_for_uri_async": (
+        "def f(u):\n    Gio.AppInfo.launch_default_for_uri_async(u, None, None, None)\n",
+        "AppInfo.launch_default_for_uri_async",
+    ),
+    "an app's launch": (
+        "def f(info, p):\n    info.launch([Gio.File.new_for_path(p)], None)\n",
+        "Launcher.launch",
+    ),
+    "an app's launch on an attribute": (
+        "def f(self, p):\n    self.app_info.launch([Gio.File.new_for_path(p)], None)\n",
+        "Launcher.launch",
+    ),
+    "an app's launch_uris": ("def f(app, u):\n    app.launch_uris([u], None)\n", "Launcher.launch_uris"),
+    "a launcher's open_containing_folder": (
+        "def f(launcher):\n    launcher.open_containing_folder(None, None, None)\n",
+        "Launcher.open_containing_folder",
+    ),
     # -- import aliases ---------------------------------------------------------------------
     "from os.path import isdir as there": ("def f(p):\n    return there(p)\n", "os.path.isdir"),
     "import os.path as osp": ("def f(p):\n    return osp.isdir(p)\n", "os.path.isdir"),
@@ -622,16 +683,9 @@ MISSED = {
     "a helper's read": "def f(p):\n    return helper(p)\n\ndef helper(p):\n    pass\n",
     "expanduser (this device's home, no read)": "def f(p):\n    return os.path.expanduser(p)\n",
     "abspath (this device's cwd, no read)": "def f(p):\n    return os.path.abspath(p)\n",
-    "Gtk.FileLauncher": (
-        "def f(p):\n"
-        "    Gtk.FileLauncher.new(Gio.File.new_for_path(p)).launch(None, None, None)\n"
+    "an app's launch on a receiver with no hint": (
+        "def f(app, p):\n    app.launch([Gio.File.new_for_path(p)], None)\n"
     ),
-    "Gtk.UriLauncher": "def f(u):\n    Gtk.UriLauncher.new(u).launch(None, None, None)\n",
-    "Gio.AppInfo.launch_default_for_uri": (
-        "def f(u):\n"
-        "    return Gio.AppInfo.launch_default_for_uri(u, None)\n"
-    ),
-    "an app's launch": "def f(info, p):\n    info.launch([Gio.File.new_for_path(p)], None)\n",
     "os.kill": "def f(pid):\n    os.kill(pid, 15)\n",
     "a function out of a dict": "def f(p, table):\n    return table['isdir'](p)\n",
     "a bare open handed on": "def f(ps):\n    return list(map(open, ps))\n",

@@ -80,6 +80,21 @@ def uri_scheme(uri: str) -> str:
         return ""
 
 
+# The schemes a clicked link opens with on any client (PR-3.0 item 8): a
+# web address and a mail address name nothing of the service's machine.
+# Every other scheme (`file:`, `ssh:`, an editor's `vscode:`, a desktop's
+# own handlers) is a local extra: it hands something to a program of this
+# device's that may read it as a path of this machine's.
+REMOTE_SAFE_SCHEMES = frozenset({"http", "https", "mailto"})
+
+
+def scheme_is_remote_safe(uri: str) -> bool:
+    """Whether a clicked *uri* opens on a client that is not on the
+    service's machine: its scheme is http, https or mailto, however cased.
+    No scheme at all is not safe (a bare word is no address)."""
+    return uri_scheme(uri) in REMOTE_SAFE_SCHEMES
+
+
 def bare_names_pattern(names: Iterable[str]) -> str | None:
     """A FILE_PATTERN companion matching any of *names* as a bare token.
 
@@ -122,10 +137,21 @@ _STITCH_ROWS_DOWN = 3
 
 
 # Whether something is at a path: the one question the gates ask of the
-# filesystem. The attachment log (the service's) passes `os.path.exists`;
-# the click (the client's, whose paths are the service's) passes the
-# service's `fs.stat` answer, on a worker thread (terminal's click).
-Exists = Callable[[str], bool]
+# filesystem. The answer is the absolute path something is at (a `~` the
+# filesystem's owner expanded), or a falsy value; a plain True keeps the
+# path asked about. The attachment log (the service's) passes
+# `attachrecords.here`, a stat of its own disk that expands `~` with its
+# home; the click (the client's, whose paths are the service's) passes the
+# service's `fs.stat` answer (`remotefiles.locate`), on a worker thread
+# (terminal's click), which expands `~` on the service (PR-3.0 item 4: a
+# client never expands a `~` with its own home).
+Exists = Callable[[str], "str | bool | None"]
+
+
+def home_led(text: str) -> bool:
+    """Whether *text* is a path in a home folder (`~`, `~/x`, `~user/x`):
+    absolute for whoever owns the filesystem, who expands it."""
+    return text.startswith("~")
 
 
 def resolve_path(text: str, roots: Iterable[str | None], exists: Exists) -> str | None:
@@ -133,20 +159,22 @@ def resolve_path(text: str, roots: Iterable[str | None], exists: Exists) -> str 
 
     The one resolution rule every "does this reference mean a real file?"
     gate shares (the click's `resolve_file_reference`, the attachment log's
-    `attachrecords.delivered`): ``~`` is expanded, a relative path is tried
+    `attachrecords.delivered`): ``~`` is *exists*'s to expand, a relative path is tried
     against each of *roots* in order (skipping None entries), and only a
     path *exists* says something is at comes back. One home for it, so the
     gates can't drift apart on what "resolves" means; *exists* is the
-    caller's, because whose filesystem it is differs between them.
+    caller's, because whose filesystem it is differs between them, and so
+    is the ``~``: a home-led path is handed to *exists* as written, and the
+    path it answers with is the one that comes back.
     """
-    expanded = os.path.expanduser(text)
-    if os.path.isabs(expanded):
-        trials = [expanded]
+    if os.path.isabs(text) or home_led(text):
+        trials = [text]
     else:
-        trials = [os.path.join(root, expanded) for root in roots if root]
+        trials = [os.path.join(root, text) for root in roots if root]
     for trial in trials:
-        if exists(trial):
-            return os.path.normpath(trial)
+        found = exists(trial)
+        if found:
+            return os.path.normpath(found if isinstance(found, str) else trial)
     return None
 
 

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-22. Full change history: git log for this file.
+fork. Last modified: 2026-10-29. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,32 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The service finds `claude` where its terminals do, and starts every
+  session itself.** A service started over a non-interactive ssh command
+  said it had no `claude` CLI while every session it launched found one:
+  it looked on its own `PATH`, not the login shell's it starts terminals
+  with. Every lookup of the service (the welcome's, the commands it types,
+  titles, icons, the login repair, the sandbox) now uses that `PATH`. The
+  service also assembles every command a session starts with, *Continue
+  last session* included, from its own CLI: the window no longer types its
+  own `claude` path into the service's terminal, and offers a new session
+  unless the service says it has no CLI.
+- **The last of the window's reads of the service's machine move to the
+  service** (the split's Phase 3, first chunk). Where a session resumes
+  (its transcript's last folder) is worked out by the service and sent with
+  the row; paths are shortened to `~` with the service's home folder; a
+  `~/…` path an agent names (a Ctrl+click, `open_in_editor`,
+  `start_session`, the diff tools' `file`) is expanded by the service; the
+  clone dialog asks the service whether the clone landed and whether it
+  has `gh`; *New session* asks the service whether the visible session's
+  folder is still there; and git always goes through the service. A
+  window that is not on the service's machine also leaves out native chat
+  and any clicked link that is not `http`, `https` or `mailto` (an
+  `ssh:` or an editor's link would open on the wrong computer), and hands
+  an app its cached copy of a file only when it is a picture or a plain
+  document (pdf, txt, md, csv, json, log): anything else has no **Open
+  With…** row. Nothing changes while the window and its service share a
+  machine.
 - **No freeze switching to a tab with a PR page open.** The service ran
   every `gh` request (a PR page's read, the status sweep, every PR
   action) on its main loop. While `gh` ran, every session's output

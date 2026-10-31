@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-18. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -80,6 +80,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_file_reference,
     resolve_wrapped_reference,
     resolve_wrapped_url,
+    scheme_is_remote_safe,
     token_at_column,
     uri_scheme,
 )
@@ -303,7 +304,9 @@ def _is_file_uri(uri: str) -> bool:
 
 def _launch_uri(terminal: Vte.Terminal, uri: str, click: int = 0) -> None:
     """Open a clicked link the way its scheme deserves (*click*: the
-    click's number, see `_present_image`)."""
+    click's number, see `_present_image`): a web or mail address on any
+    client (`_launch_web`), anything else only on the service's machine
+    (`_launch_local_uri`, PR-3.0 item 8)."""
     if uri.startswith("www."):
         uri = "http://" + uri  # the bare-host grammar's half of a URL
     if _is_file_uri(uri):
@@ -315,8 +318,29 @@ def _launch_uri(terminal: Vte.Terminal, uri: str, click: int = 0) -> None:
         if path is not None:
             _open_file_reference(terminal, path, None, None, click)
             return
-        if not apilink.is_local():
-            return  # a file handed to this device's apps: a local extra (§3.12)
+    if scheme_is_remote_safe(uri):
+        _launch_web(terminal, uri)
+    else:
+        _launch_local_uri(terminal, uri)
+
+
+def _launch_web(terminal: Vte.Terminal, uri: str) -> None:
+    """An http(s) or mailto address, on any client: it names nothing of
+    the service's machine, so this device's browser or mail app takes it."""
+    if not scheme_is_remote_safe(uri):
+        return
+    Gtk.UriLauncher.new(uri).launch(terminal.get_root(), None, _on_link_launched)
+
+
+def _launch_local_uri(terminal: Vte.Terminal, uri: str) -> None:
+    """Any other scheme (a `file:` URI with no path the click could open,
+    `ssh:`, an editor's or a desktop's own handler): a local extra
+    (§3.12, PR-3.0 item 8), since the program it starts on this device may
+    read it as a path of this machine's. Nothing for a client that is not
+    on the service's machine."""
+    if not apilink.is_local():
+        return
+    if _is_file_uri(uri):
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
     else:
         launcher = Gtk.UriLauncher.new(uri)
@@ -524,11 +548,12 @@ def _click_target(
     transcript's unwrapped text behind both screen stitchers, and the
     direct reading last. Every path is checked by the service (`fs.stat`,
     remembered for this click), every URL needs nothing but the screen."""
-    seen: dict[str, bool] = {}
+    seen: dict[str, str | None] = {}
 
-    def exists(path: str) -> bool:
+    def exists(path: str) -> str | None:
+        # Where the service found it (a `~` expanded there), or None.
         if path not in seen:
-            seen[path] = remotefiles.present(path)
+            seen[path] = remotefiles.locate(path)
         return seen[path]
 
     fetched: list[list[str]] = []
@@ -1693,7 +1718,7 @@ class TerminalTab(Gtk.Box):
         provider: Provider | None = None,
         jsonl_path: str | Path | None = None,
         options=None,
-        command_override: str | None = None,
+        continue_recent: bool = False,
         initial_size: tuple[int, int] | None = None,
         new_chat: bool = False,
         worktree_default: bool = False,
@@ -1711,7 +1736,10 @@ class TerminalTab(Gtk.Box):
         the screen's Send (the "new-chat-send" signal, via the window)
         reaches. *worktree_default* is what its worktree checkbox starts
         on, *sandbox_default* what its Sandboxed box starts on. Only a
-        fresh session (no id, no command override) is ever a new chat.
+        fresh session (no id, no continue) is ever a new chat.
+        *continue_recent* asks the service for a --continue of the newest
+        conversation in *cwd*: the service assembles that command, as it
+        does every launch, from its own claude (PR-3.0 item 1).
         *options* carries a resumed session's sandbox decision too (see
         MainWindow.open_session): the plan is written here, at spawn."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -1740,7 +1768,7 @@ class TerminalTab(Gtk.Box):
             session_id=session_id,
             fork=fork,
             options=options,
-            command_override=command_override,
+            continue_recent=continue_recent,
             cwd=cwd,
             jsonl_path=str(jsonl_path) if jsonl_path else None,
         )
@@ -1991,7 +2019,7 @@ class TerminalTab(Gtk.Box):
         # stay put through the flip. A tab that isn't a new chat skips the
         # stack — the console is the leaf, as it always was.
         stage: Gtk.Widget = self._overlay
-        if new_chat and session_id is None and command_override is None:
+        if new_chat and session_id is None and not continue_recent:
             self._new_chat = NewChatView(
                 cwd=cwd or str(Path.home()),
                 pick_attach=self._pick_file_for_composer,
@@ -2189,10 +2217,6 @@ class TerminalTab(Gtk.Box):
     @property
     def _options(self):
         return self.session.options
-
-    @property
-    def _command_override(self) -> str | None:
-        return self.session.command_override
 
     @property
     def _cwd(self) -> str | None:
@@ -2461,7 +2485,7 @@ class TerminalTab(Gtk.Box):
     def _service_spawn(self, cwd: str | None, prompt: str = "") -> None:
         """Ask the service for this tab's session: a `spawn` of kind agent
         carrying what the session is built from (the id to resume, the
-        fork, the options, the command override, the transcript, a
+        fork, the options, a --continue, the transcript, a
         new-chat *prompt* to type once the CLI is at its box) at this
         terminal's grid; then show its pty. The service builds the shell's
         environment, progress declarations included, from its own, and the
@@ -2475,8 +2499,8 @@ class TerminalTab(Gtk.Box):
             request["session"] = session.session_id
         if session.fork:
             request["fork"] = True
-        if session.command_override:
-            request["command_override"] = session.command_override
+        if session.continue_recent:
+            request["continue_recent"] = True
         if session.transcript_path:
             request["jsonl_path"] = session.transcript_path
         if self._fork_resolve:

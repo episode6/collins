@@ -57,7 +57,11 @@ call, `Path.home()`, a chain through a path's own methods off one
 an object (`spawn_async`, `spawn_sync`, `spawn_with_fds_async`,
 `spawnv` on any receiver: Vte's terminal and pty,
 `Gio.SubprocessLauncher`), `Gio.Subprocess(...)`,
-`Gtk.show_uri`, anything of `webbrowser`; and the constructors and
+`Gtk.show_uri`, anything of `webbrowser`; the launchers (PR-3.0:
+`Gtk.FileLauncher.new`, `Gtk.UriLauncher.new`,
+`Gio.AppInfo.launch_default_for_uri`, `open_containing_folder` and
+`launch_uris*` on any receiver, `launch` on an app's info:
+`LAUNCHER_CALLS`, `LAUNCHER_METHODS_ANY`); and the constructors and
 setters that open or write a file by path or by `Gio.File`
 (`Gdk.Texture.new_from_filename`, `GdkPixbuf.Pixbuf.new_from_file*`,
 `Gtk.Picture.new_for_filename` / `new_for_file`, `.set_filename(...)`,
@@ -97,11 +101,11 @@ so is `getattr(os.path, ...)`; a path's method handed on or bound
 uncalled the same (`filter(Path.is_dir, ps)`, `key=Path.stat`,
 `fn = Path.read_text`).
 
-**What is not seen** is written down, form by form, beside `UNRULED` in
+**What is not seen** is written down, form by form, in
 `tests/pathless_allowlist.py` (the D50 record): a helper's read (a site
 is named by the function the read is written in, never by its callers),
-a receiver with no hint for the method names other objects use too, the
-launchers, and the rest. `tests/test_client_is_pathless.py` holds a
+a receiver with no hint for the method names other objects use too, and
+the rest. (The launchers are seen since PR-3.0.) `tests/test_client_is_pathless.py` holds a
 table of spellings the walker must catch and of the ones it is known to
 miss, so a change to either is a change to that table.
 
@@ -276,6 +280,30 @@ GLIB_CALLS = frozenset(
 # tail): `Gio.Subprocess.new(...)`, the keyword constructor
 # `Gio.Subprocess(argv=...)`, `Gtk.show_uri(...)`.
 GIO_PROCESS_CALLS = frozenset({"Subprocess.new", "Subprocess.newv", "Gio.Subprocess", "Gtk.show_uri"})
+# The launchers (PR-3.0 item 7, the Fable review of PR 615's (a)): they
+# open nothing themselves, they hand a path or a URI to a program of this
+# device's, which is what a local extra is (or, for this device's own
+# file or a web address, `DEVICE`). By a dotted call's tail: GTK's two
+# launchers made, and GIO's default handler asked for a URI.
+LAUNCHER_CALLS = frozenset(
+    {
+        "FileLauncher.new", "UriLauncher.new", "AppInfo.launch_default_for_uri",
+        "AppInfo.launch_default_for_uri_async",
+    }
+)
+# ...and by a method's name on any receiver, the names only a launcher or
+# a `Gio.AppInfo` has: `launcher.open_containing_folder(...)`,
+# `app_info.launch_uris(...)`.
+LAUNCHER_METHODS_ANY = frozenset(
+    {
+        "open_containing_folder", "launch_uris", "launch_uris_async", "launch_uris_as_manager",
+        "launch_uris_as_manager_with_fds",
+    }
+)
+# `Gio.AppInfo.launch(files, context)`: `launch` is a word other objects
+# use too (a `Gtk.FileLauncher`'s, whose `new` is the site already), so a
+# receiver whose name says it is an app's info (`info`, `app_info`).
+APP_INFO_HINTS = ("info",)
 # Image constructors that open a file by path (a dotted call's tail).
 IMAGE_FILE_CALLS = frozenset(
     {
@@ -668,7 +696,7 @@ class _Reader:
         if len(parts) >= 2 and parts[0] in SITE_MODULES:
             return name
         tail = ".".join(parts[-2:])
-        if tail in IMAGE_FILE_CALLS or tail in GIO_PROCESS_CALLS:
+        if tail in IMAGE_FILE_CALLS or tail in GIO_PROCESS_CALLS or tail in LAUNCHER_CALLS:
             return tail
         if tail in GIO_FILE_CREATING:
             return "Gio.File.new_tmp"
@@ -747,6 +775,12 @@ class _Reader:
                 return f"Gio.File.{method}"
             if method in PROCESS_METHODS_ANY:
                 return f"Process.{method}"
+            if method in LAUNCHER_METHODS_ANY:
+                return f"Launcher.{method}"
+            if method == "launch":
+                receiver = (_dotted(func.value) or "").split(".")[-1].lower()
+                if any(hint in receiver for hint in APP_INFO_HINTS):
+                    return "Launcher.launch"
             most = PATH_METHODS_MAX_ARGS.get(method)
             if most is not None and len(node.args) > most:
                 return None  # another object's method of the same name

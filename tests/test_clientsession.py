@@ -68,7 +68,7 @@ def test_every_field_lands_on_the_attribute_the_forwarder_reads(mirror):
             session=ID,
             fork=True,
             options={"model": "sonnet", "effort": "high", "add_dirs": ["/x"], "sandbox": True},
-            command_override="claude --continue",
+            continue_recent=True,
             cwd="/home/u/project",
             agent_cwd="/home/u/project/.claude/worktrees/x",
             pid=4242,
@@ -103,7 +103,7 @@ def test_every_field_lands_on_the_attribute_the_forwarder_reads(mirror):
     )
     assert session.session_id == ID and session.fork is True
     assert session.options == SessionOptions(model="sonnet", effort="high", add_dirs=("/x",), sandbox=True)
-    assert session.command_override == "claude --continue"
+    assert session.continue_recent is True
     assert session.current_agent_cwd() == "/home/u/project/.claude/worktrees/x"
     assert session.child_pid() == 4242
     assert session.initial_command == "claude" and session.worktree_launch is True

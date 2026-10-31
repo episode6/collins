@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-22. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -103,11 +103,23 @@ class Session:
     mtime: float  # last activity (file mtime)
     created: float = 0.0  # session start (first transcript timestamp; mtime fallback)
     size: int = 0  # transcript size in bytes
-    state: str = ""  # "" or "interrupted" (see _scan_tail)
+    state: str = ""  # "" or "interrupted" (see _scan_tail_facts)
     provider: str = "claude"  # provider id (see providers.py)
     # The agent CLI's own name for the session — the last title record in the
-    # transcript's tail, "" when the tail holds none (see _scan_tail).
+    # transcript's tail, "" when the tail holds none (see _scan_tail_facts).
     cli_title: str = ""
+    # Where a resume starts (`resume_cwd`'s rule), worked out by the
+    # service's scan, or the `item` event's `resume_cwd` on a client (PR-3.0
+    # item 3: a client reads no transcript and no directory of the
+    # service's). None when nobody worked it out: `resume_at` falls back to
+    # `cwd`.
+    resume_dir: str | None = None
+
+    @property
+    def resume_at(self) -> str | None:
+        """Where to start the CLI to resume this session: the scan's (or the
+        service's) `resume_dir`, else the session's starting directory."""
+        return self.resume_dir if self.resume_dir is not None else self.cwd
 
     @property
     def project_name(self) -> str:
@@ -325,25 +337,29 @@ def _read_tail(path: Path) -> str:
         return ""
 
 
-def resume_cwd(session: Session) -> str | None:
-    """Where to start the CLI when resuming: the last cwd recorded in the
-    transcript, since the agent may have left the project directory
-    mid-session (e.g. moved into a git worktree). Falls back to the
-    session's starting directory when the tail records no cwd or the
-    directory no longer exists."""
-    # Local import breaks the sessions<->chats cycle (chats imports this module
-    # at load time; this runs only at call time).
-    from .chats import is_degraded_chat_cwd
-
+def _tail_cwd(blob: str) -> str | None:
+    """The last cwd a transcript's tail records, or None."""
     cwd: str | None = None
-    for line in _read_tail(session.jsonl_path).splitlines():
+    for line in blob.splitlines():
         try:
             entry = json.loads(line)
         except (json.JSONDecodeError, ValueError):
             continue
         if isinstance(entry, dict) and isinstance(entry.get("cwd"), str):
             cwd = entry["cwd"]
-    if is_degraded_chat_cwd(session.cwd, cwd):
+    return cwd
+
+
+def resume_cwd_from(session_cwd: str | None, tail_cwd: str | None) -> str | None:
+    """`resume_cwd`'s rule on what the tail recorded (*tail_cwd*): that
+    directory, unless it is a degraded chat's fallback or no directory any
+    more, else the session's starting one (*session_cwd*)."""
+    # Local import breaks the sessions<->chats cycle (chats imports this module
+    # at load time; this runs only at call time).
+    from .chats import is_degraded_chat_cwd
+
+    cwd = tail_cwd
+    if is_degraded_chat_cwd(session_cwd, cwd):
         # The tail records where this chat was pushed when its own directory
         # went missing, not a move it chose. Resuming there would pin it to
         # the fallback (or $HOME) for good; go back to its own directory,
@@ -351,7 +367,17 @@ def resume_cwd(session: Session) -> str | None:
         cwd = None
     if cwd and Path(cwd).is_dir():
         return cwd
-    return session.cwd
+    return session_cwd
+
+
+def resume_cwd(session: Session) -> str | None:
+    """Where to start the CLI when resuming: the last cwd recorded in the
+    transcript, since the agent may have left the project directory
+    mid-session (e.g. moved into a git worktree). Falls back to the
+    session's starting directory when the tail records no cwd or the
+    directory no longer exists. Read now, off the transcript: the
+    service's (a client reads `Session.resume_at`, the service's answer)."""
+    return resume_cwd_from(session.cwd, _tail_cwd(_read_tail(session.jsonl_path)))
 
 
 def last_worktree_state(path: Path) -> dict | None:
@@ -734,8 +760,9 @@ _TITLE_KEYS = {"ai-title": "aiTitle", "custom-title": "customTitle", "agent-name
 _MAX_CLI_TITLE_CHARS = 200
 
 
-def _scan_tail(path: Path) -> tuple[str, str]:
-    """Cheaply read the transcript's tail: (state, cli_title).
+def _scan_tail_facts(path: Path) -> tuple[str, str, str | None]:
+    """Cheaply read the transcript's tail: (state, cli_title, cwd), from one
+    read and one parse.
 
     state:
     - "interrupted": the last event was the user stopping Claude mid-task.
@@ -749,11 +776,15 @@ def _scan_tail(path: Path) -> tuple[str, str]:
     it holds none — which does not mean the session has no title: a busy
     session can push its title records past the window between re-emissions,
     so callers keep the last non-empty answer (see AppState.cli_titles).
+
+    cwd is the last cwd the tail records, None when it records none:
+    `resume_cwd`'s input (`_tail_cwd`'s answer, read in the same loop).
     """
     blob = _read_tail(path)
 
     latest: str | None = None  # "other" or "interrupted"
     title = ""
+    cwd: str | None = None
     for line in blob.splitlines():
         try:
             entry = json.loads(line)
@@ -761,6 +792,8 @@ def _scan_tail(path: Path) -> tuple[str, str]:
             continue  # likely a partial first line from the tail window
         if not isinstance(entry, dict):
             continue
+        if isinstance(entry.get("cwd"), str):
+            cwd = entry["cwd"]
         key = _TITLE_KEYS.get(entry.get("type"))
         if key is not None:
             value = entry.get(key)
@@ -777,7 +810,7 @@ def _scan_tail(path: Path) -> tuple[str, str]:
         elif entry.get("type") == "user" and not text.startswith("<"):
             latest = "other"  # a real user reply, not a tool result / command
 
-    return ("interrupted" if latest == "interrupted" else "", title)
+    return ("interrupted" if latest == "interrupted" else "", title, cwd)
 
 
 def discover_sessions() -> list[Session]:

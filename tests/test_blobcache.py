@@ -228,3 +228,23 @@ def test_the_prune_runs_at_most_once_per_interval(cache, monkeypatch):
     blobcache.prune(folder, now=1000.0 + blobcache.PRUNE_EVERY_S)
     blobcache.prune(folder, now=1001.0, force=True)
     assert swept == [1000.0, 1000.0 + blobcache.PRUNE_EVERY_S, 1001.0]
+
+
+# -- the copies an app is handed (PR-3.0 item 6, D54 (4)) ----------------------------
+
+
+def test_only_pictures_and_plain_documents_go_to_an_app():
+    from collins import editorfiles
+
+    # The pictures the service already serves, and six plain documents.
+    assert editorfiles.IMAGE_SUFFIXES <= blobcache.DOCUMENT_SUFFIXES
+    assert blobcache.DOCUMENT_SUFFIXES - editorfiles.IMAGE_SUFFIXES == {
+        ".pdf", ".txt", ".md", ".csv", ".json", ".log",
+    }
+    # An allow-list: nothing a desktop might run is on it, and neither is
+    # anything merely unknown.
+    assert not blobcache.DOCUMENT_SUFFIXES & blobcache._RUNNABLE_SUFFIXES
+    for name in ("/c/abc.pdf", "/c/abc.PNG", "notes.md", "/c/x.log"):
+        assert blobcache.hands_to_an_app(name), name
+    for name in ("/c/abc.bin", "/c/abc.img", "/c/evil.desktop", "/c/sheet.xlsx", "/c/noext", "/c/a.pdf.sh"):
+        assert not blobcache.hands_to_an_app(name), name

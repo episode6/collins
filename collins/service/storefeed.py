@@ -318,6 +318,10 @@ class StoreFeed:
         fields = {
             "path": _path_or_none(str(session.jsonl_path)) or "/",
             "cwd": _path_or_none(session.cwd),
+            # Where a resume starts: `sessions.resume_cwd`'s rule, worked
+            # out by the scan on this machine (the transcript's tail and an
+            # `is_dir`), so no client reads either (PR-3.0 item 3, D54 (2)).
+            "resume_cwd": _path_or_none(session.resume_at),
             "project": _clamp(session.project_name, protocol.PATH_MAX),
             "display_name": _clamp(display_name, protocol.NAME_MAX),
             "cli_title": _clamp(session.cli_title, protocol.NAME_MAX),

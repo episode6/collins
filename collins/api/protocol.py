@@ -247,7 +247,7 @@ each taken from the code the message replaces:
   the counts of ptys, busy sessions and clients.
 - The session on the service (PR-1.12a, §3.19). `spawn` for an agent
   carries what `service.session.Session` is built from (`fork`,
-  `command_override`, `jsonl_path`, `sandbox_plan`, `fork_resolve`, the
+  `continue_recent`, `jsonl_path`, `sandbox_plan`, `fork_resolve`, the
   new chat's `prompt`) and answers with the session's `handle`; a shell's
   `spawn` names its agent's `handle` so the service re-files its history
   when the session resolves. The `session` event is the facts a client
@@ -614,6 +614,7 @@ K_MAP = "map"
 K_JSON = "json"
 K_JSON_OBJECT = "json-object"
 K_PATH = "path"
+K_HOME_PATH = "home-path"
 K_URL = "url"
 K_SCALAR = "scalar"
 
@@ -665,6 +666,10 @@ _PTY = _i(1, U32_MAX)
 _COLS = _i(1, MAX_COLS)
 _ROWS = _i(1, MAX_ROWS)
 _PATH = Field(K_PATH)
+# An absolute path, or one led by `~` (`~` alone or `~/…`): a path in the
+# service's home, which the service expands with its own (PR-3.0 item 4,
+# `service.files.expand_home`); a client never expands it with its own.
+_HOME_PATH = Field(K_HOME_PATH)
 _TEXT = _s(TEXT_MAX)
 _NAME = _s(NAME_MAX)
 _HOST = _s(HOST_MAX)
@@ -899,7 +904,7 @@ _SESSION_FIELDS = {
     "fork": _BOOL,
     "provider": _SHORT,
     "options": _null(Field(K_JSON_OBJECT)),
-    "command_override": _null(_s(PATH_MAX)),
+    "continue_recent": _BOOL,
     "cwd": _null(_PATH),
     "agent_cwd": _null(_PATH),
     "pid": _null(_i(1, PID_MAX)),
@@ -1116,11 +1121,14 @@ _TABLE: tuple[MessageType, ...] = (
                 "sandbox": _BOOL,
                 "sandbox_box": _ID,
                 # The rest of what an agent's `Session` is built from
-                # (PR-1.12a, §3.19): the session forked, a command override
-                # (a --continue, a check's stand-in), the transcript to tail,
-                # a sibling's derived plan, a sandboxed fork's resolver mode.
+                # (PR-1.12a, §3.19): the session forked, a --continue of
+                # the newest conversation in `cwd` (`continue_recent`: the
+                # service assembles every command itself from its own
+                # claude, PR-3.0 item 1; no client sends a command), the
+                # transcript to tail, a sibling's derived plan, a sandboxed
+                # fork's resolver mode.
                 "fork": _BOOL,
-                "command_override": _s(PATH_MAX),
+                "continue_recent": _BOOL,
                 "jsonl_path": _PATH,
                 "sandbox_plan": _PATH,
                 "fork_resolve": _BOOL,
@@ -1415,7 +1423,8 @@ _TABLE: tuple[MessageType, ...] = (
         request=_request(
             {
                 "pty": _req(_PTY),
-                "cwd": _null(_PATH),
+                # `~`-led: the service's home (PR-3.0 item 4).
+                "cwd": _null(_HOME_PATH),
                 "root": _req(_PATH),
                 # Judge the move now, with none of the settling (PR-2.4): a
                 # move the editor queued while its follow dialog was up,
@@ -1544,6 +1553,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "removed": _BOOL,
                 "project": _s(PATH_MAX),
                 "cwd": _null(_PATH),
+                # Where a resume of the session starts, worked out on the
+                # service (`sessions.resume_cwd`'s rule: the transcript's last
+                # cwd while it is a directory, else `cwd`; PR-3.0 item 3).
+                "resume_cwd": _null(_PATH),
                 "display_name": _NAME,
                 "cli_title": _NAME,
                 "subtitle": _s(256),
@@ -2436,7 +2449,8 @@ _TABLE: tuple[MessageType, ...] = (
         "What is at a path on the service's machine, and whether it is inside a root.",
         request=_request(
             {
-                "path": _req(_PATH),
+                # `~`-led paths are the service's home's (PR-3.0 item 4).
+                "path": _req(_HOME_PATH),
                 # `inside` is of this root (the asking editor's) when given,
                 # else of every root the service knows (`files.roots`).
                 "root": _PATH,
@@ -2447,6 +2461,9 @@ _TABLE: tuple[MessageType, ...] = (
                 "mtime": _req(_null(_MTIME)),  # null when nothing (or a dangling link) is there
                 # The path resolves (through its symlinks) inside the root.
                 "inside": _req(_BOOL),
+                # The path stat'ed: the request's, a `~` expanded with the
+                # service's home (PR-3.0 item 4).
+                "path": _PATH,
             },
         ),
     ),
@@ -2586,6 +2603,10 @@ _TABLE: tuple[MessageType, ...] = (
                 # Absent from an older service, which the client reads as
                 # found, so nothing asks.
                 "cli": _CLI_PATH,
+                # The service's home folder (`Path.home()` on its machine):
+                # what a client abbreviates the service's paths with and
+                # where a shell row with no cwd starts (PR-3.0 item 3).
+                "home": _PATH,
             }
         ),
     ),
@@ -2873,6 +2894,16 @@ def _check(name: str, value, spec: Field):
         if len(value) > PATH_MAX:
             raise _Invalid("{field} must be at most {max} characters", field=name, max=PATH_MAX)
         if not value.startswith("/") or "\0" in value:
+            raise _Invalid("{field} must be an absolute path", field=name)
+        _check_text(name, value)
+        return value
+    if kind == K_HOME_PATH:
+        if not isinstance(value, str):
+            raise _Invalid("{field} must be a string", field=name)
+        if len(value) > PATH_MAX:
+            raise _Invalid("{field} must be at most {max} characters", field=name, max=PATH_MAX)
+        home_led = value == "~" or value.startswith("~/")
+        if not (value.startswith("/") or home_led) or "\0" in value:
             raise _Invalid("{field} must be an absolute path", field=name)
         _check_text(name, value)
         return value

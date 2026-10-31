@@ -24,6 +24,7 @@ def home(tmp_path, monkeypatch):
     Also a clean slate for apply()'s memory of what it added to PATH."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(clisetup, "_appended", None)
+    monkeypatch.setattr(clisetup, "_search_base", None)
     return tmp_path
 
 
@@ -247,3 +248,28 @@ def test_apply_saved_ignores_the_empty_default(home, monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     clisetup.apply_saved(_State(""))
     assert os.environ["PATH"] == "/usr/bin"
+
+
+# -- the search base (PR-3.0 item 10) ------------------------------------------
+
+
+def test_a_lookup_searches_the_installed_base_not_the_process_path(home, monkeypatch):
+    """The service installs its session environment's PATH as the base:
+    every lookup searches it, with a stored answer's entry on the end."""
+    monkeypatch.setenv("PATH", "/usr/bin")
+    path = _make_exec(home / "login" / "claude")
+    assert clisetup.found_at() is None or clisetup.found_at() == "/usr/bin/claude"
+    clisetup.set_search_base(lambda: str(home / "login"))
+    assert clisetup.found_at() == str(path)
+    assert clisetup.which() == str(path) and clisetup.on_path()
+    assert clisetup.search_path() == str(home / "login")
+    # An explicit base wins over the installed one.
+    assert clisetup.found_at(str(home / "nowhere")) is None
+    # A stored answer goes on the end of whatever base is searched.
+    answer = _make_exec(home / "tools" / "claude")
+    clisetup.apply(str(answer))
+    assert clisetup.search_path(str(home / "nowhere")) == os.pathsep.join(
+        [str(home / "nowhere"), str(home / "tools")]
+    )
+    assert clisetup.found_at(str(home / "nowhere")) == str(answer)
+    clisetup.set_search_base(None)

@@ -90,3 +90,21 @@ def test_refresh_updates_the_word_then_says_so(link):
     link.answer = RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
     remotecli.refresh(lambda: done.append("refused"))
     assert done[-1] == "refused" and remotecli.found_at() == "/home/u/tools/claude"
+
+
+def test_the_offered_agents_are_the_services_word_not_this_path(link, monkeypatch):
+    """PR-3.0 item 1: the client offers an agent unless the service said it
+    has no CLI; this process's PATH (which `Provider.available` reads) is
+    never asked."""
+    from collins import providers
+
+    monkeypatch.setenv("PATH", "/nowhere")
+    monkeypatch.setattr(providers.Provider, "available", lambda self: pytest.fail("asked this PATH"))
+    remotecli.set_found(None)  # not said yet: offered
+    assert [p.id for p in remotecli.available_providers()] == ["claude"]
+    remotecli.set_found("/home/u/.local/bin/claude")
+    assert [p.id for p in remotecli.available_providers()] == ["claude"]
+    assert remotecli.default_provider().id == "claude"
+    remotecli.set_found("")  # the service has none: nothing offered
+    assert remotecli.available_providers() == []
+    assert remotecli.default_provider().id == "claude"

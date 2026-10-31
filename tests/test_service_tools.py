@@ -379,6 +379,22 @@ def test_show_diff_with_nobody_coming_answers_queued(world):
     assert world["state"].pending == {"sid-1": {"what": "branch"}}  # still applied on attach
 
 
+def test_a_diff_tools_file_reaches_the_client_resolved(world, tmp_path):
+    """PR-3.0 item 5: the service resolves a show_diff `file` (the agent's
+    cwd, a `~`) before the `tool` event: the client is handed the path."""
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "pkg" / "a.py").write_text("x")
+    world["sessions"][0].cwd = str(repo / "pkg")
+    client = attach(world, answer=lambda event: (True, "shown"))
+    got = world["tools"].dispatch(4242, "show_diff", {"what": "unstaged", "file": "a.py"})
+    assert got == (True, "shown")
+    assert client.events[0]["arguments"]["file"] == str(repo / "pkg" / "a.py")
+
+
 def test_the_diff_tools_without_a_store_say_no_client(world):
     for name, args in (
         ("diff_context", {}),

@@ -634,20 +634,14 @@ def test_diff_file_path_refuses_what_cannot_be_in_the_diff():
     assert gitloads.diff_file_path(None, root) is None
 
 
-def test_diff_file_path_prefers_the_agent_cwd_when_only_it_has_the_file():
-    """An agent that cd'd into a subdirectory names files the way its shell
-    sees them; a path that is only there against its cwd is taken from
-    there — and one that exists against the root wins outright."""
+def test_diff_file_path_asks_no_disk_and_no_home():
+    """PR-3.0 item 5: the agent's cwd rule and the `~` are the service's
+    (`service.diffs.resolve_file_arg`); here a relative path is the
+    repository's and a `~` is no path inside it."""
     root = "/repo"
-    cwd = "/repo/pkg"
-    only_in_pkg = {"/repo/pkg/a.py"}
-    assert gitloads.diff_file_path("a.py", root, cwd, exists=only_in_pkg.__contains__) == "pkg/a.py"
-    both = {"/repo/a.py", "/repo/pkg/a.py"}
-    assert gitloads.diff_file_path("a.py", root, cwd, exists=both.__contains__) == "a.py"
-    neither = set()
-    assert gitloads.diff_file_path("a.py", root, cwd, exists=neither.__contains__) == "a.py"
-    # The cwd never lifts a path out of the repository.
-    assert gitloads.diff_file_path("../../x.py", root, cwd, exists=lambda _p: True) is None
+    assert gitloads.diff_file_path("a.py", root) == "a.py"
+    assert gitloads.diff_file_path("/repo/pkg/a.py", root) == "pkg/a.py"  # as the service resolved it
+    assert gitloads.diff_file_path("~/a.py", root) == "~/a.py"  # a name in the repo, if anything
 
 
 # -- the module itself ----------------------------------------------------------
@@ -689,5 +683,5 @@ def test_gitloads_stands_alone():
                 imported.update(alias.name for alias in node.names)
     assert not {name for name in imported if name == "gi" or name.startswith("gi.")}
     assert imported == {
-        "__future__", "os", "re", "subprocess", "collections.abc", "dataclasses", "i18n", "gitops"
+        "__future__", "os", "re", "collections.abc", "dataclasses", "i18n", "gitops"
     }

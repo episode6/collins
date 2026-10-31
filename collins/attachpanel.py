@@ -402,8 +402,13 @@ class AttachmentsView(Gtk.Box):
         file is asked for whole (`blobcache.fetch_file`: the service
         serves it only when this session's agent named it, and the copy
         goes to an app, never to a decoder). A file the service will not
-        serve, or that is gone, is said out loud."""
+        serve, or that is gone, is said out loud. Only a picture or a
+        document goes to an app at all (`blobcache.hands_to_an_app`,
+        PR-3.0 item 6): anything else is said out loud, and not fetched."""
         session = self.session_key()
+        if not _copy_may_open(one):
+            self._notify(_not_a_document(one))
+            return
 
         def landed(path: Path | None, error: str | None) -> None:
             if self.get_root() is None:
@@ -415,6 +420,11 @@ class AttachmentsView(Gtk.Box):
                     else _("couldn't fetch that file: {reason}")
                 )
                 self._notify(words.format(reason=error or one.key))
+                return
+            if not blobcache.hands_to_an_app(path):
+                # A web image of a type the copy's name could not say
+                # (`.img`): no app is handed a file it cannot tell.
+                self._notify(_not_a_document(one))
                 return
             then(str(path))
 
@@ -474,10 +484,13 @@ class AttachmentsView(Gtk.Box):
         """The right-click menu for *one*, pointing at where it was clicked."""
         menu = Gio.Menu()
         # Open With… is there for every client: the file itself on the
-        # service's machine, this device's cached copy anywhere else (D51).
+        # service's machine, this device's cached copy anywhere else (D51)
+        # when it is a picture or a document (`blobcache.DOCUMENT_SUFFIXES`,
+        # PR-3.0 item 6; anything else has no row, hidden, not greyed out).
         # The file manager is a local extra (§3.12): there is no folder on
         # this device to show, so the item is left out, not greyed out.
-        menu.append_item(_item(_("Open With…"), "attachments.open-with", one.key))
+        if apilink.is_local() or _copy_may_open(one):
+            menu.append_item(_item(_("Open With…"), "attachments.open-with", one.key))
         if apilink.is_local() and not one.remote:
             # A remote image's own folder is the download cache, which is
             # nobody's idea of where that picture lives.
@@ -746,6 +759,24 @@ class AttachmentsPage(Adw.Bin):
 
     def page_closed(self) -> None:
         self._on_closed(self)
+
+
+def _copy_may_open(one: Attachment) -> bool:
+    """Whether this device's cached copy of *one* may go to a desktop app
+    (PR-3.0 item 6): a web image (its copy is named by its content type,
+    checked again when it lands), or a file whose own suffix is on
+    `blobcache.DOCUMENT_SUFFIXES`."""
+    if one.remote:
+        return one.kind == "image"
+    return blobcache.hands_to_an_app(one.key)
+
+
+def _not_a_document(one: Attachment) -> str:
+    """What to say when a file is no picture or document this device hands
+    an app from another machine's (PR-3.0 item 6)."""
+    return _("only pictures and plain documents open from the service's machine: {path}").format(
+        path=one.key
+    )
 
 
 def _gone(one: Attachment) -> str:

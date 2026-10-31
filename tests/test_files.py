@@ -409,7 +409,8 @@ def test_stat_answers_kind_size_mtime_and_inside(served, tmp_path):
     reply = client.request({"t": "fs.stat", "path": str(project), "root": str(project)})
     assert reply["kind"] == "dir" and reply["size"] is None and reply["inside"] is True
     reply = client.request({"t": "fs.stat", "path": str(project / "nope"), "root": str(project)})
-    assert reply == {"kind": "missing", "size": None, "mtime": None, "inside": False}
+    missing = {"kind": "missing", "size": None, "mtime": None, "inside": False}
+    assert reply == {**missing, "path": str(project / "nope")}
     (project / "dangling").symlink_to(project / "nowhere")
     assert client.request({"t": "fs.stat", "path": str(project / "dangling")})["kind"] == "symlink"
     # A link to a file is the file; one out of the root is not inside it.
@@ -418,6 +419,27 @@ def test_stat_answers_kind_size_mtime_and_inside(served, tmp_path):
     (project / "out.txt").symlink_to(outside)
     reply = client.request({"t": "fs.stat", "path": str(project / "out.txt"), "root": str(project)})
     assert reply["kind"] == "file" and reply["inside"] is False
+
+
+def test_expand_home_is_this_machines_home_for_a_leading_tilde(monkeypatch):
+    """PR-3.0 item 4 (D54 (5)): the one place a client's `~` is expanded."""
+    from collins.service.files import expand_home
+
+    monkeypatch.setenv("HOME", "/srv/u")
+    assert expand_home("~") == "/srv/u"
+    assert expand_home("~/notes/a.md") == "/srv/u/notes/a.md"
+    assert expand_home("~/../x") == "/srv/x"  # one spelling (the Fable review of PR 622, N6)
+    assert expand_home("/abs/~/x") == "/abs/~/x"
+    assert expand_home("~other/x") == "~other/x"  # another user's home is no path a client names
+
+
+def test_stat_expands_a_tilde_with_the_services_home(served, tmp_path, monkeypatch):
+    core, client, project, _events = served
+    monkeypatch.setenv("HOME", str(project))
+    reply = client.request({"t": "fs.stat", "path": "~/a.txt"})
+    assert reply["kind"] == "file" and reply["path"] == str(project / "a.txt")
+    reply = client.request({"t": "fs.stat", "path": "~"})
+    assert reply["kind"] == "dir" and reply["path"] == str(project)
 
 
 def test_stat_is_unconfined_and_inside_of_every_root_without_one(served, tmp_path):

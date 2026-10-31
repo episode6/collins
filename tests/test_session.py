@@ -823,7 +823,7 @@ def test_a_fresh_session_binds_to_the_transcript_it_writes(resolving):
 
 def test_a_continue_adopts_the_newest_existing_transcript(resolving):
     session, provider, host, clock = resolving
-    session.command_override = "claude --continue"
+    session.continue_recent = True
     provider.write("/proj", "older", mtime=1000)
     provider.write("/proj", "newest", mtime=2000)
     session.start_resolver("/proj")
@@ -1096,6 +1096,9 @@ class LaunchClaude(ClaudeProvider):
     def resume_command(self, session_id, fork=False, options=None):
         return f"claude --resume {session_id}"
 
+    def continue_command(self, options=None):
+        return "claude --continue"
+
 
 class FakeSandboxHost:
     """sandboxplan.SandboxHost's launch half: boxes minted, plans written to
@@ -1163,6 +1166,30 @@ def test_a_fresh_launch_spawns_the_shell_and_types_the_command(launch, tmp_path)
     assert session.initial_command == "claude"
 
 
+def test_a_continue_is_assembled_on_the_service(launch, tmp_path):
+    """PR-3.0 item 1: a --continue is the session's own command (no client
+    sends one), with the flags an existing conversation takes from the
+    options behind it."""
+    from collins.providers import SessionOptions
+
+    session, term, _host, _clock = launch(
+        cwd=str(tmp_path), continue_recent=True, options=SessionOptions(permission_mode="plan")
+    )
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    assert term.writes == ["claude --continue --permission-mode plan\n"]
+    assert session.initial_command == "claude --continue --permission-mode plan"
+    assert session.worktree_launch is False
+
+
+def test_a_continue_with_no_cli_starts_a_plain_shell(launch, tmp_path, monkeypatch):
+    session, term, host, _clock = launch(cwd=str(tmp_path), continue_recent=True)
+    monkeypatch.setattr(LaunchClaude, "continue_command", lambda self, options=None: None)
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    assert term.writes == [] and session.initial_command is None
+
+
 def test_the_progress_spoof_can_be_off(launch, tmp_path):
     session, _term, host, _clock = launch(progress_env=False)
     session.spawn(str(tmp_path), None)
@@ -1176,6 +1203,25 @@ def test_a_missing_directory_falls_back_home_and_says_so(launch, tmp_path):
     assert host.spawns[0][0] == str(session_mod.Path.home())
     assert any("no longer exists" in line for line in host.painted())
     assert session.cwd == str(session_mod.Path.home())
+
+
+def test_a_gone_resume_directory_falls_back_to_where_the_session_started(launch, tmp_path):
+    """The Fable review of PR 622, N2: a resume directory gone since the
+    scan (a folder the agent `cd`ed into, no worktree) falls back to the
+    directory the store's row says the session started in, not home."""
+    session, _term, host, _clock = launch(session_id="abc")
+    started = tmp_path / "project"
+    started.mkdir()
+    host.recorded_cwd = lambda: str(started)
+    gone = str(tmp_path / "project" / "sub-gone")
+    session.spawn(gone, "abc")
+    assert host.spawns[0][0] == str(started) and session.cwd == str(started)
+    assert any("no longer exists" in line and str(started) in line for line in host.painted())
+    # A row whose own directory is gone too: home, as before.
+    session2, _t, host2, _c = launch(session_id="abc")
+    host2.recorded_cwd = lambda: str(tmp_path / "also-gone")
+    session2.spawn(gone, "abc")
+    assert session2.cwd == str(session_mod.Path.home())
 
 
 def test_a_resume_types_the_resume(launch, tmp_path):

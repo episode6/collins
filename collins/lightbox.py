@@ -98,7 +98,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import animatedimage, apilink, pictures, remoteimages  # noqa: E402
+from . import animatedimage, apilink, blobcache, pictures, remoteimages  # noqa: E402
 from .editorfiles import (  # noqa: E402
     LIGHTBOX_BUTTON_STRIP,
     LIGHTBOX_MIN_H,
@@ -138,10 +138,13 @@ class ImageLightbox(Gtk.Box):
         """*path* is the blob-cache file to show (None: the fetch failed,
         *why* says why); *open_with* the file "Open With…" hands another
         app (the cache's copy by default: a file of this device's, which
-        any client may hand to an app of this device's)."""
+        any client may hand to an app of this device's when its name is a
+        picture's or a document's, `blobcache.hands_to_an_app`, PR-3.0
+        item 6; else there is no Open With… at all)."""
         super().__init__()
         self._path = Path(path) if path is not None else None
-        self._open_with = open_with or (str(self._path) if self._path is not None else None)
+        copy = self._path if self._path is not None and blobcache.hands_to_an_app(self._path) else None
+        self._open_with = open_with or (str(copy) if copy is not None else None)
         # Called with -1/+1 when the left/right (or up/down) arrow is pressed,
         # to step to the previous/next image; None when this lightbox was
         # opened somewhere with no gallery to walk (a clicked path, the

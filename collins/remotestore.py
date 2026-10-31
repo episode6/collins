@@ -91,7 +91,7 @@ log = logging.getLogger(__name__)
 
 # The `item` fields a `sessions.Session` is rebuilt from.
 _SESSION_FIELDS = frozenset(
-    {"path", "cwd", "preview", "mtime", "created", "size", "state", "provider", "cli_title"}
+    {"path", "cwd", "resume_cwd", "preview", "mtime", "created", "size", "state", "provider", "cli_title"}
 )
 # The `item` fields that are SessionItem properties.
 _PROPS = (
@@ -395,6 +395,9 @@ class RemoteStore(GObject.Object):
             state=fields.get("state", ""),
             provider=fields.get("provider", "claude"),
             cli_title=fields.get("cli_title", ""),
+            # The service's answer to "where does a resume start" (PR-3.0
+            # item 3); None from an older service: `resume_at` is `cwd`.
+            resume_dir=fields.get("resume_cwd"),
         )
 
     def _set_props(self, item: SessionItem, fields: dict, announce: bool) -> None:

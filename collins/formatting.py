@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-10-29. Full change history: git log for this file.
 
 """Small human-readable formatting helpers shared across the UI."""
 
@@ -9,11 +9,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from xml.parsers import expat
 
 from gi.repository import GLib
 
+from . import apilink
 from .i18n import _
 
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
@@ -401,8 +401,12 @@ def _renumber_lists(text: str) -> str:
 
 
 def display_path(path: str) -> str:
-    """A directory path as shown in the UI: the home prefix collapsed to ~."""
-    home = str(Path.home())
+    """A directory path as shown in the UI: the home prefix collapsed to ~.
+    The home is the service's (`apilink.service_home`, PR-3.0 item 3): the
+    paths shown are its; nothing is collapsed before it said."""
+    home = apilink.service_home()
+    if not home:
+        return path
     if path == home:
         return "~"
     if path.startswith(home + "/"):

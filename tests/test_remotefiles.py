@@ -429,3 +429,32 @@ def test_is_local_is_the_links_proof_and_false_without_a_link(link, monkeypatch)
     assert apilink.is_local() is True
     monkeypatch.setattr(apilink, "_current", None)
     assert apilink.is_local() is False
+
+
+# -- locate: the click gate's exists (PR-3.0 item 4; the Fable review of PR 622, S2) ----------
+
+
+def test_locate_answers_the_path_the_service_stat_ed(link):
+    """A `~` path goes to `fs.stat` as written; what comes back is the path
+    the service stat'ed, its `~` expanded there."""
+    link.answers["fs.stat"] = {"kind": "file", "size": 3, "mtime": 1, "inside": True, "path": "/srv/u/a.md"}
+    assert remotefiles.locate("~/a.md") == "/srv/u/a.md"
+    assert link.calls[-1][0] == {"t": "fs.stat", "path": "~/a.md"}
+    link.answers["fs.stat"] = {"kind": "dir", "size": None, "mtime": 1, "inside": False, "path": "/srv/u"}
+    assert remotefiles.locate("~") == "/srv/u"
+
+
+def test_locate_is_none_for_nothing_there_or_a_dangling_link(link):
+    for kind in ("missing", "symlink"):
+        link.answers["fs.stat"] = {"kind": kind, "size": None, "mtime": None, "inside": False, "path": "/x"}
+        assert remotefiles.locate("/x") is None, kind
+
+
+def test_locate_keeps_the_asked_path_from_a_service_older_than_the_field(link):
+    link.answers["fs.stat"] = {"kind": "file", "size": 3, "mtime": 1, "inside": True}  # no `path`
+    assert remotefiles.locate("/home/u/a.md") == "/home/u/a.md"
+
+
+def test_locate_is_none_on_a_refusal(link):
+    link.answers["fs.stat"] = RequestRefused(protocol.ERROR_INVALID, "{field} must be an absolute path", {})
+    assert remotefiles.locate("~bob/a.md") is None

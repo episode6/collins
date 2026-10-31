@@ -316,31 +316,41 @@ budget (`MAIN_THREAD_STATUS_TIMEOUT_S`). The
 client opens no project file and runs no program of the project's:
 `tests/test_client_is_pathless.py` walks the GTK modules and the client
 helpers for filesystem and subprocess sites and holds them to
-`tests/pathless_allowlist.py`, the final list since PR-2.8, each group
-pinned by size so that nothing is filed on it unseen: `DEVICE` (this device's own files and programs: `ui-state.json`,
-the blob cache, the Markdown export's destination, the desktop entry,
-the update check, `buildinfo`, the service's process), `LOCAL_EXTRAS`
-(below; D49), `UNRULED` (three sites recorded and not moved, D50,
-pinned; D54 rules what Phase 3 does with them) and `RECORDED` (four
-`gitloads` default arguments the walker has seen since it reads a
-function handed on without being called; recorded the same way, pinned).
-The comment at `UNRULED` is the D50 record: the reads of the service's
-facts the walker cannot see, and every form of a read it has no word for
-(a helper's read, a hintless receiver, the launchers, ...);
+`tests/pathless_allowlist.py`, the final list since PR-2.8 (closed by
+PR-3.0, D59: two groups and one table), each group pinned by size so
+that nothing is filed on it unseen: `DEVICE` (this device's own files
+and programs: `ui-state.json`, the blob cache, the Markdown export's
+destination, the desktop entry, the update check, `buildinfo`, the
+service's process, and the launchers that hand an app a web address or
+a file this device has) and `LOCAL_EXTRAS` (below; D49). The walker
+reads the launchers since PR-3.0 (`Gtk.FileLauncher.new`,
+`Gtk.UriLauncher.new`, `Gio.AppInfo.launch_default_for_uri`,
+`open_containing_folder`, `launch_uris*`, `launch` on an app's info).
+The comment in the allowlist is the D50 record: the reads of the
+service's facts the walker cannot see, and every form of a read it has
+no word for (a helper's read, a hintless receiver, ...);
 `tests/test_client_is_pathless.py` keeps a table of the spellings it
 catches and of the ones it is known to miss. A match that is no read at
 all (the walker's any-receiver words on an object that is no path: a
 module's own `load_bytes(data)`, a service fact with an `is_dir()` of
 its own) is answered in `NOT_A_SITE`, a pinned table of site, count and
 reason; the failing test's message says which of the four answers a new
-site takes.
+site takes. `UNRULED` and `RECORDED` are gone (D54, PR-3.0): the
+client's `~` is the service's home (`fs.stat` and `cwd.settle` take
+one), the diff tools' `file` is resolved on the service, the clone
+dialog and the visible project's directory ask `fs.stat`, and the app
+installs the git transport on every hello (a client never runs git
+itself).
 
 **The local extras.** `apilink.is_local()` is the one reader of the
 link's `local` proof (D11), and `App.local` is it. What hands a path of
 the service's to something on this device hangs on it: every "Open In…"
 and footer app, the file manager, Open in Ghostty, Reveal transcript,
-the attachments panel's Show in Folder, a clicked folder's default app, `file:` URIs on the clipboard, a dropped file mentioned by
-its own path, a native chooser's starting folder. For a client that is
+the attachments panel's Show in Folder, a clicked folder's default app,
+a clicked link of any scheme but http, https and mailto
+(`linkpatterns.scheme_is_remote_safe`), native chat, `file:` URIs on
+the clipboard, a dropped file mentioned by its own path, a native
+chooser's starting folder. For a client that is
 not on the service's machine they are **hidden, not disabled**, and the
 function that reads the disk or starts the program asks
 `apilink.is_local()` itself, **before** it does: the pathless test reads
@@ -352,12 +362,20 @@ name first, or some other object's `is_local()` does not count). Open With in th
 row's default app there, are not: not local, they hand over this device's
 cached copy (D51; `GET /api/blob?kind=file&as=file` serves a file that is
 no picture only to a request that names a session the service knows
-(`blobs.names_a_session`, one handle rule for the uploads, the delivered set and the show_image registry alike) and only when that session's agent named it, and the copy's suffix
-is made safe by `blobcache.file_suffix`). Nor is the Markdown export: the service renders the transcript
+(`blobs.names_a_session`, one handle rule for the uploads, the delivered set and the show_image registry alike) and only when that session's agent named it, and the copy goes to
+an app only when it is a picture or a plain document
+(`blobcache.DOCUMENT_SUFFIXES`, D54 (4): anything else has no Open
+With… row and opens nowhere). Nor is the Markdown export: the service renders the transcript
 (`store.transcript-export`) and the window writes its own file. Nor is
 where a session or a shell starts: the client sends the cwd it has and
 the service's `spawn` falls back and says where the pty landed (`cwd` in
-the reply, the pty's row and `pty.info`; D39).
+the reply, the pty's row and `pty.info`; D39). Nor is what a session
+runs: the service assembles every agent command (new, resume, fork, a
+`--continue` asked as `continue_recent`) from its own `claude` lookup on
+its session environment's PATH (D54 (1)); the client offers an agent
+unless `service.status`'s `cli` says the service has none (`remotecli`),
+and reads where a resume starts off the `item`'s `resume_cwd` and the
+service's home off `service.status`'s `home` (`apilink.service_home`).
 
 ## Where state lives
 
