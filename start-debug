@@ -1,6 +1,43 @@
 #!/bin/bash
+# A debug instance of this checkout: the window and the service it spawns
+# both import collins from here (cwd and PYTHONPATH), and any service
+# already running for the debug app id is stopped first, so the window
+# never attaches to a service left over from another checkout.
 set -e
 
-export COLLINS_APP_ID=com.episode6.Collins.Debug 
-python3 -m collins
+cd "$(dirname "$(readlink -f "$0")")"
+export COLLINS_APP_ID=com.episode6.Collins.Debug
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
+# The app id as a literal inside an extended regex (its dots escaped).
+APP_ID_RE=${COLLINS_APP_ID//./\\.}
+# How long a SIGTERMed process gets before SIGKILL: past the service's
+# own stop sequence (core.STOP_BOUND_S, 30 s), so a service with no
+# keeper ends its sessions itself instead of being killed over them.
+STOP_WAIT_S=35
+
+# SIGTERM every process of ours whose command line matches, wait for them
+# to go, SIGKILL whatever still matches.
+stop_matching() {
+    local pattern="$1" what="$2" pids
+    pids=$(pgrep -u "$(id -u)" -f -- "$pattern" || true)
+    [ -z "$pids" ] && return 0
+    echo "start-debug: stopping the running $what ($(echo "$pids" | tr '\n' ' '))" >&2
+    kill -TERM $pids 2>/dev/null || true
+    for _ in $(seq $((STOP_WAIT_S * 5))); do
+        pgrep -u "$(id -u)" -f -- "$pattern" >/dev/null || return 0
+        sleep 0.2
+    done
+    pids=$(pgrep -u "$(id -u)" -f -- "$pattern" || true)
+    [ -z "$pids" ] && return 0
+    echo "start-debug: $what still up after $STOP_WAIT_S s; killing" >&2
+    kill -KILL $pids 2>/dev/null || true
+}
+
+# The service first (its stop sequence ends its sessions, or with a keeper
+# hands them over), then the keeper left holding their ptys, which ends
+# them: a keeper stopped before the service would only be started again.
+stop_matching "(collins\.service\.main|collins-service) --app-id $APP_ID_RE" "$COLLINS_APP_ID service"
+stop_matching "(collins\.service\.keeper|collins-keeper) --app-id $APP_ID_RE" "$COLLINS_APP_ID keeper"
+
+exec python3 -m collins

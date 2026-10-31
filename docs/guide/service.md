@@ -70,7 +70,9 @@ installs the launcher and icons, no unit) spawns the service too: with no
 `collins-service` on `PATH`, the window runs `python3 -m
 collins.service.main` from its own checkout. The debug instance
 (`./start-debug`, app id `com.episode6.Collins.Debug`) always spawns its
-own, with no unit, beside your real one. It shares your config directory
+own, with no unit, beside your real one: the script first stops any
+service (and keeper) already running under the debug id, so the window
+and the service it then spawns both run the checkout it was started from. It shares your config directory
 and so your `state.json`: run the debug instance and the real one one at a
 time.
 
