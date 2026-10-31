@@ -138,6 +138,9 @@ import it. It holds:
 - **Versioning is additive.** `PROTOCOL` and `MIN_PROTOCOL` (both 1,
   pinned) bound what a peer speaks; the window is at most two wide, so an
   upgraded client still talks to a service with running agents.
+  `negotiate(own, own_min, peer, peer_min)` gives both sides the same
+  answer, None being the mismatch dialog. Also here: `QUEUE_BYTES` (4 MiB),
+  the keepalive pair (10 s, 10 s), `LOCAL_PROOF_BYTES`.
 - **The module is MIT and the API is published.** `docs/api/index.md` is
   the prose spec, `docs/api/messages.md` the reference
   `scripts/gen_api_reference.py` renders from `TYPES` (every type under
@@ -149,9 +152,6 @@ import it. It holds:
   `protocol.py`): a new module under `collins/api/` is GPL, and nothing
   of the private design spec belongs in a `MessageType.summary`, which
   the public page prints verbatim.
-  `negotiate(own, own_min, peer, peer_min)` gives both sides the same
-  answer, None being the mismatch dialog. Also here: `QUEUE_BYTES` (4 MiB),
-  the keepalive pair (10 s, 10 s), `LOCAL_PROOF_BYTES`.
 
 The module docstring's "Shapes the spec left to this module" records each
 field shape chosen beyond the spec's text; read it before adding a field.
