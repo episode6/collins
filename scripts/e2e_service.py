@@ -70,6 +70,8 @@ WAIT_S = 20.0
 STOP_S = 15.0
 
 _services: list[subprocess.Popen] = []
+_keepers: list[subprocess.Popen] = []  # the keepers this harness started (start_keeper)
+_keeper_ids: set[str] = set()  # the app ids whose keeper this check's services run on
 
 
 def _die_with_parent() -> None:
@@ -96,9 +98,83 @@ def _stop(proc: subprocess.Popen) -> None:
             pass
 
 
+def start_keeper(app_id: str, env: dict, wait_s: float = WAIT_S) -> subprocess.Popen | None:
+    """The check's keeper (PR-3.6), started by the harness itself, as a
+    child of the check with `PR_SET_PDEATHSIG` (S7 of the review of PR
+    629): a check killed on its deadline, a segfault or a SIGKILL takes the
+    keeper with it (SIGTERM, so it still ends its children) instead of
+    leaving it and the check's shims behind, where a keeper the service
+    spawns detached would outlive everything. The service then finds it on
+    its socket. None when the keeper is off (`COLLINS_KEEPER=none`).
+    **Call this from the main thread**: Linux ties `PR_SET_PDEATHSIG` to
+    the thread that forked, so a keeper started from a worker thread is
+    SIGTERMed, and every session with it, when that thread exits."""
+    from collins.service import keeper
+    from collins.service import main as service_main
+
+    if not service_main.keeper_wanted():
+        return None
+    path = api_server.keeper_socket_path(app_id)
+    if keeper.read_pid(path) is not None:
+        return None  # one runs already (a second service on the same id)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "collins.service.keeper", "--app-id", app_id, "--socket", path],
+        env=env,
+        cwd=REPO,
+        stdin=subprocess.DEVNULL,
+        preexec_fn=_die_with_parent,
+    )
+    deadline = time.monotonic() + wait_s
+    while keeper.read_pid(path) is None:
+        if proc.poll() is not None:
+            raise RuntimeError(f"collins-keeper exited {proc.returncode} before listening on {path}")
+        if time.monotonic() >= deadline:
+            proc.kill()
+            raise RuntimeError(f"collins-keeper did not listen on {path} within {wait_s:.0f} s")
+        time.sleep(0.05)
+    _keepers.append(proc)
+    return proc
+
+
+def _stop_keepers() -> None:
+    """The keeper each check's service runs on (PR-3.6): with it present
+    a service's SIGTERM leaves every pty running for the next service, so
+    the check's shims would outlive the check. SIGTERM to the keeper ends
+    its children; it is found by the pid file beside its socket, and
+    killed outright after a bounded wait."""
+    import signal as _signal
+
+    from collins.service import keeper
+
+    for app_id in list(_keeper_ids):
+        pid = keeper.read_pid(api_server.keeper_socket_path(app_id))
+        if pid is None:
+            continue
+        try:
+            os.kill(pid, _signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and os.path.exists(f"/proc/{pid}"):
+            time.sleep(0.05)
+        if os.path.exists(f"/proc/{pid}"):
+            try:
+                os.kill(pid, _signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    for proc in list(_keepers):
+        _stop(proc)
+
+
 def _stop_all() -> None:
+    """Every service this check started, then the keeper (the `atexit`;
+    a check's own deadline handler calls it too before `os._exit`, since
+    that exit skips the `atexit` and would leave the keeper and its
+    children behind)."""
     for proc in list(_services):
         _stop(proc)
+    _stop_keepers()
     if RUNTIME_DIR:
         import shutil
 
@@ -146,6 +222,10 @@ def start_service(
         env["COLLINS_E2E_STUBS"] = STUBS_MODULE
         env["COLLINS_E2E_STUBS_DATA"] = _stubs_data
     path = api_server.socket_path(app_id)
+    _keeper_ids.add(app_id)
+    # The keeper first, as the check's own child (S7), so the service finds
+    # it rather than spawning one detached.
+    start_keeper(app_id, env)
     proc = subprocess.Popen(
         [sys.executable, "-m", "collins.service.main", "--app-id", app_id],
         env=env,
@@ -170,10 +250,20 @@ def start_service(
 
 def stop_service(proc: subprocess.Popen) -> None:
     """SIGTERM the service and wait (a check that wants it gone before it
-    ends)."""
+    ends). With a keeper (PR-3.6) the service's ptys run on, for the next
+    `start_service` on the same app id to adopt; the keeper itself is
+    ended at the check's exit."""
     _stop(proc)
     if proc in _services:
         _services.remove(proc)
+
+
+def keeper_pid(app_id: str | None = None) -> int | None:
+    """The pid of the keeper serving *app_id* (default: the check's), None
+    with none running."""
+    from collins.service import keeper
+
+    return keeper.read_pid(api_server.keeper_socket_path(app_id or os.environ["COLLINS_APP_ID"]))
 
 
 def harness_link(device: str = "harness", stubs: dict | None = None):

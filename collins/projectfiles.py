@@ -135,10 +135,12 @@ import re
 import secrets
 import shutil
 import stat as stat_mod
+import threading
 from collections import deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from .sessions import worktree_project_root
 
@@ -1075,6 +1077,11 @@ def _copy_tree(
     sfd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=src_fd)
     try:
         tmp, dfd = _make_temp_dir(dst_fd)
+        # The top temporary directory is recorded as a copy in flight
+        # (`inflight_copies` in state.json, PR-3.6) until it lands or is
+        # undone: a service that dies between removes exactly this tree at
+        # its next start (`remove_inflight`, §8).
+        token = _inflight_begin(tmp)
         errors = _WalkErrors()
         try:
             _walk(sfd, dfd, *(labels or (name, newname)), errors)
@@ -1095,6 +1102,7 @@ def _copy_tree(
             raise
         finally:
             _close(dfd)
+            _inflight_end(token)
         if errors:
             # Raised after the landing, never before it: the walk finished,
             # so the tree lands short of its error entries, as `copytree`
@@ -1425,12 +1433,82 @@ def _place(
         _close(dfd, sfd)
 
 
+# The copy-in-flight recorder of the paste running on this thread
+# (`paste_entries`'s *inflight*): `_copy_tree` tells it the temporary name
+# its tree builds under and when that is over. Thread-local, since the
+# service runs each paste on a worker of its own and the tree copy has
+# no other way to the request's destination.
+_INFLIGHT = threading.local()
+
+
+class InflightRecorder(Protocol):
+    """What `paste_entries` takes as *inflight*: `begin(dest, name)` records
+    a tree copy building under *name* in the directory *dest* and returns a
+    token; `end(token)` clears it. Both run on the paste's thread."""
+
+    def begin(self, dest: str, name: str) -> object: ...
+
+    def end(self, token: object) -> None: ...
+
+
+def _inflight_begin(name: str) -> object | None:
+    recorder = getattr(_INFLIGHT, "recorder", None)
+    dest = getattr(_INFLIGHT, "dest", None)
+    if recorder is None or dest is None:
+        return None
+    try:
+        return recorder.begin(dest, name)
+    except Exception:
+        log.exception("recording a copy in flight failed")
+        return None
+
+
+def _inflight_end(token: object | None) -> None:
+    recorder = getattr(_INFLIGHT, "recorder", None)
+    if token is None or recorder is None:
+        return
+    try:
+        recorder.end(token)
+    except Exception:
+        log.exception("clearing a copy in flight failed")
+
+
+def remove_inflight(dest: str, name: str) -> bool:
+    """A tree a dead service left building under the temporary *name* in
+    *dest* (an `inflight_copies` row), removed: only a directory (never a
+    link) whose name is a `_TEMP_NAME_RE` name, through its descriptor as
+    a failed copy's undo removes it (`_remove_tree` with *ours*). Whether
+    anything went; nothing else is touched (§8: exactly those trees)."""
+    if not isinstance(name, str) or not _TEMP_NAME_RE.match(name) or not isinstance(dest, str):
+        return False
+    try:
+        dfd = _open_dir(dest)
+    except OSError:
+        return False
+    try:
+        try:
+            fd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=dfd)
+        except OSError:
+            return False
+        try:
+            _remove_tree(dfd, name, fd, ours=True)
+        except OSError as err:
+            log.warning("%s/%s: removing the unfinished copy failed: %s", dest, name, err)
+            return False
+        finally:
+            _close(fd)
+    finally:
+        _close(dfd)
+    return True
+
+
 def paste_entries(
     root: str | Path,
     dest_dir: str | Path,
     sources: list[str],
     move: bool = False,
     source_allowed: Callable[[str], bool] | None = None,
+    inflight: InflightRecorder | None = None,
 ) -> list[PasteOutcome]:
     """Paste every entry in *sources* into *dest_dir* — copying, or moving
     when *move* (a cut). One outcome per source, in order: a clipboard holding
@@ -1459,6 +1537,7 @@ def paste_entries(
     # kernel's own path of it; a destination that cannot be held refuses
     # every entry the way `paste_target` would.
     hold: tuple[int | None, PasteError | None, str] | None = None
+    _INFLIGHT.recorder, _INFLIGHT.dest = inflight, str(dest)
     try:
         for source in sources:
             src = Path(os.path.normpath(source))
@@ -1477,6 +1556,7 @@ def paste_entries(
                 continue
             outcomes.append(_paste_one(dst_fd, dest, src, target, move, source_allowed))
     finally:
+        _INFLIGHT.recorder = _INFLIGHT.dest = None
         if hold is not None:
             _close(hold[0])
     return outcomes

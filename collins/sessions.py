@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -185,9 +185,17 @@ def _scan_transcript(path: Path) -> tuple[str | None, str, float | None]:
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             read = 0
-            for i, line in enumerate(fh):
+            for _i in range(_MAX_SCAN_LINES):
+                # A bounded read: one first line holding a pasted image's
+                # base64 (megabytes) would otherwise be read whole before
+                # the byte bound applied (V2-N3 of the verification of PR
+                # 629); a line cut at the bound is no record and ends the
+                # scan.
+                line = fh.readline(_MAX_SCAN_BYTES + 1)
+                if not line:
+                    break
                 read += len(line)
-                if i >= _MAX_SCAN_LINES or read > _MAX_SCAN_BYTES:
+                if read > _MAX_SCAN_BYTES:
                     break
                 try:
                     entry = json.loads(line)

@@ -139,21 +139,41 @@ read elsewhere meanwhile comes down.
 
 ## Restarting and stopping
 
-**Restart service** (the main menu) says what it costs (how many
-foreground sessions run, how many are working, and that the `/bg`
-background agents keep running: they belong to the CLI's daemon, not to
-the service, see below), and ends every foreground session the way *Stop
-Sessions and Quit* does. *Restart Now* does it at once; *Restart When
-Idle* has the service wait until no session is busy (it looks every 2 s),
-shown as "Restarting when idle" with a Cancel where the reconnect banner
-goes. The service disconnects its windows first, so a window sees the
-link go rather than each session end, reconnects to the new service and
-resumes every open tab.
+**A restart ends no session.** The service does not hold the sessions'
+terminals itself: a second small program, **`collins-keeper`**, forks
+every agent and panel shell on the service's behalf, stays their parent
+and keeps a duplicate of every terminal's master. When the service stops,
+whatever runs in those terminals keeps running: an agent mid-turn blocks
+on its output for the moment the service is away, and the service that
+starts next asks the keeper for its terminals, loads the screen it saved
+for each (the screen model of record, written every few seconds and at
+the stop), makes every program repaint, and picks up where the last one
+stopped. For a sandboxed session it holds the box again, mounts its live
+grants again and only then sweeps what nothing uses. What is lost is at
+most the last read the dying service had taken and not yet shown, which
+the repaint puts right.
 
-A crash of the service ends every foreground agent, as a crash of the old
-single process did; the sessions are resumable, and the window's
-reconnect brings them back. The `/bg` daemon and its agents hold no pty
-of the service's and run on.
+**Restart service** (the main menu) says what the restart means for the
+sessions (how many run, how many are working, that they keep running
+through it and each open tab shows its own again once the service is
+back; and that the `/bg` background agents keep running too: they belong
+to the CLI's daemon, see below). *Restart Now* does it at once; *Restart
+When Idle* has the service wait until no session is busy (it looks every
+2 s), shown as "Restarting when idle" with a Cancel where the reconnect
+banner goes. The service disconnects its windows first, so a window sees
+the link go, reconnects to the new service and attaches every open tab
+again. Without a keeper (none could be started, or `COLLINS_KEEPER=none`
+in the service's environment) the restart is the old one: every
+foreground session ends gracefully, is recorded as resumable, and each
+open tab resumes its own once the service is back; the dialog says which.
+
+A crash of the service ends nothing either: the keeper holds the
+terminals, the next service adopts them. A crash of the **keeper** loses
+nothing running (its children are reparented and run on, the service
+reads them still) but their exit statuses: the service starts another
+keeper and hands it the terminals, and such a session's end is reported
+with no status. The `/bg` daemon and its agents hold no pty of the
+service's and run on through any of it.
 
 **The protocol mismatch dialog.** A service and a window speak the same
 protocol or one apart; outside that the window refuses to connect and names
@@ -169,21 +189,50 @@ systemctl --user stop collins-service.service   # the unit
 kill $(pgrep -f 'bin/collins-service')           # a spawned one
 ```
 
-Either is SIGTERM. Stopping ends every foreground session the way *Stop
-Sessions and Quit* does: each agent is asked to exit (the CLI's own exit
-keystrokes, a worktree dialog answered, a bounded wait, then the process
-ended for good), its session id is recorded (`resume_on_start` in
+Either is SIGTERM, and with the keeper present **it stops the service
+alone**: every session runs on under the keeper, blocked on its output,
+until the next service adopts it (the next window starts one). To stop
+every session for good, stop the keeper as well:
+
+```bash
+systemctl --user stop collins-keeper.service   # ends every session it holds
+# a keeper the service spawned itself (no unit): its pid file names it
+pid=$(cat "$XDG_RUNTIME_DIR"/collins/com.episode6.Collins/keeper.pid)
+grep -q collins-keeper /proc/"$pid"/cmdline && kill "$pid"
+```
+
+The pid file is removed when the keeper exits by itself; one left by a
+keeper that was killed can name any process by now, which is what the
+`cmdline` check is for. Only one keeper runs per app id: a second one
+started on the same socket (by hand, by a stall, by an upgrade) exits 0
+on the first one's lock and changes nothing. A keeper that speaks an
+older protocol than the service and still holds sessions is left alone,
+and so is one that is there but does not answer: the service runs
+without a keeper, touches none of those sessions' rows, saved screens,
+sandbox plans or boxes, refuses to start a second copy of any of them
+("running in a keeper this Collins service cannot read"), says so in the
+*Restart service* dialog ("held by a keeper this service cannot take
+over"), and stopping that keeper is the way on. Without any keeper
+process at all the rows name sessions that are gone, and are dropped.
+
+The keeper ends each child it holds (SIGHUP, then SIGKILL) and exits. A
+service stopped with no keeper ends every foreground session the way
+*Stop Sessions and Quit* does: each agent is asked to exit (the CLI's own
+exit keystrokes, a worktree dialog answered, a bounded wait, then the
+process ended for good), its session id is recorded (`resume_on_start` in
 `state.json`), and the service exits 0, so the unit does not restart it by
 itself; the next window starts it again and finds the sessions resumable.
 *Restart service* runs the same stop sequence (`service.restart`) and
 exits as cleanly; the window that asked reconnects and starts it again.
 
-The unit is `KillMode=process`: systemd signals the service alone, never
-the agents or the CLI's background daemon, so the graceful sequence above
-is the service's own doing, and `/bg` agents and the daemon behind them
-outlive a stop, a restart or a package upgrade of the service. Foreground
-sessions do not, yet: their ptys close with the service that holds them,
-until a later release's keeper holds them across a restart.
+Both units are `KillMode=process`: systemd signals the service (or the
+keeper) alone, never the agents or the CLI's background daemon. A stop, a
+restart or a package upgrade of the service therefore ends nothing: the
+keeper holds the sessions' terminals, and `/bg` agents and the daemon
+behind them were never the service's. The keeper's unit,
+`collins-keeper.service`, ships beside the service's and is started by the
+service on demand (never enabled by a package); where there is no
+systemd, or no unit, the service spawns `collins-keeper` itself, detached.
 
 ## Where things live
 
@@ -191,6 +240,8 @@ until a later release's keeper holds them across a restart.
 | --- | --- |
 | The API socket | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` (0600, directory 0700) |
 | Single-instance lock | `service.lock` beside it, held for the service's life |
+| The keeper's socket, pid and lock | `keeper.sock`, `keeper.pid` and `keeper.lock` beside it |
+| Each terminal's saved screen | `~/.local/state/collins/pty/<app id>/<pty id>.model`, written every few seconds and at a stop, read by the next service, removed when the terminal ends |
 | The local proof | `local-proof` beside it: 32 random bytes, 0600, minted at each start |
 | With no `$XDG_RUNTIME_DIR` | `~/.local/state/collins/<app id>/` for the three above; a path too long for a Unix socket falls back to a 0700 directory under the temp directory |
 | The session tools' socket | `mcp.sock` beside `api.sock` when `$XDG_RUNTIME_DIR` is set; under the temp directory (`/tmp/collins/<app id>/`) otherwise |
@@ -238,6 +289,12 @@ login shell's `PATH`.
 - **Lingering.** Without `loginctl enable-linger`, the user manager, the
   service and `$XDG_RUNTIME_DIR` go away at logout and do not exist at
   boot. On a headless box, `loginctl enable-linger` is the first step.
+  Without a runtime directory the keeper's lock falls back under
+  `~/.local/state/collins/<app id>/` with the rest; on a home directory
+  shared over NFS by two machines, Linux's NFS `flock` emulation can make
+  one machine's keeper exit on the other's lock, which leaves that
+  machine keeperless (its service then forks its own ptys and a restart
+  ends them). A runtime directory, which every login session has, avoids it.
 - **The CLI on `PATH`.** Shells spawn with the service's environment
   overlaid by a login-shell capture, which is what finds
   `~/.local/bin/claude` and your `PATH` on a box with no desktop. Once at

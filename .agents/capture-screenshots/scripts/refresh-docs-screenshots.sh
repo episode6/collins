@@ -25,6 +25,10 @@ export COLLINS_CLAUDE_CONFIG="$E2E/claude.json"
 export COLLINS_CHATS_DIR="$E2E/chats"
 export COLLINS_UPLOADS_DIR="$E2E/uploads"
 export COLLINS_USAGE_FIXTURE="$E2E/usage-fixture.json"
+# No keeper for a capture (PR-3.6): the window spawns its service detached,
+# and a keeper that service spawned would outlive the run holding its
+# shells; without one the service ends every session when it stops.
+export COLLINS_KEEPER=none
 export XDG_CONFIG_HOME="$E2E/config"
 export XDG_STATE_HOME="$E2E/state"
 export HOME="$E2E"                # paths render as ~/dev/<project>

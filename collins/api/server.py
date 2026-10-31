@@ -172,6 +172,12 @@ def lock_path(app_id: str) -> str:
     return os.path.join(runtime_dir(app_id), "service.lock")
 
 
+def keeper_socket_path(app_id: str) -> str:
+    """The keeper's socket (PR-3.6), beside the API socket: what the
+    service connects to and passes a keeper it spawns as ``--socket``."""
+    return os.path.join(runtime_dir(app_id), "keeper.sock")
+
+
 def socket_path(app_id: str) -> str:
     return os.path.join(runtime_dir(app_id), SOCKET_NAME)
 

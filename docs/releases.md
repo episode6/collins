@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-29. Full change history: git log for this file.
+fork. Last modified: 2026-10-30. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -91,6 +91,28 @@ downloads of each version, see the
   A picture or file dropped before its session has started is shown back
   only to the computer that dropped it.
   See [Two windows on one session](/guide/remote#two-windows-on-one-session).
+- **A service restart keeps every session running.** A small companion
+  program, `collins-keeper`, now forks every agent and terminal-panel
+  shell on the service's behalf and holds their terminals, so stopping or
+  restarting the service (*Restart service*, an upgrade, `systemctl --user
+  restart collins-service`) ends nothing: the next service takes the
+  terminals over, loads the screen it had saved for each, makes every
+  program repaint, holds each sandbox again with its live grants mounted
+  again, and every open tab shows its session where it was, mid-turn
+  included, its row still an open row in the sidebar and in the footer's
+  count. The *Restart service* dialog says so instead of counting the
+  sessions that would end, and *Restart Now* is no longer destructive. A
+  crash of the service ends nothing either. To stop every session for
+  good, stop the keeper (`systemctl --user stop collins-keeper.service`).
+  The keeper has its own user unit beside the service's (`KillMode=process`
+  too), installed by `collins --install-desktop`; the service starts it on
+  demand and spawns one itself where there is no systemd, and only one
+  runs per app id. The pty table in `state.json` and the saved screens
+  are kept per app id, so a debug instance beside the real one never
+  takes over or drops the other's sessions. A service that
+  died in the middle of copying a folder in the editor's file tree now
+  removes exactly the unfinished copy at its next start (the copies in
+  flight are recorded in `state.json`).
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch

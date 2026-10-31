@@ -641,6 +641,14 @@ class SessionRecord:
         self.send(changed)
         self.core.session_transcript_landed(self)
 
+    def running_session_ids(self) -> set[str]:
+        """The ids every *other* live agent pty runs (`agent_pty_sessions`),
+        for the resolver's refusal to bind one of them (N-M2)."""
+        return {
+            sid for pty_id, sid in self.core.agent_pty_sessions().items()
+            if sid and pty_id != self.pty_id
+        }
+
     def session_resolved(self, session_id: str) -> None:
         self.core.session_resolved(self, session_id)
         self._send_changed({"session": session_id, **self.box_facts(), **self.sandbox_facts()})

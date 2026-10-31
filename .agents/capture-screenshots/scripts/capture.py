@@ -10,7 +10,9 @@ a concurrent agent session would share — plus the data-isolation env vars,
 each pointing into a per-run scratch tree: COLLINS_PROJECTS_DIR,
 COLLINS_CLAUDE_CONFIG, COLLINS_CHATS_DIR, XDG_CONFIG_HOME, XDG_STATE_HOME.
 COLLINS_CHATS_DIR especially: without it this run reaps the user's live chat
-working directories (see the skill).
+working directories (see the skill). COLLINS_KEEPER=none too (PR-3.6): the
+service this window spawns detached would otherwise spawn a keeper that
+outlives the run, holding the shells the capture opened.
 
 Run this behind scripts/with-headless-display.sh, or the window opens on the
 user's screen and takes focus for the whole settle period.

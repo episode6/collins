@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-10-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1193,6 +1193,30 @@ class MainWindow(Adw.ApplicationWindow):
                     shell.reattach()
                 except Exception:
                     log.exception("a panel shell failed to reattach")
+        self._resync_statuses()
+
+    def _resync_statuses(self) -> None:
+        """Say again what this window shows (D29: a row's `status` is what a
+        person did at a client's screen, kept on the service's items in
+        memory). A service that restarted under the tabs (PR-3.6) starts
+        every row blank and knows nothing of the tabs it adopted the ptys
+        of, so the sidebar's "open" rows and the footer's count would stay
+        lost; a reconnect to the same service finds nothing to change.
+        Differences only, so it runs on every store refresh too: the
+        restarted service sends no rows until its first scan has landed
+        (storefeed.subscribe), and the window reconnects as soon as it
+        listens, so on a large projects directory the reattach finds an
+        empty mirror and the rows come later (V5-S1)."""
+        rows = set(self._pages)
+        rows.update(sid for sid in self.store.row_ids() if self._is_detached(sid))
+        for row_id in rows:
+            item = self.store.get_item(row_id)
+            if item is None or item.status == self._row_status(row_id):
+                continue
+            try:
+                self._sync_status(row_id)
+            except Exception:
+                log.exception("a row's status did not resync")
 
     def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):
@@ -3479,18 +3503,12 @@ class MainWindow(Adw.ApplicationWindow):
         # A transcript that moved under a session on worktree entry is the
         # service's to follow (ServiceCore.sync_transcript_paths, PR-1.12d).
         self._refresh_tab_titles()
-        # Freshly discovered rows start with no status; re-assert yellow lines
-        # for the rows the service says run detached (no-op when unchanged):
-        # a row made by this refresh took its `background` without a signal.
-        for row_id in self.store.row_ids():
-            item = self.store.get_item(row_id)
-            if (
-                item is not None
-                and item.background
-                and item.status != "background"
-                and self._page_for(row_id) is None
-            ):
-                self._sync_status(row_id)
+        # Freshly discovered rows start with no status; re-assert the yellow
+        # lines of the rows the service says run detached (a row made by
+        # this refresh took its `background` without a signal) and the
+        # in-tab status of the rows this window's tabs show (the rows of a
+        # restarted service land after the reattach: V5-S1). Differences only.
+        self._resync_statuses()
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
         # A handoff's in-flight state as the rows now have it: a row made
@@ -5929,10 +5947,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _ask_restart_service(self) -> None:
         """*Restart service* (§3.21): the blast radius first — the sessions
         the service runs, how many of them are working, and the /bg agents
-        that outlive it — then a restart now, or once none is busy. Every
-        foreground session ends with the service and each open tab resumes
-        its own once it is back, as a quit and a relaunch did before the
-        service; the CLI's background daemon and its agents run on (D52)."""
+        that outlive it — then a restart now, or once none is busy. With
+        a keeper (`service.status`'s `keeper`, PR-3.6) every session runs
+        on through the restart and each open tab shows its own again;
+        without one every foreground session ends with the service and
+        each open tab resumes its own once it is back, as a quit and a
+        relaunch did before the service. The CLI's background daemon and
+        its agents run on either way (D52)."""
         app = self.get_application()
         link = getattr(app, "_service_link", None)
         try:
@@ -5950,11 +5971,19 @@ class MainWindow(Adw.ApplicationWindow):
         background = sum(
             1 for i in range(model.get_n_items()) if (model.get_item(i).background or "")
         )
-        body = quitrules.restart_body(sessions=sessions, busy=busy, background=background)
+        # With a keeper (PR-3.6) the sessions run on through the restart:
+        # the dialog says so, and *Restart Now* is no longer destructive.
+        keeper = bool(status.get("keeper"))
+        body = quitrules.restart_body(
+            sessions=sessions, busy=busy, background=background, keeper=keeper,
+            unkept=int(status.get("unkept") or 0),
+            mismatch=max(int(status.get("keeper_mismatch") or 0), int(status.get("keeper_held") or 0)),
+        )
         choices = []
         if busy:
             choices.append(("idle", _("Restart When Idle"), ""))
-        choices.append(("now", _("Restart Now"), "destructive" if sessions else "suggested"))
+        destructive = bool(sessions) and not keeper
+        choices.append(("now", _("Restart Now"), "destructive" if destructive else "suggested"))
 
         def answered(response: str) -> None:
             if response in ("now", "idle") and hasattr(app, "restart_service"):

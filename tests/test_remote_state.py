@@ -323,7 +323,7 @@ def test_every_shared_key_survives_the_trip(app_state, tmp_path):
     service.set_process_baseline("s1", ["node mcp"])
     service.forward_session("s1", "s4")
     service.set_pending_detach("s5", provider="claude", cwd="/home/u", uuid="u")
-    service.set_pty(3, {"kind": "agent", "cwd": "/home/u", "cols": 80, "rows": 24})
+    service.set_pty("com.example.App", 3, {"kind": "agent", "cwd": "/home/u", "cols": 80, "rows": 24})
     service.set_setting("title_model", "none")
     link = FakeLink()
     mirror = RemoteState(link, ui=uistate.UiState(tmp_path / "ui.json", device_defaults()))

@@ -156,11 +156,14 @@ from typing import Any, Protocol
 from gi.repository import GLib
 
 from .. import (
+    APP_ID,
     autodelete,
     chats,
     clisetup,
     notifycenter,
     panelhistory,
+    proctree,
+    projectfiles,
     providers,
     sandboxgrants,
     sandboxplan,
@@ -188,6 +191,7 @@ from . import (
 from . import blobs as blobs_mod
 from . import diffs as diffs_mod
 from . import files as files_mod
+from . import keeper as keeper_mod
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
@@ -216,6 +220,9 @@ SPAWN_ENV_STRIPPED = (
     "JOURNAL_STREAM",
 )
 ALREADY_RUNNING_MSGID = protocol.ALREADY_RUNNING_MSGID
+# A session whose pty a keeper holds that this service could not read or
+# speak to (`keeper_unread`): a second CLI on its transcript is refused.
+HELD_BY_KEEPER_MSGID = N_("This session is running in a keeper this Collins service cannot read")
 # How long stop_sessions waits for every close flow (the agent's exit
 # budget, the shell's, the SIGKILL grace) before shutting what is left.
 STOP_BOUND_S = 30.0
@@ -264,17 +271,22 @@ class ServiceCore:
         on_stream_event: Callable[[int, object], None] | None = None,
         sandbox_plan: Callable[[str], str | None] | None = None,
         state=None,
+        app_id: str | None = None,
     ) -> None:
         """*record*, *record_next_id* and *next_id* are `AppState.set_pty`,
-        `AppState.set_pty_next_id` and `AppState.pty_next_id` (the pty table
-        of §3.8); *get_setting* reads the service's settings (only
-        ``progress_termprop`` so far); *environment* is the session
-        environment of §3.10 (the process's own by default); *on_stream_event*
-        hears every stream event (progress, bell, title, modes) off every
-        pty, for the service's own detection (§3.6); *sandbox_plan*
-        is the plan file the session running in a box launched from, by the
-        box's id (None when there is none): what a sandboxed panel shell is
-        spawned on.
+        `AppState.set_pty_next_id` and `AppState.get_pty_next_id` for this
+        service's *app_id* (the pty table of §3.8, by app id: PR-3.6's
+        ruling on M4 of the review of PR 629; the default is the
+        environment's ``COLLINS_APP_ID``, else the app's); *get_setting*
+        reads the service's settings (only ``progress_termprop`` so far);
+        *environment* is the session environment of §3.10 (the process's
+        own by default); *on_stream_event* hears every stream event
+        (progress, bell, title, modes) off every pty, for the service's
+        own detection (§3.6); *sandbox_plan* is the plan file the session
+        running in a box launched from, by the box's id (None when there
+        is none): what a sandboxed panel shell is spawned on. *state_dir*
+        is the pty models' root; the files live in its ``<app id>/``
+        subdirectory.
 
         *state* is the service's `AppState`; given one, the pty table is
         written to it and the settings are read off it (the callables above
@@ -287,11 +299,13 @@ class ServiceCore:
         self.notifications: notifications_mod.ServiceNotifications | None = None
         self.prs: prfeed.PrFeed | None = None
         self.diffs: diffs_mod.DiffNotes | None = None
+        self.app_id = app_id or os.environ.get("COLLINS_APP_ID") or APP_ID
         if state is not None:
-            record = record or state.set_pty
-            record_next_id = record_next_id or state.set_pty_next_id
+            own = self.app_id
+            record = record or (lambda pty_id, row: state.set_pty(own, pty_id, row))
+            record_next_id = record_next_id or (lambda n: state.set_pty_next_id(own, n))
             if next_id is None:
-                next_id = state.pty_next_id
+                next_id = state.get_pty_next_id(own)
             get_setting = state.get_setting
         self._get_setting = get_setting
         # The sessions (§3.19): one record per live agent pty, by pty id.
@@ -300,7 +314,7 @@ class ServiceCore:
         self._environment = environment or (lambda: dict(os.environ))
         self._stream_listener = on_stream_event
         self.ptys = ptyserver.PtyServer(
-            state_dir=state_dir,
+            state_dir=Path(state_dir or ptyserver.default_state_dir()) / self.app_id,
             record=record,
             record_next_id=record_next_id,
             next_id=1 if next_id is None else next_id,
@@ -327,6 +341,9 @@ class ServiceCore:
         # The device each pending upload came from (PR-3.5): a drop made
         # before its session had an id is served back to that device only.
         self.pending_owners = uploads_mod.PendingOwners()
+        # The tree copies fs.paste has in flight, as rows of state.json
+        # (PR-3.6, §8): what `remove_inflight_copies` reads at start.
+        self.inflight_copies = InflightCopies(self)
         self.file_blobs = blobs_mod.FileBlobs(self)
         self.remote_blobs = blobs_mod.RemoteBlobs(self)
         self.icon_blobs = blobs_mod.IconBlobs(self)
@@ -348,7 +365,6 @@ class ServiceCore:
         self._gh_wanted = 0  # bumped by each drop of the answer (check_gh)
         self._sweep_source = 0
         self._orphan_sweep_refused = False  # logged once (sweep_orphan_uploads)
-        self.app_id = ""
         # The e2e probe (D27): served only when the service runs with the
         # flag in its environment.
         self.debug = os.environ.get("COLLINS_DEBUG_API") == "1"
@@ -365,9 +381,247 @@ class ServiceCore:
         # hosting.SessionRecord._send_changed): a session counts as running
         # only while it does (cli_changed).
         self._cli_running: dict[int, bool] = {}
+        # The plan files the adopted ptys launched from (PR-3.6): what the
+        # start-up sweep of plan files keeps.
+        self._adopted_plans: set[str] = set()
+        # A keeper of another protocol that holds ptys (PR-3.6's ruling on
+        # an older keeper): how many it holds; the service runs without one
+        # and `service.status` says so (`keeper_mismatch`).
+        self.keeper_mismatch = 0
+        # Whether a keeper exists for this app id that the service could not
+        # read or speak to at start (M3 of the review of PR 629, and its
+        # verification's N-M1: an unreadable list, another protocol, one
+        # that does not answer): nothing is adopted, dropped, pruned or
+        # swept, the rows wait for a service that can read it, and a
+        # session they name is refused a second spawn (`keeper_held`).
+        self.keeper_unread = False
+        self.keeper_unread_reason = ""
+        self.keeper_unread_pid: int | None = None  # the unread keeper's pid, when known
+
+    # -- the keeper and the adoption (PR-3.6, §3.10 item 2)
+
+    def attach_keeper(self, client, restart: Callable[[], object] | None = None) -> None:
+        """Every spawn goes through *client* (a connected
+        `keeper.KeeperClient`) from here on; *restart* brings a new keeper
+        when it is lost (`PtyServer._keeper_lost`)."""
+        self.ptys.keeper = client
+        self.ptys._keeper_restart = restart
+
+    def adopt_ptys(self) -> list[int]:
+        """At start, before the store: every pty the keeper lists whose row
+        the state kept for this app id is adopted (`PtyServer.adopt`, at the
+        grid the keeper read off the master), an agent's with a
+        `SessionRecord` over it (`adopt_session`); a row the keeper has no
+        pty for is dropped (the pty died with a service that had no keeper,
+        or the keeper was restarted and lost it); a pty the keeper holds
+        with no row is adopted as an anonymous shell (kind ``shell``, its
+        cwd read off ``/proc``, no session: PR-3.6's ruling, the review of
+        PR 629's Q3) and never signalled for the absence of a row. Then
+        every adopted program is made to repaint, and the model files of
+        ptys not in the table are pruned. **A keeper whose list cannot be
+        read leaves everything as it is** (M3): no row dropped, no model
+        pruned, nothing adopted; `keeper_unread` says so. Only this app
+        id's rows and files are read or touched (M4). Returns the adopted
+        ids."""
+        keeper = self.ptys.keeper
+        rows = self.state.get_ptys(self.app_id) if self.state is not None else {}
+        log.info("adoption: %d row(s) in the pty table for %s: %s", len(rows), self.app_id, sorted(rows))
+        adopted: list[int] = []
+        entries: list[dict] = []
+        if self.keeper_unread:
+            # A keeper exists that this service cannot read or speak to
+            # (`mark_keeper_unread`): its ptys live, so every row and model
+            # stays for a service that can (N-M1).
+            log.error(
+                "a keeper holds this app id's ptys and cannot be read (%s): %d row(s) left as they are",
+                self.keeper_unread_reason, len(rows),
+            )
+            return []
+        if keeper is not None:
+            try:
+                entries = keeper.list(with_fds=True)
+            except keeper_mod.KeeperError as exc:
+                log.error(
+                    "the keeper's list could not be read (%s): %d row(s) left as they are, nothing adopted",
+                    exc, len(rows),
+                )
+                self.mark_keeper_unread("its list could not be read")
+                return []
+        seen: set[int] = set()
+        for entry in entries:
+            try:
+                pty_id, pid, fd = int(entry["id"]), int(entry["pid"]), int(entry["fd"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            seen.add(pty_id)
+            row = rows.get(pty_id)
+            alive = bool(entry.get("alive"))
+            grid = (entry.get("cols"), entry.get("rows"))
+            if row is None:
+                log.warning("pty %d: held by the keeper with no row in the state; adopted as a shell", pty_id)
+                row = {"kind": "shell", "cwd": proctree.process_cwd(pid) or str(Path.home())}
+            try:
+                pty = self.ptys.adopt(pty_id, fd, pid, row, alive=alive, grid=grid)
+            except Exception:
+                log.exception("pty %d: adopting it failed; left to the keeper", pty_id)
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                continue
+            if not alive:
+                status = entry.get("status")
+                if isinstance(status, int):
+                    try:
+                        pty.exit_status = os.waitstatus_to_exitcode(status)
+                    except ValueError:
+                        pty.exit_status = None
+            adopted.append(pty_id)
+            if pty.kind != "shell" and alive:
+                if pty.plan:
+                    self._adopted_plans.add(pty.plan)  # a live agent's (N5)
+                try:
+                    self.adopt_session(pty)
+                except Exception:
+                    log.exception("pty %d: no session could be built over the adopted pty", pty_id)
+        for pty_id in rows:
+            if pty_id not in seen and self.state is not None:
+                self.state.remove_pty(self.app_id, pty_id)
+        if rows and not seen:
+            log.info("no pty of the %d in the table survived; the rows are dropped", len(rows))
+        for pty_id in adopted:
+            pty = self.ptys.ptys.get(pty_id)
+            if pty is None:
+                continue
+            if not pty._reaped:
+                self.ptys.repaint(pty_id)
+            else:
+                # Already gone: the EOF its master reads finishes it
+                # (`_maybe_finish`); a shell's history is written there.
+                GLib.idle_add(self._finish_adopted_dead, pty, priority=GLib.PRIORITY_DEFAULT)
         pruned = self.ptys.prune_models()
         if pruned:
             log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
+        if adopted:
+            log.info("adopted %d pty(s) from the keeper: %s", len(adopted), adopted)
+        return adopted
+
+    def mark_keeper_unread(self, reason: str, pid: int | None = None) -> None:
+        """A keeper exists for this app id but this service cannot read it
+        or speak its protocol (*reason*; *pid* when known): the adoption
+        touches nothing, the sandbox sweeps are skipped, `service.status`
+        says so and a session a kept row names is refused a second spawn,
+        for as long as that keeper and the row's child live
+        (`held_session_ids`)."""
+        self.keeper_unread = True
+        self.keeper_unread_reason = reason
+        self.keeper_unread_pid = pid
+
+    def held_session_ids(self) -> set[str]:
+        """The sessions the kept rows name while the keeper is unread: each
+        has a CLI running somewhere this service cannot see. A row counts
+        only while its child (`pid`) and the unread keeper are alive (V2-S1
+        of the verification of PR 629): once the user has stopped that
+        keeper, as the dialog advises, its rows are dropped, their models
+        pruned, and with none left the service is no longer unread, so the
+        sessions resume as any ended session does."""
+        if not self.keeper_unread or self.state is None:
+            return set()
+        keeper_alive = self.keeper_unread_pid is None or keeper_mod.pid_alive(self.keeper_unread_pid)
+        held: set[str] = set()
+        live_rows = 0
+        for pty_id, row in self.state.get_ptys(self.app_id).items():
+            pid = row.get("pid")
+            whole = isinstance(pid, int) and not isinstance(pid, bool)
+            alive = keeper_alive and whole and keeper_mod.pid_alive(pid)
+            if not alive:
+                log.info("pty %d: its child or its keeper is gone; the row and its model are dropped", pty_id)
+                self.state.remove_pty(self.app_id, pty_id)
+                try:
+                    (self.ptys.state_dir / f"{pty_id}{ptyserver.MODEL_SUFFIX}").unlink()
+                except OSError:
+                    pass
+                continue
+            live_rows += 1
+            session = row.get("session")
+            if isinstance(session, str) and session:
+                held.add(session)
+        if not live_rows:
+            log.info("nothing is held by the unread keeper any more (%s)", self.keeper_unread_reason)
+            self.keeper_unread = False
+            self.keeper_unread_reason = ""
+            self.keeper_unread_pid = None
+            self.keeper_mismatch = 0
+            self.ptys.prune_models()
+        return held
+
+    def _finish_adopted_dead(self, pty: ptyserver.Pty) -> bool:
+        if pty.id in self.ptys.ptys and not pty._finished:
+            self.ptys._drain(pty)
+            self.ptys._finish(pty)
+        return GLib.SOURCE_REMOVE
+
+    def adopt_session(self, pty: ptyserver.Pty) -> hosting.SessionRecord:
+        """The `SessionRecord` of an adopted agent pty: built from the row
+        (its session id, cwd, options, box and plan) with nothing typed,
+        the transcript found by the id, and registered as a running
+        session when its CLI owns the terminal."""
+        provider = providers.get_provider("claude")
+        options = providers.options_from_record(pty.options)
+        transcript = self._transcript_for(provider, pty.session, pty.cwd)
+        record = hosting.SessionRecord(
+            self,
+            provider=provider,
+            session_id=pty.session,
+            options=options,
+            cwd=pty.cwd,
+            jsonl_path=transcript,
+            progress=True,
+            progress_env=self._get_setting("progress_termprop") in (None, True),
+        )
+        record.grid = (pty.cols, pty.rows)
+        record.pty_id = pty.id
+        pty.handle = record.handle
+        self.sessions[pty.id] = record
+        record.session.adopt(pty.cwd, box=pty.box or "", plan=pty.plan)
+        record.cli_ever_ran = True
+        if not pty.session and pty.cwd:
+            # No id yet (its first prompt not sent when the last service
+            # stopped, or sent moments before): the resolver, baselined at
+            # the child's start rather than now, so its own transcript is
+            # not swallowed (S6 of the review of PR 629).
+            since = keeper_mod.process_start_wall(pty.pid) if pty.pid else None
+            record.session.start_resolver(pty.cwd, since=since)
+        running = False
+        try:
+            running = bool(record.session.has_running_command())
+        except Exception:
+            log.exception("session %s: the adopted pty's foreground could not be read", record.handle)
+        if running:
+            self._cli_running[pty.id] = True
+        log.info(
+            "pty %d: adopted as session %s (%s)", pty.id, pty.session or "unresolved",
+            "the CLI runs" if running else "a shell alone",
+        )
+        return record
+
+    @staticmethod
+    def _transcript_for(provider, session_id: str | None, cwd: str) -> str | None:
+        """The transcript of *session_id*: the one in *cwd*'s project
+        directory, else the newest anywhere under the projects directory;
+        None with no id or no file."""
+        if not session_id or not sessions._UUID_RE.match(session_id):
+            return None
+        for path in provider.transcripts_for_cwd(cwd):
+            if path.stem == session_id and transcript_path_allowed(str(path)):
+                return str(path)
+        try:
+            candidates = list(provider.projects_dir.glob(f"*/{session_id}.jsonl"))
+            allowed = [p for p in candidates if transcript_path_allowed(str(p))]
+            found = sorted(allowed, key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return None
+        return str(found[0]) if found else None
 
     @classmethod
     def with_state(cls, **kwargs) -> ServiceCore:
@@ -582,6 +836,10 @@ class ServiceCore:
         if options is not None and message.get("sandbox") and not options.sandbox_plan:
             options = self._box_for_launch(message, options)
         wanted = message.get("session")
+        if wanted and not message.get("fork") and wanted in self.held_session_ids():
+            # Its CLI runs in a keeper this service cannot read (N-S2): a
+            # second CLI on the transcript is refused, as for a running pty.
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, HELD_BY_KEEPER_MSGID)
         # A fork starts its own conversation: no running pty of its origin
         # stands in for it, and none is closed for it (PR-1.12c review).
         if wanted and not message.get("fork"):
@@ -1090,7 +1348,38 @@ class ServiceCore:
             fields["live"] = (self.sandbox_grants.capable() or "")[: protocol.ARG_TEXT_MAX]
         if self.gh_status is not None:
             fields["gh"] = self.gh_status[: protocol.SHORT_MAX]
+        keeper = self.ptys.keeper
+        if keeper is not None and keeper.connected and isinstance(keeper.pid, int) and keeper.pid > 0:
+            # The keeper's pid (PR-3.6): with one, a restart keeps every pty
+            # it holds; `unkept` counts the agent ptys forked while it was
+            # away, which a restart ends and resumes (S1).
+            fields["keeper"] = keeper.pid
+            unkept = len(self.unkept_agent_ptys())
+            if unkept:
+                fields["unkept"] = unkept
+        if self.keeper_mismatch:
+            # An older keeper holds sessions this service cannot adopt
+            # (PR-3.6's ruling): stop it to go on with a keeper.
+            fields["keeper_mismatch"] = self.keeper_mismatch
+        if self.keeper_unread:
+            # A keeper this service could not read or speak to holds the
+            # rows left in the table (N-S2): how many sessions that is.
+            fields["keeper_unread"] = True
+            fields["keeper_held"] = len(self.held_session_ids())
         return protocol.reply(message.id, **fields)
+
+    @property
+    def keeper_holds(self) -> bool:
+        """Whether a keeper is connected to hand the ptys to the next
+        service: what makes a stop a `suspend` rather than an end."""
+        keeper = self.ptys.keeper
+        return keeper is not None and keeper.connected
+
+    def unkept_agent_ptys(self) -> list[int]:
+        """The live agent ptys no keeper holds (forked while the keeper was
+        lost and not handed to its replacement): what a stop with a keeper
+        still ends the item-1 way (S1 of the review of PR 629)."""
+        return [pty.id for pty in self.ptys.unkept_ptys() if pty.kind != "shell"]
 
     def cli_search_path(self) -> str:
         """The PATH the service looks the claude CLI up on: its session
@@ -1853,7 +2142,26 @@ class ServiceCore:
             return
         host = sandboxplan.SandboxHost(app_id, state, state.state_file())
         self.sandbox_host = host
-        swept = sandboxplan.sweep_plans(app_id)
+        if self.keeper_unread:
+            # The sessions left in a keeper this service cannot read still
+            # run in their boxes with their plans (N-S1): no plan is
+            # unlinked, no box or mount swept; the grants' worker serves
+            # what this service spawns, and the sweeps are the next
+            # service's that can read the keeper.
+            log.warning("sandbox: the keeper is unread; the plan, box and mount sweeps are skipped")
+            self.sandbox_grants = sandboxgrants.GrantMounts(host)
+            sandboxplan.probe_async(self._on_probe)
+            return
+        # The adopted sessions first (PR-3.6, §3.9's order: adopt, re-hold,
+        # re-mount, then sweep): each box held again under this pid (its
+        # lease rewritten), its plan file kept from the sweep below.
+        adopted = [
+            record for record in self._records()
+            if record.session.sandbox_box and record.session.sandbox_plan_path
+        ]
+        for record in adopted:
+            host.hold(record.session.sandbox_box)
+        swept = sandboxplan.sweep_plans(app_id, keep=self._adopted_plans)
         if swept:
             log.info("sandbox: swept %d stale plan file(s)", swept)
         # Here, on the main loop, before the sweep's thread: it writes the state.
@@ -1872,7 +2180,28 @@ class ServiceCore:
             if gone:
                 log.info("sandbox: removed %d unused box(es)", gone)
 
-        threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
+        # The live grants of every adopted box mounted again (`register`
+        # delivers what the state holds that the plan lacks; a dead
+        # instance's stale mount at the point is unmounted first), and only
+        # once the last registration has landed do the sweeps run: the
+        # mounts made here carry this pid and are nobody's to sweep.
+        plans = [sandboxplan.load_plan(record.session.sandbox_plan_path) for record in adopted]
+        plans = [plan for plan in plans if plan]
+        remaining = [len(plans)]
+        lock = threading.Lock()
+
+        def registered(_deliveries) -> None:
+            with lock:
+                remaining[0] -= 1
+                last = remaining[0] <= 0
+            if last:
+                threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
+
+        if plans:
+            for plan in plans:
+                grants.register(plan, done=registered)
+        else:
+            threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
         sandboxplan.probe_async(self._on_probe)
 
     def _on_probe(self, reason: str) -> None:
@@ -1897,6 +2226,11 @@ class ServiceCore:
             get_setting=lambda key: self._get_setting(key) in (None, True),
             announce=self._announce_finished,
         )
+        # The sessions adopted before the tracker existed (PR-3.6): each
+        # registered as a spawn with an id is, never as fresh (its
+        # plumbing baseline was captured by the service that spawned it).
+        for record in self._records():
+            self.activity.started(record, fresh=False)
         return self.activity
 
     def start_background(self, **kwargs) -> bgagents.BackgroundAgents:
@@ -2027,6 +2361,31 @@ class ServiceCore:
                 session.relocate_transcript(moved)
             except Exception:
                 log.exception("session %s: following the moved transcript failed", record.handle)
+
+    def remove_inflight_copies(self) -> None:
+        """At start (PR-3.6, §8): every tree a dead service left building
+        under a temporary name (`inflight_copies`) is removed off the main
+        loop, exactly those and nothing else (`projectfiles.remove_inflight`
+        takes only a `.collins-<hex>` directory), and the rows cleared."""
+        state = self.state
+        if state is None:
+            return
+        rows = state.get_inflight_copies()
+        if not rows:
+            return
+
+        def work() -> None:
+            removed = sum(1 for row in rows if projectfiles.remove_inflight(row["dest"], row["name"]))
+            log.info("removed %d of %d unfinished tree copies a dead service left", removed, len(rows))
+
+            def landed() -> bool:
+                for row in rows:
+                    state.remove_inflight_copy(row["dest"], row["name"])
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(landed, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="inflight-copies", daemon=True).start()
 
     def start_housekeeping(self) -> None:
         """The service's own timers (PR-1.12d): the archive sweep at start
@@ -2656,7 +3015,9 @@ class ServiceCore:
 
     # -- stopping (§3.10 item 1)
 
-    def stop_sessions(self, done: Callable[[], None] | None = None) -> list[str]:
+    def stop_sessions(
+        self, done: Callable[[], None] | None = None, only: set[int] | None = None
+    ) -> list[str]:
         """End every session the way *Stop sessions and quit* does (§3.10
         item 1): the ids of the live agent sessions are recorded as
         `resume_on_start` (a client reopening its tabs finds them resumable;
@@ -2666,10 +3027,14 @@ class ServiceCore:
         closed: SIGHUP, and SIGKILL after `CLOSE_GRACE_MS`); once every
         agent pty has exited, or `STOP_BOUND_S` has passed, `shutdown()`
         closes what is left and *done* is called. The main loop keeps
-        running meanwhile (the flows and the grace are its timers). Returns
-        the ids recorded."""
+        running meanwhile (the flows and the grace are its timers). With
+        *only* (pty ids) just those sessions end and are recorded, nothing
+        else is shut: the unkept ptys of a stop whose keeper holds the rest
+        (S1 of the review of PR 629), the caller going on with `suspend`.
+        Returns the ids recorded."""
+        chosen = [r for r in self._records() if only is None or r.pty_id in only]
         ids: list[str] = []
-        for record in self._records():
+        for record in chosen:
             session_id = getattr(record.session, "session_id", None)
             if session_id:
                 ids.append(str(session_id))
@@ -2678,7 +3043,7 @@ class ServiceCore:
                 self.state.set_resume_on_start(ids)
             except Exception:
                 log.exception("could not record the sessions to resume")
-        for record in self._records():
+        for record in chosen:
             pty_id = record.pty_id
             if pty_id is None or pty_id not in self.ptys.ptys:
                 continue
@@ -2699,14 +3064,21 @@ class ServiceCore:
         deadline = time.monotonic() + STOP_BOUND_S
 
         def settled() -> bool:
-            live = [r for r in self._records() if r.pty_id in self.ptys.ptys]
+            live = [
+                r for r in self._records()
+                if r.pty_id in self.ptys.ptys and (only is None or r.pty_id in only)
+            ]
             if live and time.monotonic() < deadline:
                 return GLib.SOURCE_CONTINUE
             if live:
                 log.warning(
                     "stop: %d session(s) still up after %.0f s; closing them", len(live), STOP_BOUND_S
                 )
-            self.shutdown()
+            if only is None:
+                self.shutdown()
+            else:
+                for record in live:
+                    self.force_close(record.pty_id)
             if done is not None:
                 done()
             return GLib.SOURCE_REMOVE
@@ -2733,25 +3105,94 @@ class ServiceCore:
         return lambda: self.force_close(pty_id)
 
     def shutdown(self) -> None:
+        self._stop_services()
+        self.ptys.shutdown()
+        self._stop_grants()
+
+    def suspend(self, keep_resume: bool = False) -> int:
+        """§3.10 item 2: the keeper holds every pty, so a stopping service
+        ends no session. Every model is saved and every master closed with
+        no signal to any child (`PtyServer.suspend`); the rows stay in the
+        pty table and the plan files and leases on disk for the next
+        service's adoption; `resume_on_start` is emptied (nothing is to be
+        resumed: the sessions run on) unless *keep_resume*, when the
+        unkept sessions `stop_sessions(only=…)` just ended are recorded
+        there (S1). The live grants are unmounted cleanly (the bindfs
+        servers die with this process anyway; the next service mounts them
+        again). Returns how many ptys were left to the keeper."""
+        self._stop_services()
+        if self.state is not None and not keep_resume:
+            try:
+                self.state.set_resume_on_start([])
+            except Exception:
+                log.exception("could not clear the sessions to resume")
+        kept = len(self.ptys.ptys)
+        self.ptys.suspend()
+        self.sessions.clear()
+        self._cli_running.clear()
+        self._stop_grants()
+        return kept
+
+    def _stop_services(self) -> None:
         self.cancel_restart()
         self.git.shutdown()
         self.files.shutdown()
         if self.background is not None:
             self.background.stop()
         if self._sweep_source:
-            from gi.repository import GLib
-
             GLib.source_remove(self._sweep_source)
             self._sweep_source = 0
         if self.activity is not None:
             self.activity.stop()
-        self.ptys.shutdown()
+
+    def _stop_grants(self) -> None:
         if self.sandbox_grants is not None:
             # Every directory mounted into a running box, unmounted; the
             # bindfs servers would go with the process anyway
             # (PR_SET_PDEATHSIG), this leaves nothing to chance.
             self.sandbox_grants.shutdown()
             self.sandbox_grants = None
+
+
+class InflightCopies:
+    """`projectfiles.InflightRecorder` over the core's state (PR-3.6, §8):
+    `begin` lands the row on the main loop (the state is written there)
+    and waits for it, bounded, so the row is on disk before the tree is
+    built; `end` clears it the same way. Called on a paste's worker."""
+
+    WAIT_S = 2.0
+
+    def __init__(self, core: ServiceCore) -> None:
+        self.core = core
+
+    def _land(self, call: Callable[[], None]) -> None:
+        done = threading.Event()
+
+        def landed() -> bool:
+            try:
+                call()
+            except Exception:
+                log.exception("the copies-in-flight row could not be written")
+            finally:
+                done.set()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(landed, priority=GLib.PRIORITY_DEFAULT)
+        done.wait(self.WAIT_S)
+
+    def begin(self, dest: str, name: str) -> tuple[str, str] | None:
+        state = self.core.state
+        if state is None:
+            return None
+        self._land(lambda: state.add_inflight_copy(dest, name))
+        return (dest, name)
+
+    def end(self, token: tuple[str, str] | None) -> None:
+        state = self.core.state
+        if token is None or state is None:
+            return
+        dest, name = token
+        self._land(lambda: state.remove_inflight_copy(dest, name))
 
 
 def _spawn_refusal(message: protocol.Message, exc: ptyserver.SpawnError) -> dict:

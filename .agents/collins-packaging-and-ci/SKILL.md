@@ -97,9 +97,17 @@ e2e stack, and the install lines in `docs/guide/getting-started.md`.
 
 **`KillMode=process`** (spec D52) is what makes an upgrade safe: systemd
 signals the service alone on a stop or restart, never the ptys' children
-or the CLI's `/bg` daemon, so the service's own stop sequence ends the
-foreground sessions gracefully (resumable) and the daemon and its agents
-run on. A package upgrade restarts nothing anyway (the `--no-enable`
+or the CLI's `/bg` daemon; with the keeper (PR-3.6) the sessions run on
+and the next service adopts them, and without one the service's own stop
+sequence ends the foreground sessions gracefully (resumable); the daemon
+and its agents run on either way. **The keeper's unit**
+(`data/collins-keeper.service`, `collins/collins-keeper.service` by
+symlink, `KillMode=process` too, `Type=simple`, the `collins-keeper`
+script in `[project.scripts]`) ships in the wheel's package data and is
+written beside the service's by `collins --install-desktop`
+(`desktopentry.KEEPER_UNIT`); the `.deb`, RPM, PPA and AUR install lines
+and `scripts/verify_wheel_data.py`'s `expected()` learn it in PR-3.7
+(the split `collins-service` package). A package upgrade restarts nothing anyway (the `--no-enable`
 overrides, and no `%systemd_user_post` / `%systemd_user_postun` scriptlets
 in the spec), so the old service keeps serving the new window through the
 protocol window until *Restart service*; changing the unit's `ExecStart`

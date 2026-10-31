@@ -277,7 +277,8 @@ check("the first quit dialog carries the status-icon notice", said.get("quit-dia
       said.get("quit-dialog-notice"))
 check("Quit quit the first Collins", "quit" in said and first.returncode == 0, first.returncode)
 check("the service is alive", service.poll() is None)
-rows = read_json(STATE_FILE).get("ptys") or {}
+# The pty table is keyed by app id since PR-3.6 (the ruling on the review of PR 629).
+rows = (read_json(STATE_FILE).get("ptys") or {}).get(os.environ["COLLINS_APP_ID"]) or {}
 check("the pty outlived the quit", str(pty_id) in rows, sorted(rows))
 blocks = read_json(UI_FILE).get("services") or {}
 open_tabs = [tab for block in blocks.values() for tab in block.get("open_tabs") or []]

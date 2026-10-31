@@ -106,6 +106,7 @@ from ..prstatus import (
     merge_ordered,
 )
 from ..sessions import (
+    _scan_transcript,
     recreatable_worktree,
     recreate_worktree,
     worktree_project_root,
@@ -414,6 +415,12 @@ class SessionHost(Protocol):
         """A sandboxed fork's resolver found the forked conversation's id."""
         ...
 
+    def running_session_ids(self) -> set[str]:
+        """The session ids other live agent ptys on this service run (the
+        resolver never binds one of them: the verification of PR 629,
+        N-M2). Optional: a host without it holds none."""
+        ...
+
     def cwd_polled(self, cwd: str | None) -> None:
         """One tick of the cwd poll: where the agent is working now."""
         ...
@@ -590,6 +597,7 @@ class Session:
         self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this session
         self._resolver_armed_at = 0.0  # wall-clock time polling (re)started
+        self._baseline_by_created = False  # an adopted session: judge by the first record (N-M2)
         self.fork_resolve = False  # a sandboxed fork: report the new id, don't bind to it
 
         # Activity: the per-terminal watches the window's ActivityTracker is
@@ -1719,33 +1727,50 @@ class Session:
 
     # -- the transcript resolver ------------------------------------------------
 
-    def start_resolver(self, cwd: str) -> None:
+    def start_resolver(self, cwd: str, since: float | None = None) -> None:
         """Find the transcript of the session this terminal is about to
         start in *cwd*. The transcript only appears once the first prompt is
         sent, which can be arbitrarily long after the tab opens: poll for as
         long as the tab is in the foreground; in the background allow ~3 min
         before pausing, and resume whenever the tab is brought back
-        (`arm_resolver`, which the tab calls on every map)."""
+        (`arm_resolver`, which the tab calls on every map). *since* is a
+        session adopted from the keeper (PR-3.6) whose shell started then
+        (wall-clock seconds): the baseline is that moment, not now, so a
+        transcript its CLI wrote before the restart is its own to bind, not
+        another session's to leave out."""
         self.resolver_cwd = cwd
-        self.arm_resolver()
+        self.arm_resolver(since)
 
-    def arm_resolver(self) -> None:
+    def arm_resolver(self, since: float | None = None) -> None:
         if self.resolver_cwd is None or (self.session_id is not None and not self.fork_resolve):
             return  # never started for this session, or already resolved
         self._resolver_attempts = 0
         if self._resolver_source is not None:
             return  # already polling; just refresh the background budget
+        if since is not None and not self._resolver_armed_at:
+            self._resolver_armed_at = since
+            # An adopted session judges a transcript by when its session
+            # began (its first record's timestamp), not by its last write:
+            # an active sibling in the same cwd writes after the adopted
+            # shell started yet began long before it (the verification of
+            # PR 629, N-M2).
+            self._baseline_by_created = True
         # A brand-new session must attach to a transcript that appeared while
         # polling: the newest one *existing* at (re)start belongs to some other
         # session — a submitted prompt creates the file well within the ~3 min
         # background budget, so anything from a pause can't be ours either.
         # `--continue` (continue_recent) reuses the newest existing
-        # transcript, which is exactly the session it resumes.
-        self._known_transcripts = (
-            set(self.provider.transcripts_for_cwd(self.resolver_cwd))
-            if not self.continue_recent
-            else set()
-        )
+        # transcript, which is exactly the session it resumes. An adopted
+        # session's baseline (*since*) is its shell's start: only what
+        # predates that is another session's (S6 of the review of PR 629).
+        if self.continue_recent:
+            self._known_transcripts = set()
+        elif since is not None:
+            self._known_transcripts = {
+                p for p in self.provider.transcripts_for_cwd(self.resolver_cwd) if self._predates_resolver(p)
+            }
+        else:
+            self._known_transcripts = set(self.provider.transcripts_for_cwd(self.resolver_cwd))
         self._baselined_dirs = {self.resolver_cwd}
         # Stamp the instant polling *first* starts, before any prompt has
         # created a transcript. A worktree we later follow into may hold
@@ -1767,10 +1792,29 @@ class Session:
         """Whether `path` was last written before this resolver armed — i.e.
         belongs to an older session, not one this tab is waiting on. A file we
         can't stat is treated as *not* predating, so a transient error never
-        baselines out (and thus loses) a transcript that might be ours."""
+        baselines out (and thus loses) a transcript that might be ours. An
+        adopted session (`_baseline_by_created`) asks when the transcript's
+        session *began* instead: its first record's timestamp, the mtime
+        only when no record carries one."""
+        if self._baseline_by_created:
+            created = _scan_transcript(path)[2]
+            if created is not None:
+                return created < self._resolver_armed_at
         try:
             return path.stat().st_mtime < self._resolver_armed_at
         except OSError:
+            return False
+
+    def _held_elsewhere(self, path: Path) -> bool:
+        """Whether another live agent pty on this service already runs the
+        session *path* belongs to: never bound here, whatever its age (an
+        active sibling in the same cwd)."""
+        asker = getattr(self.host, "running_session_ids", None)
+        if asker is None:
+            return False
+        try:
+            return self.provider.session_id_for_transcript(path) in asker()
+        except Exception:  # noqa: BLE001 - a host that cannot answer holds nothing
             return False
 
     def _resolve_transcript(self) -> bool:
@@ -1781,6 +1825,8 @@ class Session:
             p
             for p in self.provider.transcripts_for_cwd(self.resolver_cwd)
             if p not in self._known_transcripts
+            and not self._held_elsewhere(p)
+            and not (self._baseline_by_created and self._predates_resolver(p))
         ]
         # A worktree launch (claude -w) moves the agent into a worktree under
         # the launch dir before the first prompt, and its transcript is keyed
@@ -2128,6 +2174,29 @@ class Session:
         """A shell already up: settle the launch for *cwd* and type it."""
         self._settle_launch(cwd, session_id)
         self.shell_spawned()
+
+    def adopt(self, cwd: str, box: str = "", plan: str | None = None) -> None:
+        """The session of a pty a restarted service took over from the
+        keeper (PR-3.6, §3.10 item 2): the shell is up and the agent most
+        likely running, so nothing is typed and no launch is settled. What
+        the launch would have left on this object is set from the pty's
+        row: where the shell runs, and for a sandboxed session its box and
+        the plan file it launched from (the box is held again and its
+        grants registered by the core, in §3.9's order, once the sandbox
+        host is up; the plan is this session's to release at its exit, as
+        one it wrote itself). Nothing of the transcript resolver runs: a
+        session whose id the row did not carry stays unresolved."""
+        self.cwd = cwd
+        self.initial_command = None
+        self.worktree_launch = False
+        if plan and box and os.path.isfile(plan):
+            self.sandbox_plan_path = plan
+            self.sandbox_plan_adopted = False
+            self.sandbox_box = box
+        elif box:
+            # The plan file is gone (swept, or never ours): the box id is
+            # kept so the chip's restart rebuilds in the same home.
+            self.sandbox_box = box
 
     def shell_spawned(self) -> None:
         """The shell is up on the pty (its pid is the pty's now): type the

@@ -120,9 +120,11 @@ threading.Thread(target=watchdog, daemon=True).start()
 
 
 def pty_rows() -> dict:
+    """This service's rows of the pty table, which is keyed by app id since
+    PR-3.6 (the ruling on the review of PR 629)."""
     try:
         with open(STATE_FILE, encoding="utf-8") as fh:
-            return json.load(fh).get("ptys") or {}
+            return (json.load(fh).get("ptys") or {}).get(os.environ["COLLINS_APP_ID"]) or {}
     except (OSError, ValueError):
         return {}
 

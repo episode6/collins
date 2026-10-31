@@ -1,0 +1,31 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+#
+# The Collins pty keeper as a systemd user unit (split-service spec §3.10
+# item 2, PR-3.6). The keeper forks every session's pty child on the
+# service's behalf, stays their parent and holds a duplicate of each
+# master, so that stopping or restarting collins-service (an upgrade,
+# *Restart service*) ends no session: the next service asks the keeper for
+# its terminals and goes on. Not enabled by the package: collins-service
+# starts it on demand (`systemctl --user start collins-keeper.service`)
+# when its socket is absent, and spawns one itself where there is no unit.
+# `collins --install-desktop` installs a copy under
+# ~/.local/share/systemd/user/ with ExecStart resolved to the installed
+# command for a pip install.
+#
+# KillMode=process (spec D52): a stop of this unit signals the keeper
+# alone, which ends every child it holds itself (SIGHUP, then SIGKILL):
+# `systemctl --user stop collins-keeper.service` is how every session is
+# stopped for good, where stopping the service alone leaves them running.
+# The socket is %t/collins/<app id>/keeper.sock, beside the service's.
+
+[Unit]
+Description=Collins pty keeper
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/collins-keeper
+Restart=on-failure
+KillMode=process
+
+[Install]
+WantedBy=default.target

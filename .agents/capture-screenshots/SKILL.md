@@ -50,6 +50,7 @@ export COLLINS_PROJECTS_DIR="$E2E/projects"     # session transcripts
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json" # echo '{}' > it
 export COLLINS_CHATS_DIR="$E2E/chats"           # throwaway chat working dirs
 export COLLINS_UPLOADS_DIR="$E2E/uploads"       # drops and pastes; swept by the sessions the service knows
+export COLLINS_KEEPER=none                      # no keeper: the capture's service ends its sessions when it stops
 export XDG_CONFIG_HOME="$E2E/config"            # app state lives in config/collins/state.json
 export XDG_STATE_HOME="$E2E/state"              # saved panel-terminal history
 ```
@@ -58,6 +59,15 @@ Redirecting `XDG_CONFIG_HOME` also hides `gh`'s credentials from the app, so a
 footer PR chip captures as a bare `#72` with no CI glyph (Collins refreshes PR
 status with `gh pr view`/`gh pr list`, which then fail auth). Add
 `GH_CONFIG_DIR="$HOME/.config/gh"` when the shot is meant to show the glyph.
+
+**`COLLINS_KEEPER=none` is not optional either** (PR-3.6). A capture builds
+`App()` with no `e2e_service.start_service`, so the window spawns its
+`collins-service` detached for the fresh app id, and that service would
+spawn a `collins-keeper` detached too; neither is ever stopped, and the
+keeper would hold the capture's shells for good (five such pairs were
+found on the dev box after the first keeper-era captures). With the
+keeper off the service forks its own ptys and ends every session when it
+is stopped, as before the keeper.
 
 **`COLLINS_CHATS_DIR` is not optional.** On its first scan every instance
 reaps chat directories that none of the sessions it discovered point at. An
@@ -193,6 +203,7 @@ export COLLINS_PROJECTS_DIR="$E2E/projects"
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json"
 export COLLINS_CHATS_DIR="$E2E/chats"
 export COLLINS_UPLOADS_DIR="$E2E/uploads"
+export COLLINS_KEEPER=none
 export XDG_CONFIG_HOME="$E2E/config"
 export XDG_STATE_HOME="$E2E/state"
 

@@ -502,10 +502,13 @@ worktree other jobs share. The daemon is spawned by the first `/bg` on the
 box, so under Collins it is a grandchild of the service's pty, but it is
 **not the service's**: the unit ships `KillMode=process` (spec D52), so a
 stop or restart of the service — *Restart service*, a package upgrade,
-`systemctl --user restart` — signals the service alone, which ends the
-foreground sessions itself (gracefully, resumable until PR-3.6's keeper)
-and leaves the daemon and every `/bg` agent running; the restart dialog's
-blast radius (`quitrules.restart_body`) counts them as surviving, by row.
+`systemctl --user restart` — signals the service alone and leaves the
+daemon and every `/bg` agent running; since PR-3.6 the foreground
+sessions run on too (the keeper holds their ptys; the next service
+adopts them and their rows stay `running`), and without a keeper the
+service ends them itself, gracefully and resumable. The restart dialog
+(`quitrules.restart_body`) says which, and counts the `/bg` rows as
+surviving either way.
 A service *crash* also leaves them (the daemon holds no pty of the
 service's); only the foreground ptys die of SIGHUP.
 

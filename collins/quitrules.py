@@ -98,14 +98,32 @@ def quit_body(*, other_windows: bool, panel_busy: bool, tray_present: bool, firs
 # -- the *Restart service* dialog's body (`MainWindow._ask_restart_service`, §3.21) ---
 
 
-def restart_body(*, sessions: int, busy: int, background: int) -> str:
+def restart_body(
+    *, sessions: int, busy: int, background: int, keeper: bool = False, unkept: int = 0, mismatch: int = 0
+) -> str:
     """The blast radius of a service restart. *sessions* are the agent ptys
-    the service runs and *busy* how many of them are working: they end with
-    the service (gracefully; each open tab resumes its own once it is back).
-    *background* are the rows running as `/bg` agents: the CLI's background
-    daemon is no child of the service's stop (the unit is `KillMode=process`,
-    D52), so they are counted as surviving, never as ending."""
-    if sessions:
+    the service runs and *busy* how many of them are working. Without a
+    keeper they end with the service (gracefully; each open tab resumes
+    its own once it is back); with one (*keeper*, PR-3.6: the service's
+    status names the keeper that holds the ptys) they run on through the
+    restart, blocked on their output for the moment it takes, and each
+    open tab shows its own again, except the *unkept* ones (started while
+    the keeper was away), which end and resume. *mismatch* is how many
+    sessions a keeper holds that this service cannot take over, an older
+    one or one it could not read (the status's `keeper_mismatch` or
+    `keeper_held`): stopping that keeper is the way on.
+    *background* are the rows running as `/bg` agents: the CLI's
+    background daemon is no child of the service's stop (the unit is
+    `KillMode=process`, D52), so they are counted as surviving, never as
+    ending."""
+    if sessions and keeper:
+        parts = [_("{n} sessions keep running through the restart, {busy} of them working: "
+                   "the keeper holds their terminals. Each open tab shows its session "
+                   "again once the service is back.").format(n=sessions, busy=busy)]
+        if unkept:
+            parts.append(_("{n} of them were started while the keeper was away: they end with "
+                           "the service and resume.").format(n=unkept))
+    elif sessions:
         parts = [_("{n} sessions end with it, {busy} of them working. Each open tab "
                    "resumes its session once the service is back.").format(n=sessions, busy=busy)]
     else:
@@ -115,6 +133,10 @@ def restart_body(*, sessions: int, busy: int, background: int) -> str:
     elif background:
         parts.append(_("The {n} background (/bg) agents keep running: they are not "
                        "the service's.").format(n=background))
+    if mismatch:
+        parts.append(_("{n} sessions are held by a keeper this service cannot take over (an older "
+                       "one, or one it could not read): stop it (systemctl --user stop "
+                       "collins-keeper.service) to go on with a keeper.").format(n=mismatch))
     parts.append(_("Collins and its status icon stay while the service restarts."))
     return " ".join(parts)
 
