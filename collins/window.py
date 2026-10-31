@@ -31,6 +31,7 @@ from . import (
     buildinfo,
     chats,
     checkouts,
+    choosers,
     clonedialog,
     connectdialog,
     contextmenu,
@@ -2404,33 +2405,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _choose_new_session_folder(self, provider=None) -> None:
         self._new_session_provider = provider or self._default_provider()
-        dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self._visible_project_dir()
-        if default:
-            dialog.set_initial_folder(Gio.File.new_for_path(default))
-        dialog.select_folder(self, None, self._on_new_session_folder)
+        choosers.choose_folder(
+            self, _("Choose project directory"), self._visible_project_dir(), self._on_new_session_folder
+        )
 
-    def _on_new_session_folder(self, dialog: Gtk.FileDialog, result) -> None:
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return  # cancelled
-        cwd = folder.get_path()
+    def _on_new_session_folder(self, cwd: str) -> None:
         self._start_new_session(cwd, getattr(self, "_new_session_provider", None))
 
     def _choose_add_project_folder(self) -> None:
-        dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self._visible_project_dir()
-        if default:
-            dialog.set_initial_folder(Gio.File.new_for_path(default))
-        dialog.select_folder(self, None, self._on_add_project_folder)
+        choosers.choose_folder(
+            self, _("Choose project directory"), self._visible_project_dir(), self._on_add_project_folder
+        )
 
-    def _on_add_project_folder(self, dialog: Gtk.FileDialog, result) -> None:
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return  # cancelled
-        cwd = folder.get_path()
+    def _on_add_project_folder(self, cwd: str) -> None:
         # Same trust gate as a launch — adding a project is an invitation to
         # run sessions in it — but the button says what actually happens next.
         self._with_folder_trust(
@@ -3082,18 +3069,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _continue_session(self, provider) -> None:
         self._cont_provider = provider or self._default_provider()
-        dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self._visible_project_dir()
-        if default:
-            dialog.set_initial_folder(Gio.File.new_for_path(default))
-        dialog.select_folder(self, None, self._on_continue_folder)
+        choosers.choose_folder(
+            self, _("Choose project directory"), self._visible_project_dir(), self._on_continue_folder
+        )
 
-    def _on_continue_folder(self, dialog: Gtk.FileDialog, result) -> None:
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return
-        cwd = folder.get_path()
+    def _on_continue_folder(self, cwd: str) -> None:
         provider = getattr(self, "_cont_provider", None) or self._default_provider()
         self._with_folder_trust(cwd, provider, lambda: self._launch_continue(cwd, provider))
 
@@ -3686,18 +3666,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _new_chat_session(self, provider, variant_key: str = "") -> None:
         self._new_chat_provider = provider
         self._new_chat_variant_key = variant_key
-        dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self._visible_project_dir()
-        if default:
-            dialog.set_initial_folder(Gio.File.new_for_path(default))
-        dialog.select_folder(self, None, self._on_new_chat_folder)
+        choosers.choose_folder(
+            self, _("Choose project directory"), self._visible_project_dir(), self._on_new_chat_folder
+        )
 
-    def _on_new_chat_folder(self, dialog: Gtk.FileDialog, result) -> None:
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return  # cancelled
-        cwd = folder.get_path()
+    def _on_new_chat_folder(self, cwd: str) -> None:
         self._start_new_chat_session(
             cwd,
             getattr(self, "_new_chat_provider", None),

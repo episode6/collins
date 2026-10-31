@@ -8,9 +8,11 @@ description: >-
   key grammar in composerkeys.py, image/file drops and pastes (dropimages.py),
   libspelling, the new-chat screen (newchat.py, newchatview.py) with its
   worktree checkbox and model/effort pickers (modelmenu.py), Draft rows, and
-  how Send launches the CLI. Use when changing prompt entry, drafts, the
-  first-prompt screen, the model or effort menus, or anything that types text
-  into the agent on the user's behalf.
+  how Send launches the CLI, the composer's Attach file, and the folder
+  choosers (choosers.py) with the path picker over the service's folders
+  (pathpicker.py, pathpickermodel.py). Use when changing prompt entry,
+  drafts, the first-prompt screen, the model or effort menus, a folder
+  chooser, or anything that types text into the agent on the user's behalf.
 ---
 
 # Composer and the new-chat screen
@@ -60,6 +62,52 @@ blob (`pictures.fetch` of the path, `kind=file`, the host's
 the blob cache; the thumb goes up empty and fills, or goes when it won't
 decode. Removing one takes its mention (`remove_mention`, refuses on
 ambiguity). File-reference chips were deliberately never built.
+
+**Attach file** (the composer's attach button, `TerminalTab.
+_pick_file_for_composer`) is a native `Gtk.FileDialog` always (D56: the
+file meant is this device's). A `local` client's starts in the agent's cwd
+(set only after `apilink.is_local()`) and mentions the picked path; any
+other's starts where the desktop puts it, uploads the pick with
+`remoteuploads.upload_files` exactly as a drop (session id or `_pending/`)
+and mentions the copy (`_mention_attached`, into whichever composer
+`_attach_composer` still finds: the new-chat screen's or the open one; a
+composer gone by then drops it). `check_local_extras.py` drives both by
+handing `_on_composer_file_chosen` a stand-in dialog.
+
+## Choosing a folder (`choosers.py`, `pathpicker.py`, `pathpickermodel.py`)
+
+The seven sites that pick a folder the service will use (window's new
+session, *Add project*, *Continue*, new chat; the clone dialog's and
+Preferences' clone destination; the sandbox chip's *Allow a directory…*)
+call `choosers.choose_folder(parent, title, initial, on_done)`:
+`Gtk.FileDialog.select_folder` for a `local` client (the starting folder's
+`isdir` behind the ask: one `LOCAL_EXTRAS` site), `pathpicker.pick_folder`
+otherwise. *on_done(path)* gets a path of the service's machine, a
+dismissal calls nothing. The picker (`PathPicker`, an `Adw.Dialog`, 640 x
+520, never resizable) browses the service's whole filesystem over its own
+two unconfined requests (D60): `fs.dirs {path, hidden}` for the listing
+(`remotefiles.list_dirs`) and `fs.newdir {path}` for *New folder*
+(`remotefiles.new_dir`); never the editor's confined `fs.list` / `fs.mkdir`
+(a non-local client is refused `outside` everything that is no known
+root there). `~` is sent as typed and expanded by the service; the entry
+then shows the folder as the service listed it. Typing re-lists after
+`LIST_DEBOUNCE_MS` (300) on a `GLib.timeout_add`; a click, a shortcut,
+*Up*, *Show hidden* (a toggle, off per open, never saved) list at once;
+`Listing` numbers the asks and drops a stale answer; Tab completes against
+the rows of the folder typed (asking first when they are another
+folder's). A link row carries `pathpicker.LINK_ICON`,
+`collins-symlink-symbolic`, a filled-path icon of Collins' own (the tree
+has no link marker to borrow, and the desktop's
+`emblem-symbolic-link-symbolic` is missing from Adwaita, which draws the
+broken-image glyph for it), and opens like any folder; a cut listing
+ends in an inert row; a refusal's words replace the list. *Open* is the
+service's `fs.stat` of the entry's text and hands on the path it echoes
+(`~` expanded, normalised, never resolved). Shortcuts: the service's home
+(`apilink.service_home`) and the store's `proj` rows' project roots. All
+requests through `remotefiles.off_main`, landing at `PRIORITY_DEFAULT`.
+`pathpickermodel` is GTK-free (`tests/test_pathpicker.py`);
+`check_path_picker.py` walks it with the client not local at both ends
+(`e2e_service.drop_local`).
 
 ## The cut and the paste-back (`TerminalTab`)
 

@@ -458,3 +458,46 @@ def test_locate_keeps_the_asked_path_from_a_service_older_than_the_field(link):
 def test_locate_is_none_on_a_refusal(link):
     link.answers["fs.stat"] = RequestRefused(protocol.ERROR_INVALID, "{field} must be an absolute path", {})
     assert remotefiles.locate("~bob/a.md") is None
+
+
+# -- covers (PR-3.2): when a root the service refused is worth asking about again ---------
+
+
+def test_covers_is_a_session_at_or_above_the_root():
+    assert remotefiles.covers("/srv/p", ["/srv/p"])
+    assert remotefiles.covers("/srv/p/sub", ["/srv/p"])
+    assert remotefiles.covers("/srv/p/", ["/srv/p"])  # normalised
+    assert not remotefiles.covers("/srv/p", ["/srv/p/sub"])  # a session below it names no more
+    assert not remotefiles.covers("/srv/project", ["/srv/p"])  # a prefix of the text is no parent
+    assert not remotefiles.covers("/srv/p", [])
+    assert not remotefiles.covers("", ["/srv/p"])
+
+
+def test_covers_counts_a_worktrees_project_and_skips_what_is_not_text():
+    # The service's roots count a Claude worktree's project (files.roots).
+    assert remotefiles.covers("/srv/p", ["/srv/p/.claude/worktrees/w1"])
+    assert remotefiles.covers("/srv/p/docs", [None, 7, "", "/srv/p/.claude/worktrees/w1"])
+    assert not remotefiles.covers("/srv/q", [None, "/srv/p/.claude/worktrees/w1"])
+
+
+# -- the path picker's two (PR-3.2, D60) ---------------------------------------------------
+
+
+def test_list_dirs_is_an_fs_dirs_call(link):
+    link.answers["fs.dirs"] = {
+        "path": "/home/svc",
+        "entries": [{"name": "src", "symlink": False}, {"name": "shared", "symlink": True}, {"bad": 1}],
+        "truncated": True,
+    }
+    dirs = remotefiles.list_dirs("~", hidden=True)
+    assert dirs == remotefiles.Dirs("/home/svc", [("src", False), ("shared", True)], True)
+    assert link.calls[-1][0] == {"t": "fs.dirs", "path": "~", "hidden": True}
+    link.answers["fs.dirs"] = RequestRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID, {})
+    with pytest.raises(RequestRefused):
+        remotefiles.list_dirs("/gone")
+
+
+def test_new_dir_is_an_fs_newdir_call(link):
+    link.answers["fs.newdir"] = {"path": "/home/svc/new"}
+    assert remotefiles.new_dir("~/new") == "/home/svc/new"
+    assert link.calls[-1][0] == {"t": "fs.newdir", "path": "~/new"}

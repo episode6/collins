@@ -498,7 +498,14 @@ names travels as blob frames, confined on the worker like `fs.walk`, off the
 main loop; the answer is dropped when the root moved or
 a newer ask overtook it, kept when the service cannot answer) and holds a
 `fs.watch {kind: dir}` on the root (`self._monitor` is its handle) whose
-`dir-changed` re-asks through the same 500 ms leading-edge throttle. A link
+`dir-changed` re-asks through the same 500 ms leading-edge throttle. A root
+the service refused (`refused`: outside every root it knows, a remote
+client's tab whose session has no row yet) is asked about again, names and
+watch (`_rebuild`), when a `rows` event lists a session there: the store's
+`refreshed` heard while `_refused`, `remotefiles.covers(root, cwds)` over
+the listed rows' cwds (a cwd at or above the root, or a worktree's
+project; a cue only, the service decides), disconnected once it fires or
+the instance dies (PR-2.8's nit 2, PR-3.2). A link
 check that needs the files transport must `remotefiles.install(link)` first
 (the app does on every connect; a widget check on a harness link does it
 itself, as `check_root_name_links.py` does). "Is this directory a git

@@ -149,9 +149,35 @@ would open the wrong file on the wrong machine:
 
 *Open With…* on a picture or a plain document (pdf, txt, md, csv, json,
 log) still works: it hands your desktop app the window's cached copy.
-The file choosers that pick a folder on the service (where a new session
-starts, a project to add) are being replaced by a picker that lists the
-box's folders; until then they open on your own filesystem.
+
+## Picking a folder on the box
+
+Every chooser that picks a folder the service will use — where a new
+session starts, *Add project*, *Continue last session*, a new chat, the
+clone destination (in the dialog and in Preferences), a directory allowed
+into a sandboxed session — opens Collins' own **path picker** when the
+service is elsewhere, since your desktop's chooser can only show your own
+disk. It lists the box's folders, the whole filesystem as a native dialog
+would:
+
+- **The path entry** takes a path on the box; `~` is the box's home.
+  Typing filters the folder's subfolders (after a 300 ms pause), and
+  **Tab** completes the name.
+- **Shortcuts** on the left: the box's home, then the project folders the
+  sidebar lists.
+- **Up**, **Show hidden** (off each time the picker opens) and **New
+  folder** (made on the box, and entered) beside the entry. A link to a
+  folder is listed with a link mark and opens like any other folder.
+- **Open** (or Enter) picks the folder the entry names, once the box says
+  a folder is there.
+
+On this computer the desktop's own chooser opens as before. Three
+choosers stay your desktop's either way: **Attach file** in the composer
+picks a file of *yours*, and when the service is elsewhere it is uploaded
+to the box as a dropped file is and the copy is what the agent is told
+about; the notification sound and the Markdown export are files of this
+computer. Picking the `claude` executable and *Open session transcript*
+are hidden when the service is elsewhere (type the CLI's path instead).
 
 Collins decides "is this the service's machine" by a proof it reads from
 its own disk, not by anything the service claims: a window reaching a

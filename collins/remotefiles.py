@@ -54,6 +54,14 @@ links), blocking the same way:
 - `root_names(root)` is `fs.names`: the non-directory names of a root, and
   `truncated`; the root's watch is `Watcher.watch(root, listener,
   kind=WATCH_DIR)` and its `dir-changed` is the cue to ask again.
+  `covers(root, cwds)` is when a root the service refused is worth
+  asking about again (PR-3.2): a session listed at it or above it.
+
+PR-3.2 adds the path picker's two (D60), unconfined on the service:
+`list_dirs(path, hidden)` is `fs.dirs` (the folder listed, its
+subfolders as `(name, symlink)`, `truncated`) and `new_dir(path)` is
+`fs.newdir` (the folder made). The picker never sends `fs.list` or
+`fs.mkdir`, which stay the editor's, confined to its tree root.
 
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
@@ -65,6 +73,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import threading
 import weakref
 from collections.abc import Callable
@@ -77,6 +86,7 @@ from .api import protocol
 from .api.protocol import RequestRefused
 from .i18n import _
 from .projectfiles import PasteError, RenameError
+from .sessions import worktree_project_root
 
 log = logging.getLogger(__name__)
 
@@ -280,6 +290,27 @@ def root_names(root: str) -> tuple[list[str], bool]:
     return [str(n) for n in fields.get("names") or ()], bool(fields.get("truncated", False))
 
 
+def covers(root: str, cwds) -> bool:
+    """Whether a session working in one of *cwds* makes *root* a folder
+    the service may now answer about: a cwd that is the root or one of its
+    parents, or the project a Claude worktree among them belongs to (what
+    the service's `files.roots` counts). A cue to ask again, nothing more:
+    the service decides (PR-2.8's nit 2, PR-3.2). Text only: no disk."""
+    if not root:
+        return False
+    target = os.path.normpath(root)
+    for cwd in cwds:
+        if not isinstance(cwd, str) or not cwd:
+            continue
+        for known in (cwd, worktree_project_root(cwd)):
+            if not known:
+                continue
+            known = os.path.normpath(known)
+            if target == known or target.startswith(known.rstrip("/") + "/"):
+                return True
+    return False
+
+
 def off_main(
     work: Callable[[], object], land: Callable[[str, object], None], name: str = "remotefiles"
 ) -> None:
@@ -400,6 +431,43 @@ def _paste_outcomes(fields: dict) -> list[PasteOutcome]:
             )
         )
     return outcomes
+
+
+@dataclass(frozen=True)
+class Dirs:
+    """What `fs.dirs` answered: the folder listed (`~` expanded and
+    normalised by the service), its subfolders as `(name, symlink)` in
+    the service's order, and whether the list was cut."""
+
+    path: str
+    folders: list[tuple[str, bool]]
+    truncated: bool
+
+
+def list_dirs(path: str, hidden: bool = False) -> Dirs:
+    """`fs.dirs` of *path* (absolute, or led by `~`, the service's home):
+    blocking, on the caller's thread. Raises `RequestRefused` (``gone``
+    when no folder is there; ``unknown`` from a service without it)."""
+    fields = apilink.call({"t": "fs.dirs", "path": str(path), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
+    where = fields.get("path")
+    return Dirs(
+        path=where if isinstance(where, str) else str(path),
+        folders=[
+            (str(item.get("name")), bool(item.get("symlink")))
+            for item in fields.get("entries") or ()
+            if isinstance(item, dict) and item.get("name")
+        ],
+        truncated=bool(fields.get("truncated", False)),
+    )
+
+
+def new_dir(path: str) -> str:
+    """`fs.newdir` of *path*: one folder made under a folder that is
+    there; the path made. Blocking. Raises `RequestRefused` (its `reason`
+    one of `protocol.FS_MKDIR_REASONS`)."""
+    fields = apilink.call({"t": "fs.newdir", "path": str(path)}, timeout=CALL_TIMEOUT_S)
+    made = fields.get("path")
+    return made if isinstance(made, str) else str(path)
 
 
 def make_dir(path: str, root: str) -> None:

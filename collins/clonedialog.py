@@ -32,9 +32,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import apilink, clonerepo, ghsetup, jobclient, remotefiles  # noqa: E402
+from . import apilink, choosers, clonerepo, ghsetup, jobclient, remotefiles  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -403,23 +403,14 @@ class CloneDialog(Adw.Dialog):
         )
 
     def _browse_target(self) -> None:
-        picker = Gtk.FileDialog(title=_("Choose the folder to clone into"))
-        current = clonerepo.parent_directory(self._target.get_text())
-        # The native chooser is a `local` client's (§3.11): only then is the
-        # folder it opens at one this device can look for.
-        if apilink.is_local() and os.path.isdir(current):
-            picker.set_initial_folder(Gio.File.new_for_path(current))
-
-        def picked(picker: Gtk.FileDialog, result) -> None:
-            try:
-                folder = picker.select_folder_finish(result)
-            except GLib.Error:
-                return  # dismissed
-            path = folder.get_path() if folder is not None else None
-            if path:
-                self._target.set_text(display_path(path))
-
-        picker.select_folder(self.get_root(), None, picked)
+        # The desktop's chooser for a `local` client, the path picker over
+        # the service's folders for any other (§3.11, PR-3.2).
+        choosers.choose_folder(
+            self,
+            _("Choose the folder to clone into"),
+            clonerepo.parent_directory(self._target.get_text()),
+            lambda path: self._target.set_text(display_path(path)),
+        )
 
     # -- cloning -------------------------------------------------------------
 

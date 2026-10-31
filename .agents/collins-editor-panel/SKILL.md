@@ -596,8 +596,13 @@ touches the disk.
   pure name check `rename_name_error` and `make_directory` share).
 - `fs.mkdir {path, root}` (`remotefiles.make_dir`; `projectfiles.
   make_directory`): one folder inside the root, never over anything; the
-  refusal's `reason` is one of `protocol.FS_MKDIR_REASONS`. Served for
-  Phase 3's path picker (*New folder*); the tree has no caller yet.
+  refusal's `reason` is one of `protocol.FS_MKDIR_REASONS`. The tree has
+  no caller yet; the path picker does not use it either (D60: a non-local
+  client is refused outside every known root): it has `fs.newdir {path}`
+  and `fs.dirs {path, hidden}` of its own, unconfined, the same
+  `make_directory` with the parent as its root and a folders-only listing
+  (`dirs_reply`). A confined request never carries a field that unconfines
+  it. `files.roots` counts the store's virtual projects since PR-3.2.
 - **The clipboard** (`fileclipboard.set_files` / `has_files` /
   `read_files`, each taking a `remotefiles.ClipboardScope` or reading the
   link's: its hello's `service_id` and its `local` proof): Copy and Cut

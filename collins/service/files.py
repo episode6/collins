@@ -108,6 +108,26 @@ PR-2.5 adds the tree's file operations, the rules in `projectfiles`
   listing's is), never on the main loop: the known roots are computed
   there and every resolving check runs on the thread.
 
+PR-3.2 adds the path picker's two (§3.23, §3.24, D60), **unconfined** on
+`fs.stat`'s ground (a list of folder names leaks nothing a shell could
+not; the proof is a capability probe, not a security boundary, §3.2):
+
+- `fs.dirs {path, hidden}`: `dirs_reply`, the folder's subfolders (a
+  link to a folder flagged `symlink`), sorted case-folded, at most
+  FS_LIST_MAX and `truncated`, dotted names only with `hidden`, and
+  `fs.list`'s name rules (a dangling link, a name that is not UTF-8 and
+  one over FS_NAME_MAX left out; SKIP_DIR_NAMES not applied: the native
+  dialog shows `node_modules`). `gone` when no folder is there, `failed`
+  when it cannot be read; the reply's `path` is the one listed, `~`
+  expanded and normalised, never resolved.
+- `fs.newdir {path}`: `make_directory` with the parent as its root, so
+  the hold on the parent and the exclusive mkdir are `fs.mkdir`'s and only
+  the rule differs (any parent that is there; one level).
+
+`fs.list` and `fs.mkdir` keep their confinement: it is the editor's rule
+against a link planted in a repo, anchored on a tree root. A request is
+confined or it is not: no field unconfines a confined one.
+
 PR-2.6 adds the bare root-name links' read:
 
 - `fs.names {root}`: `names_reply`, the names in an allowed root that are
@@ -168,7 +188,10 @@ WATCH_DEBOUNCE_MS = 300
 def roots(core) -> list[str]:
     """Every directory a client may name a path under: the live sessions'
     working directories (where they started and where their agent is
-    now), and every session the store knows, with its project root."""
+    now), every session the store knows, with its project root, and the
+    store's virtual projects (the rows *Add project* writes before any
+    session has run there: a project added from the path picker is a root
+    from its row on, PR-3.2, D60)."""
     found: list[str] = []
     for record in list(getattr(core, "sessions", {}).values()):
         session = getattr(record, "session", None)
@@ -188,6 +211,13 @@ def roots(core) -> list[str]:
                 project = worktree_project_root(cwd)
                 if project:
                     found.append(project)
+    state = getattr(core, "state", None)
+    if state is not None:
+        try:
+            virtual = state.get_virtual_projects()
+        except Exception:
+            virtual = {}
+        found.extend(str(cwd) for cwd in virtual.values() if isinstance(cwd, str) and cwd)
     return found
 
 
@@ -694,6 +724,52 @@ def names_reply(root: str) -> dict:
     return {"names": names[: protocol.FS_NAMES_MAX], "truncated": truncated}
 
 
+def dirs_reply(path: str, hidden: bool) -> dict:
+    """`fs.dirs`' fields (a worker thread): the subfolders of *path* (an
+    absolute path, `~` expanded already), a link to a folder among them
+    with `symlink: true` (`is_dir()` following it); sorted case-folded,
+    then cut at FS_LIST_MAX with `truncated`. A dotted name only with
+    *hidden*; a dangling link (no folder to follow to), a name that is not
+    UTF-8 on disk and one over FS_NAME_MAX are left out (`fs.list`'s
+    rules); SKIP_DIR_NAMES is not applied. Nothing or no folder at *path*
+    is `ReadRefused` ``gone``; a folder that cannot be read is
+    ``failed`` with the OSError's words. The reply's `path` is *path*
+    normalised, never resolved through its links."""
+    listed = os.path.normpath(path)
+    if not os.path.isdir(listed):
+        raise ReadRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID)
+    found: list[tuple[str, bool]] = []
+    try:
+        with os.scandir(listed) as entries:
+            for entry in entries:
+                name = entry.name
+                if not hidden and name.startswith("."):
+                    continue
+                if len(name) > protocol.FS_NAME_MAX:
+                    continue
+                try:
+                    name.encode("utf-8")
+                except UnicodeEncodeError:
+                    continue
+                try:
+                    if not entry.is_dir():
+                        continue
+                    link = entry.is_symlink()
+                except OSError:
+                    continue  # cannot be told: no folder to enter
+                found.append((name, link))
+    except OSError as exc:
+        raise ReadRefused(
+            protocol.ERROR_FAILED, "Couldn't read the folder: {error}", {"error": _os_error(exc)}
+        ) from None
+    found.sort(key=lambda row: (row[0].casefold(), row[0]))
+    return {
+        "path": listed,
+        "entries": [{"name": name, "symlink": link} for name, link in found[: protocol.FS_LIST_MAX]],
+        "truncated": len(found) > protocol.FS_LIST_MAX,
+    }
+
+
 def _dispatch_default(fn: Callable[[], object]) -> None:
     GLib.idle_add(lambda: fn() and False, priority=GLib.PRIORITY_DEFAULT)
 
@@ -797,6 +873,10 @@ class Files:
             return self.mkdir(message, client)
         if kind == "fs.names":
             return self.names(message, client)
+        if kind == "fs.dirs":
+            return self.dirs(message, client)
+        if kind == "fs.newdir":
+            return self.newdir(message, client)
         return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
 
     def client_gone(self, client) -> None:
@@ -1107,6 +1187,53 @@ class Files:
             return protocol.reply(message.id, **fields)
 
         return self._later(message, "fs-names", work)
+
+    # -- the path picker's two (PR-3.2, D60) ------------------------------------------------
+
+    def dirs(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        """`fs.dirs {path, hidden}`: `dirs_reply` on a thread. Unconfined,
+        for every client (D60: `fs.stat`'s ground); a `~`-led path is this
+        machine's home's."""
+        path = self._path(message, expand=True)
+        if isinstance(path, dict):
+            return path
+        hidden = bool(message.get("hidden"))
+
+        def work() -> dict:
+            try:
+                fields = dirs_reply(path, hidden)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
+            return protocol.reply(message.id, **fields)
+
+        return self._later(message, "fs-dirs", work)
+
+    def newdir(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        """`fs.newdir {path}`: `make_directory` on a thread with the folder
+        it goes in as the root, so the hold on that folder and the
+        exclusive mkdir are `fs.mkdir`'s and only the rule differs: any
+        folder that is there, for every client (D60). One level; the
+        refusal's `reason` is `fs.mkdir`'s."""
+        path = self._path(message, expand=True)
+        if isinstance(path, dict):
+            return path
+        path = os.path.normpath(path)
+
+        def work() -> dict:
+            try:
+                error = make_directory(os.path.dirname(path), path)
+            except OSError as exc:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "Couldn't make the folder: {error}",
+                    {"error": _os_error(exc)},
+                )
+            if error is not None:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, MKDIR_MSGIDS[error], {"reason": error.value}
+                )
+            return protocol.reply(message.id, path=path)
+
+        return self._later(message, "fs-newdir", work)
 
     # -- the watch -------------------------------------------------------------------------
 

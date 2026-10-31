@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The path picker's mark on a row that is a symlink to a folder (PR-3.2):
+     an arrow pointing up and out, drawn for Collins. The desktop's
+     `emblem-symbolic-link-symbolic` is not in every theme (Adwaita has no
+     symbolic one), so the mark ships here under a name no theme has.
+
+     Filled paths only, as GTK's symbolic recoloring requires: the shaft is
+     a polygon along the diagonal, the head a triangle, no stroke and no
+     transform. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M14 2v8l-2.6-2.6-6.35 6.35a1 1 0 0 1-1.41 0l-.79-.79a1 1 0 0 1 0-1.41L9.2 5.2 6.6 2.6 6 2Z"/><path d="M1 3.5A1.5 1.5 0 0 1 2.5 2H5v1.5H2.5v10h10V11H14v2.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 1 13.5Z"/></svg>

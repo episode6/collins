@@ -437,10 +437,15 @@ def test_the_debug_requests_are_refused_without_the_flag(server, tmp_path):
         {"t": "debug.screen", "pty": pty},
         {"t": "debug.pty", "pty": pty},
         {"t": "debug.sandbox", "target": "core", "name": "sandbox_hosted"},
+        {"t": "debug.local", "local": False},
     ):
         with pytest.raises(loopback.RequestRefused) as refused:
             client.request(message)
         assert refused.value.error == protocol.ERROR_UNKNOWN, message["t"]
+    client.local = True
+    with pytest.raises(loopback.RequestRefused):
+        client.request({"t": "debug.local", "local": False})
+    assert client.local is True  # no flag, no lever (D60)
 
 
 def test_the_debug_requests_are_served_with_the_flag(tmp_path, monkeypatch):
@@ -473,6 +478,15 @@ def test_the_debug_requests_are_served_with_the_flag(tmp_path, monkeypatch):
         with pytest.raises(loopback.RequestRefused) as refused:
             client.request({"t": "debug.sandbox", "target": "host", "name": "grants", "args": ["b" * 32]})
         assert refused.value.error == protocol.ERROR_GONE
+        # `debug.local` sets the asking client's flag and nothing else (D60):
+        # a check's stand-in for a client over ssh.
+        client.local = True
+        other = srv.connect(ends.on_output, ends.on_event, device="phone")
+        other.local = True
+        assert client.request({"t": "debug.local", "local": False}) == {}
+        assert client.local is False and other.local is True
+        client.request({"t": "debug.local", "local": True})
+        assert client.local is True
     finally:
         srv.shutdown()
         pump(0.3)

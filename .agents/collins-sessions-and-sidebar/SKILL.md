@@ -629,7 +629,8 @@ its headers with the body drained, never held (`set_accumulate(False)` in
 the early handler).
 
 **Adding and cloning projects.** The sidebar header's folder button is a
-`Gtk.MenuButton`: *Open folder…* (`win.add-project`, a `Gtk.FileDialog`)
+`Gtk.MenuButton`: *Open folder…* (`win.add-project`, `choosers.choose_folder`:
+the desktop's chooser for a `local` client, the path picker otherwise)
 and *Clone repository…* (`win.clone-project`, `clonedialog.CloneDialog`,
 whose repository list and clone are the service's `clone.repos` and
 `clone` jobs: gh and git run on its machine).

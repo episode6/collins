@@ -772,6 +772,15 @@ _FS_ENTRY = Field(
         "ignored": _req(_BOOL),
     },
 )
+# One row of `fs.dirs`, the path picker's listing (PR-3.2, D60): a
+# subdirectory's name, and whether it is a symlink to one.
+_FS_DIR_ENTRY = Field(
+    K_OBJ,
+    fields={
+        "name": _req(_s(FS_NAME_MAX, low=1)),
+        "symlink": _req(_BOOL),
+    },
+)
 # File operations (§3.23, PR-2.5): the rule a refused rename or mkdir
 # broke (`projectfiles.RenameError` / `MkdirError`), carried as the
 # refusal's ``reason``; the rule a paste entry broke
@@ -1516,6 +1525,11 @@ _TABLE: tuple[MessageType, ...] = (
                 "process_cwd": _req(_null(_PATH)),
             },
         ),
+    ),
+    MessageType(
+        "debug.local",
+        "Set whether the service treats the asking client as local (a check's stand-in for ssh, D60).",
+        request=_request({"local": _req(_BOOL)}),
     ),
     MessageType(
         "debug.sandbox",
@@ -2565,6 +2579,40 @@ _TABLE: tuple[MessageType, ...] = (
                 "names_chunked": _BOOL,
                 "names_bytes": _i(0, SIZE_MAX),
             },
+        ),
+    ),
+    # -- the path picker's two (§3.23, §3.24; PR-3.2, D60): unconfined, on
+    # `fs.stat`'s ground, and never a field that unconfines a confined one
+    MessageType(
+        "fs.dirs",
+        "A folder's subfolders on the service's machine, anywhere: the path picker's listing.",
+        request=_request(
+            {
+                # `~`-led paths are the service's home's, as `fs.stat`'s.
+                "path": _req(_HOME_PATH),
+                # Dotted names listed too (the picker's Show hidden).
+                "hidden": _req(_BOOL),
+            },
+            reply={
+                # The folder listed: `~` expanded and normalised, never
+                # resolved through its links.
+                "path": _req(_PATH),
+                "entries": _req(Field(K_LIST, high=FS_LIST_MAX, item=_FS_DIR_ENTRY)),
+                "truncated": _req(_BOOL),
+                # Set by the transport when the entries went ahead as
+                # TAG_BLOB frames (CHUNKED_JSON_FIELDS).
+                "entries_chunked": _BOOL,
+                "entries_bytes": _i(0, SIZE_MAX),
+            },
+        ),
+    ),
+    MessageType(
+        "fs.newdir",
+        "Make one folder on the service's machine under any folder that is there: the picker's New folder.",
+        request=_request(
+            {"path": _req(_HOME_PATH)},
+            # The folder made: `~` expanded and normalised.
+            reply={"path": _req(_PATH)},
         ),
     ),
     # -- the service itself (§3.10)

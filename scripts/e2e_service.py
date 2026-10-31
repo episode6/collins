@@ -192,6 +192,18 @@ def harness_link(device: str = "harness", stubs: dict | None = None):
     return link
 
 
+def drop_local(link) -> None:
+    """Make *link* what a client over ssh is, at both ends (D60): the
+    service stops treating it as local (`debug.local`, served only with
+    COLLINS_DEBUG_API=1: its confinement and its blobs answer as they would
+    a remote client) and the client stops saying it is (`link.local`, which
+    `apilink.is_local()` and `app.local` read). The proof itself is
+    untouched, so a reconnect proves again: a check that reconnects calls
+    this again before it asserts anything of the remote kind."""
+    link.call({"t": "debug.local", "local": False})
+    link.local = False
+
+
 if __name__ == "__main__":
     proc = start_service()
     print(api_server.socket_path(os.environ["COLLINS_APP_ID"]))
