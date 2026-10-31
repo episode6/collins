@@ -25,6 +25,7 @@ from pathlib import Path
 
 from . import APP_ID, DEBUG_APP_ID, diffmodel, diffnotes
 from .claudemodels import EFFORT_LEVELS
+from .sessions import worktree_project_root
 
 # One frame on the shim↔app socket never legitimately approaches this; a line
 # that does is garbage or an attack, not a tool call. Mirrored in mcp_shim.py.
@@ -626,7 +627,8 @@ TOOLS: list[dict] = [
                     "description": (
                         "Force starting in a fresh git worktree on or off. "
                         "Omit to use the project's usual setting. Ignored "
-                        "outside a git checkout (the result says so)."
+                        "outside a git checkout. The result says where the "
+                        "session really started, and why if it has no worktree."
                     ),
                 },
                 "permission_mode": {
@@ -1635,6 +1637,65 @@ def sibling_cwd_refusal(reason: str) -> str:
         f"start_session from a sandboxed session: {reason}. A sibling's "
         "sandbox reaches what its parent's does, so it has to start inside "
         "that sandbox's workspace or one of its allowed directories."
+    )
+
+
+def start_session_reply(
+    session_id: str,
+    actual: str,
+    *,
+    asked: bool | None,
+    wanted: bool,
+    is_git: bool,
+    flag_ran: bool,
+) -> str:
+    """What a start_session call answers once its session has resolved, read
+    off what happened rather than what was planned.
+
+    *actual* is where the agent runs now; *asked* the tool's own `worktree`
+    argument (None when omitted) and *wanted* what that came to with the
+    project's default. *is_git* is the service's answer about the launch
+    directory, False when nothing asked. *flag_ran* is whether the session's
+    own options still carry the worktree flag: the service clears it when the
+    CLI refused to cut one and the session started again without it, or when a
+    sandbox couldn't reserve the directory.
+
+    The launch directory is never a managed worktree (the tool collapses it to
+    the project root), so "in a worktree" is a look at *actual* alone, and needs
+    no comparison of two paths this process cannot resolve. The flag having run
+    with no move to show for it is reported as just that: neither "you have a
+    worktree" nor a reason is known, and an agent told either may edit the
+    wrong tree."""
+    started = f"Started session {session_id}"
+    in_worktree = worktree_project_root(actual) is not None
+    if flag_ran:
+        if in_worktree:
+            return f"{started} in a fresh worktree at {actual}."
+        return (
+            f"{started} with the CLI's worktree flag, but its working directory "
+            f"still reads {actual}: it may be sharing that tree, so check before "
+            "relying on it being isolated."
+        )
+    if not in_worktree:
+        if wanted and is_git:
+            return f"{started} in {actual} — a worktree couldn't be created, so it shares the tree."
+        if asked and not is_git:
+            return (
+                f"{started} in {actual} — a worktree was requested but this "
+                "isn't a git checkout, so it shares the tree."
+            )
+    return f"{started} in {actual}."
+
+
+def start_session_unasked(cwd: str) -> str:
+    """The start_session reply when a worktree was wanted and the service
+    couldn't say whether *cwd* is a git checkout: nothing was started, since
+    starting anyway would put the session in the tree it was to be kept out
+    of (the new-chat screen's Send refuses the same way)."""
+    return (
+        f"Nothing was started: a worktree was wanted, but Collins couldn't find "
+        f"out whether {cwd} is a git checkout. Try again, or pass worktree=false "
+        "to start in that tree."
     )
 
 

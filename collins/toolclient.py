@@ -303,6 +303,8 @@ class _BackgroundSpawn:
         self._provider = provider
         self._options = options
         self._worktree = worktree
+        self._wanted = False  # the argument and the project's default, as begin settled it
+        self._is_git = False  # the service's answer, False when nothing needed to ask
         self._prompt = prompt
         self._deferred = deferred
         self._on_done = on_done
@@ -316,21 +318,30 @@ class _BackgroundSpawn:
     def begin(self) -> None:
         """Start the spawn. A worktree launch needs to know whether the
         project is a git checkout, which is the service's answer
-        (`checkouts.ask`, off the main loop, so the tab opens when it
+        (`checkouts.ask_answer`, off the main loop, so the tab opens when it
         lands); a launch that will not use a worktree (said so, or left it
         to a project default that is off) asks nothing and opens its tab
         at once."""
         wanted = self._worktree
         if wanted is None:
             wanted = self._window._worktree_for_new_session(self._cwd)
+        self._wanted = bool(wanted)
         if wanted:
-            checkouts.ask(self._cwd, self._begin)
+            checkouts.ask_answer(self._cwd, self._begin)
         else:
             self._begin(False)
 
-    def _begin(self, is_git: bool) -> None:
+    def _begin(self, is_git: bool | None) -> None:
         if self._finished:
             return
+        if is_git is None:
+            # The service couldn't be asked. Starting plain would ignore the
+            # worktree and put the session in the checkout it was wanted out
+            # of, so nothing starts, as at the new-chat screen's Send.
+            _drop_sibling_box(self._options.sandbox_plan, self._options.sandbox_box)
+            self._finish(False, mcptools.start_session_unasked(self._cwd))
+            return
+        self._is_git = is_git
         tab = self._window.start_background_session(
             self._cwd, self._provider, self._options, self._worktree, is_git=is_git
         )
@@ -372,21 +383,21 @@ class _BackgroundSpawn:
     def _on_resolved(self, tab, session_id: str) -> None:
         if self._finished:
             return
-        # By now the resolver has followed the agent into any worktree it moved
-        # to (that is how it found the transcript), so the live cwd is the
-        # session's real directory — and whether it differs from the launch dir
-        # is whether a worktree was actually used, however `worktree` resolved.
-        actual = tab.current_agent_cwd() or self._cwd
-        if os.path.realpath(actual) != os.path.realpath(self._cwd):
-            text = f"Started session {session_id} in a fresh worktree at {actual}."
-        elif self._worktree:  # asked for, but silently dropped outside a checkout
-            text = (
-                f"Started session {session_id} in {actual} — a worktree was "
-                "requested but this isn't a git checkout, so it shares the tree."
-            )
-        else:
-            text = f"Started session {session_id} in {actual}."
-        self._finish(True, text)
+        # The event that named the session carried the agent's cwd and its
+        # options as they stand on the service (`SessionRecord.session_resolved`),
+        # so the mirror is not waiting on the next tick of the cwd poll here.
+        options = tab.session.options
+        self._finish(
+            True,
+            mcptools.start_session_reply(
+                session_id,
+                tab.current_agent_cwd() or self._cwd,
+                asked=self._worktree,
+                wanted=self._wanted,
+                is_git=self._is_git,
+                flag_ran=bool(options and options.worktree),
+            ),
+        )
 
     def _on_exited(self, _tab, status: int) -> None:
         if self._finished:

@@ -532,14 +532,14 @@ itself, as `check_root_name_links.py` does). "Is this directory a git
 checkout" (the worktree box, the sidebar project menu, the header's one-off
 entry, a sibling's worktree launch) is `checkouts` — an `fs.stat` of
 `.git` off the main loop, in two forms because a failure means two things.
-`checkouts.ask` is for an *offer* (the menus, a sibling's launch): False on
-any failure, so a worktree is simply not offered. `checkouts.ask_answer` is
-for the new-chat screen, whose Send may already be waiting on it: True,
+`checkouts.ask` is for an *offer* (the menus): False on any failure, so a
+worktree is simply not offered. `checkouts.ask_answer` is for a launch already
+meant to be isolated (the new-chat screen's Send, which may already be waiting
+on it, and a `start_session` sibling that wants a worktree): True,
 False, or **None for "could not ask"** (a refusal, no link, nothing within
 `ANSWER_TIMEOUT_S`, 10 s, not the files' 60; since the 2026-10-18 review's
 nit 5 `ask` waits the same 10 s, since a person waits on an offer too: at a
-right-click whose menu is built on it, at a `start_session` tool call whose
-tab opens on it), and None is never remembered
+right-click whose menu is built on it), and None is never remembered
 (the next caller asks again). A screen whose own first ask failed, built
 while the link was down or the service stalled, arms one re-ask on the
 next reconnect (`_arm_checkout_reask`, `remotefiles.Watcher.on_reset`, the

@@ -346,7 +346,16 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   only one of `claudemodels.EFFORT_LEVELS`; the schema's enum gates an
   explicit pick), injecting the prompt unfocused, and
   answering with the new session id once `session-resolved` fires (12 s
-  deadline, `process-exited` fail-fast, tab kept on failure). Spawns
+  deadline, `process-exited` fail-fast, tab kept on failure). **The reply
+  reports what happened** (`mcptools.start_session_reply`): the event naming
+  the session carries the agent's cwd and options as they stand on the service
+  (`SessionRecord.session_resolved`), since the mirror's `agent_cwd` otherwise
+  moves only on the 2 s cwd poll and the resolver can bind a `-w` session
+  between two ticks; "isn't a git checkout" takes the service's answer, "a
+  worktree couldn't be created" is a flag the session dropped after the CLI
+  refused, and a wanted worktree the service couldn't be asked about
+  (`checkouts.ask_answer`'s None) starts nothing
+  (`check_start_session_worktree.py` holds the poll off and pins each). Spawns
   **serialize per project root** (`_start_session_chains`) so two siblings
   can't claim each other's transcript. Whether there is a `claude` to
   spawn is the **service's word** (`remotecli.missing()`, from

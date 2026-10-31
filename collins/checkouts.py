@@ -13,14 +13,14 @@ own.
 `is_checkout(stat)` is the pure rule (GTK-free, unit-tested). There are two
 requests, because a failure means two different things:
 
-- `ask` is for *offering* a worktree (a menu entry, a sibling's launch). A
-  refusal, no link, or any failure answers False: a worktree launch is then
-  simply not offered, which is the safe direction.
-- `ask_answer` is for a launch the user already asked to isolate (the
-  new-chat screen's Send). There False is not safe: launching plain would
-  put the session in the checkout the worktree was meant to protect. So a
-  failure is its own answer, None ("could not ask"), on which the caller
-  does not launch.
+- `ask` is for *offering* a worktree (a menu entry). A refusal, no link, or
+  any failure answers False: a worktree launch is then simply not offered,
+  which is the safe direction.
+- `ask_answer` is for a launch already meant to be isolated (the new-chat
+  screen's Send, a `start_session` sibling that wants a worktree). There
+  False is not safe: launching plain would put the session in the checkout
+  the worktree was meant to protect. So a failure is its own answer, None
+  ("could not ask"), on which the caller does not launch.
 
 Both wait ANSWER_TIMEOUT_S, not the files' CALL_TIMEOUT_S (sized for 5 MiB
 reads): a person is waiting on each of them, at a Send, at a right-click

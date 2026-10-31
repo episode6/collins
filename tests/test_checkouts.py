@@ -95,9 +95,9 @@ def test_ask_answer_tells_no_checkout_from_could_not_ask(monkeypatch):
 
 
 def test_a_held_launchs_ask_and_an_offers_both_wait_ten_seconds(monkeypatch):
-    """The 2026-10-18 review's nit 5: an offer (a project header's menu,
-    a `start_session` tool call's tab) has a person waiting on it too, so
-    it gets the launch's 10 s and never the files' minute."""
+    """The 2026-10-18 review's nit 5: an offer (a project header's menu) has
+    a person waiting on it too, so it gets the launch's 10 s and never the
+    files' minute."""
     _run_inline(monkeypatch, "dir")
     del TIMEOUTS[:]
     checkouts.ask_answer("/srv/p", lambda _answer: None)

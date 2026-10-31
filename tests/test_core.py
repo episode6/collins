@@ -20,6 +20,7 @@ from gi.repository import GLib
 
 from collins import proctree
 from collins.api import protocol
+from collins.providers import SessionOptions
 from collins.service.core import ServiceCore
 from collins.sessions import discover_sessions
 from collins.store import SessionStore
@@ -292,6 +293,28 @@ def test_a_shells_spawn_names_its_agent_and_is_refiled_on_resolve(server, tmp_pa
     record.session_resolved("11111111-2222-3333-4444-555555555555")
     assert server.core.ptys.get(shell).history == "11111111-2222-3333-4444-555555555555"
     assert server.core.ptys.get(agent).session == "11111111-2222-3333-4444-555555555555"
+
+
+def test_the_event_naming_a_session_says_where_it_is_and_what_it_ran(server, tmp_path, monkeypatch):
+    """A client acts on the id the moment it lands (start_session's reply),
+    so the agent's cwd can't wait for the next tick of the 2 s poll: a `-w`
+    launch moves and writes its transcript well inside one. Nor can the
+    options, which lose the worktree flag when the CLI refused to cut one."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    agent = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": agent, "cols": 80, "rows": 24})
+    record = server.core.sessions[agent]
+    worktree = f"{tmp_path}/.claude/worktrees/w1"
+    monkeypatch.setattr(record.session, "current_agent_cwd", lambda: worktree)
+    record.session.options = SessionOptions(worktree=True)
+    sid = "11111111-2222-3333-4444-555555555555"
+    record.session.session_id = sid
+    record.session_resolved(sid)
+    named = [event for event in ends.of("session") if event.get("session") == sid][-1]
+    assert named["agent_cwd"] == worktree
+    assert named["options"]["worktree"] is True
+    assert isinstance(protocol.validate(dict(named), protocol.SERVICE), protocol.Message)
 
 
 # -- the requests a tab makes -------------------------------------------------------------------

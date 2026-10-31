@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-30. Full change history: git log for this file.
+fork. Last modified: 2026-10-31. Full change history: git log for this file.
 -->
 
 # Features
@@ -1166,7 +1166,11 @@ is running in:
   `max`) and `permission_mode` each override — runs on the **model, effort
   level and permission mode its caller is using right now** (one exception: a
   bypass-permissions caller's siblings come up in acceptEdits, so an
-  unattended session can't mint more of itself). Spawned sessions get
+  unattended session can't mint more of itself). `worktree` starts it in a
+  fresh git worktree or not, over the project's usual setting, and the reply
+  says where the session really started: in its worktree, or in the tree it
+  shares and why (no git checkout there, or the CLI couldn't cut one). A
+  wanted worktree Collins can't check for starts nothing. Spawned sessions get
   these same tools, so they can spawn siblings of their own.
 - **`read_terminal(terminal?, lines?)`** — read the terminal panel's tabs,
   text and scrollback, exactly as you see it — so "the error over there" is

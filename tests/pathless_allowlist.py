@@ -345,8 +345,9 @@ LOCAL_EXTRAS = frozenset(
 #    its own `PATH`. (A window whose PATH lacked the CLI's folder showed
 #    the not-found welcome on every launch.) `tokenrefresh`'s `on_path()`
 #    always ran on the service.
-# 8. `toolclient`'s `os.path.realpath` on service paths: toolclient.py:372
-#    and :1006.
+# 8. `toolclient`'s `os.path.realpath` on a service path: `start_session`'s
+#    per-root queue key (only ever compared with itself; the reply's own
+#    comparison went when `mcptools.start_session_reply` stopped needing one).
 # 9. Six native choosers that start at a path of the service's with no
 #    gate (`Gio.File.new_for_path` with no read, so the walker sees
 #    nothing): window.py:2309, 2324, 2984, 3583 (from
