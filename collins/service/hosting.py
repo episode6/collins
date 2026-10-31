@@ -651,15 +651,14 @@ class SessionRecord:
 
     def session_resolved(self, session_id: str) -> None:
         self.core.session_resolved(self, session_id)
-        # Where the agent is and what it launched with go in the same event:
-        # a client acts on the id the moment it lands (start_session's reply),
-        # and the cwd poll may not have ticked since a `-w` launch moved the
-        # agent, nor a settle since a refused one dropped the flag.
+        # Where the agent is goes in the same event (the options already do,
+        # in the sandbox facts): a client acts on the id the moment it lands
+        # (start_session's reply), and the cwd poll may not have ticked since
+        # a `-w` launch moved the agent.
         self._send_changed(
             {
                 "session": session_id,
                 "agent_cwd": self.session.current_agent_cwd(),
-                **self.launch_facts(),
                 **self.box_facts(),
                 **self.sandbox_facts(),
             }
