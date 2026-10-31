@@ -93,11 +93,14 @@ def test_parse_shard():
     assert run_e2e.parse_shard("3/4") == (3, 4)
 
 
-def test_a_check_gets_a_scratch_uploads_directory_unless_it_has_one(tmp_path, monkeypatch):
+def test_every_check_gets_a_scratch_uploads_directory_of_its_own(tmp_path, monkeypatch):
     """A check's service judges upload directories by its staged sessions,
     so the runner never leaves it on the user's real uploads root: a
-    scratch `COLLINS_UPLOADS_DIR`, removed afterwards, unless the
-    environment already names one."""
+    scratch `COLLINS_UPLOADS_DIR` per run of a check, removed afterwards.
+    One the environment names (the headless wrapper sets one for the whole
+    run) is the parent of each check's own, never shared between checks:
+    `check_composer_paste.py` and `check_drop_upload.py` count the pending
+    uploads, and under one wrapper each found the other's."""
     out = tmp_path / "seen"
     script = tmp_path / "check_env.py"
     script.write_text(
@@ -113,4 +116,13 @@ def test_a_check_gets_a_scratch_uploads_directory_unless_it_has_one(tmp_path, mo
     mine.mkdir()
     monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(mine))
     assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "pass"
-    assert out.read_text().split("\n")[0] == str(mine) and mine.is_dir()
+    first, existed = out.read_text().split("\n")
+    assert os.path.dirname(first) == str(mine) and existed == "True"
+    assert not os.path.exists(first) and mine.is_dir()
+    assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "pass"
+    second = out.read_text().split("\n")[0]
+    assert os.path.dirname(second) == str(mine) and second != first
+    # A parent that does not exist yet is made, not refused.
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "later" / "uploads"))
+    assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "pass"
+    assert out.read_text().split("\n")[1] == "True"

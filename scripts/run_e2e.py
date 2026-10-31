@@ -209,20 +209,26 @@ def run_check(path, timeout, use_dbus, env=None):
     # check sets it too, since the service is in-process.
     env = {**(env if env is not None else os.environ), "COLLINS_DEBUG_API": "1"}
     # A check stages its own sessions (COLLINS_PROJECTS_DIR), and few of
-    # them move the uploads: a scratch directory here, so no check's service
-    # reads or sweeps the user's real ~/.local/share/collins/uploads. (The
-    # service refuses that sweep on its own, `uploads.sweep_refusal`; this
-    # keeps a check's uploads out of the real directory as well.) A check
-    # that sets its own in its preamble wins, the service being in-process.
-    uploads_scratch = None
-    if not env.get("COLLINS_UPLOADS_DIR"):
-        uploads_scratch = tempfile.mkdtemp(prefix="collins-e2e-uploads-")
-        env["COLLINS_UPLOADS_DIR"] = uploads_scratch
+    # them move the uploads: a scratch directory per check (per attempt,
+    # a retry included), so no check's service reads or sweeps the user's
+    # real ~/.local/share/collins/uploads and no check sees another's
+    # uploads. (The service refuses that sweep on its own,
+    # `uploads.sweep_refusal`; this keeps a check's uploads out of the real
+    # directory as well.) A COLLINS_UPLOADS_DIR the environment names is
+    # the parent, not the directory: the headless wrapper sets one for the
+    # whole run, and the checks that count their pending uploads
+    # (check_composer_paste.py, check_drop_upload.py) found each other's
+    # pastes in it. A check that sets its own in its preamble wins, the
+    # service being in-process.
+    parent = env.get("COLLINS_UPLOADS_DIR") or None
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    uploads_scratch = tempfile.mkdtemp(prefix="collins-e2e-uploads-", dir=parent)
+    env["COLLINS_UPLOADS_DIR"] = uploads_scratch
     try:
         return _run_check(cmd, timeout, env, start)
     finally:
-        if uploads_scratch is not None:
-            shutil.rmtree(uploads_scratch, ignore_errors=True)
+        shutil.rmtree(uploads_scratch, ignore_errors=True)
 
 
 def _run_check(cmd, timeout, env, start):
