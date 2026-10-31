@@ -187,7 +187,16 @@ daemon refuses a plain resume for any id it still lists. The `claude` it
 types is the service's own lookup on its session environment's PATH
 (`Provider.cli_path` → `clisetup.which`; `collins-service` installs that
 PATH as `clisetup`'s search base at start, PR-3.0 item 10), never this
-device's. Tests stage a `claude` on the PATH instead of typing a command
+device's.
+That environment is the service's own overlaid by `service/main.py`'s
+`capture_login_shell` (D63, PR-3.1a): `$SHELL -lc 'env -0'` and `$SHELL
+-lic 'env -0'` started at once and waited to one 5 s deadline (a round
+past it `killpg`ed), a round counting only when its parse holds `PATH`,
+the interactive round's variables overlaid on the login round's. It was
+one `-lic` round, which an rc ending in `exec zsh` (or auto-tmux) emptied
+whole; now it costs only its own round, and `--check`'s `shell:` line says
+which answered. A `PATH` only in an rc that hands the shell on is not seen
+(the same limit as the `--print-socket` run below). Tests stage a `claude` on the PATH instead of typing a command
 (`tests/test_core.py`'s `stage_cli`). `attach` is not exclusive: a second client can attach to the same
 job, which is how live sessions are probed without typing into them.
 

@@ -105,6 +105,17 @@ downloads of each version, see the
   last session* included, from its own CLI: the window no longer types its
   own `claude` path into the service's terminal, and offers a new session
   unless the service says it has no CLI.
+- **The service's capture of your login shell survives an rc that hands
+  the shell on.** The service fills in its environment from your login
+  shell at start; that was one interactive shell, and an `~/.bashrc` that
+  ends in `exec zsh` (or `exec fish`, or starts tmux) emptied the whole
+  capture, `~/.profile`'s `PATH` included, so the service looked for
+  `claude` on its own `PATH`. It now runs a login shell and an
+  interactive login shell at once, to the same 5 s limit, and a round that
+  prints no `PATH` costs only itself. A `PATH` set only in an rc that
+  hands the shell on is still not seen (put it in `~/.profile` or
+  `~/.zprofile`). `collins-service --check` has a `shell:` line saying
+  which was read. See [The service](/guide/service#collins-service-check).
 - **The last of the window's reads of the service's machine move to the
   service** (the split's Phase 3, first chunk). Where a session resumes
   (its transcript's last folder) is worked out by the service and sent with
