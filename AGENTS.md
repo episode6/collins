@@ -543,6 +543,7 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 python3 scripts/verify_versions.py          # every version copy agrees
 python3 -m collins.service.main --app-id X  # a service by hand (--check, --print-socket too)
 ./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug)
+./scripts/install-service.sh                # pipx-install this checkout's service; stops every running service first
 ```
 
 GTK apps are single-instance per application id: launching with an id that is

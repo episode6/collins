@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-30. Full change history: git log for this file.
+fork. Last modified: 2026-10-31. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -95,7 +95,9 @@ keeper, and a user who wants the service from login runs `systemctl
   checkout has none on `PATH`: the window falls back to `python3 -m
   collins.service.main` from its own tree (`connection.service_argv`), the
   service to `python3 -m collins.service.keeper`, and `data/install.sh`
-  installs no unit.
+  installs no unit. `scripts/install-service.sh` is the other way in: it
+  stops every running service of the user, pipx-installs the checkout and
+  writes both units itself, since `collins --install-desktop` needs GTK.
 - **The units.** `debian/rules` installs both to `usr/lib/systemd/user/`
   and overrides `dh_installsystemduser --no-enable` (and `dh_installsystemd
   --no-enable --no-start`, for a system unit that does not exist) so the

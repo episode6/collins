@@ -164,6 +164,15 @@ headless box it needs only the distro's PyGObject and libsoup 3 typelib
 `python3-gobject-base libsoup3` on Fedora). No package enables or starts
 a unit: the first `--print-socket` from a window starts the service.
 
+**From a checkout**, for a box that needs what no package has yet:
+
+```bash
+git clone https://github.com/episode6/collins && cd collins
+./scripts/install-service.sh
+```
+
+It installs whatever is checked out (any branch, uncommitted edits included) with pipx, for your user, replacing any pipx install of Collins, and writes both systemd user units under `~/.local/share/systemd/user/`, overriding a package's. It needs `pipx` and the same PyGObject and libsoup 3 as the wheel, and says so before it touches anything. It first stops **every** `collins-service` of your user, whatever its app id, so a debug instance's or a test's goes too; a service with a keeper leaves its sessions running, and one without ends them, resumable. Keepers are left alone, so one keeps running its old code until you stop it, which ends its sessions. Run it again after a `git pull` to install what is checked out then.
+
 Then, on the box:
 
 ```bash
