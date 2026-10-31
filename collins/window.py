@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-30. Full change history: git log for this file.
+# fork. Last modified: 2026-10-31. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -2593,7 +2593,7 @@ class MainWindow(Adw.ApplicationWindow):
         hands are skipped.
 
         *is_git* is whether `cwd` is a git checkout, the service's answer
-        (`checkouts.ask`) the caller holds: a worktree launch needs it and
+        (`checkouts.ask_answer`) the caller holds: a worktree launch needs it and
         nothing here may stat the directory. None (not asked) is "not a
         checkout", so no worktree.
         """

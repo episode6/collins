@@ -725,6 +725,72 @@ def test_start_session_minimal_args():
     assert "50000" in mcptools.validate_args("start_session", {"prompt": "x" * 50_001})
 
 
+SID = "9553cf63-9ddd-408b-8941-edccee7f6d38"
+REPO = "/home/u/dev/collins"
+WORKTREE = f"{REPO}/.claude/worktrees/calm-riding-allen"
+NOT_A_CHECKOUT = "a worktree was requested but this isn't a git checkout"
+
+
+def _reply(actual, **facts):
+    return mcptools.start_session_reply(SID, actual, **facts)
+
+
+def test_start_session_reply_in_a_checkout_that_got_its_worktree():
+    """The report that started this: `-w` ran, the agent moved, and the reply
+    said the directory wasn't a git checkout. An explicit request and a
+    project's default read the same."""
+    for asked in (True, None):
+        text = _reply(WORKTREE, asked=asked, wanted=True, is_git=True, flag_ran=True)
+        assert text == f"Started session {SID} in a fresh worktree at {WORKTREE}."
+
+
+def test_start_session_reply_never_blames_a_checkout_for_a_failed_worktree():
+    """In a checkout whose CLI refused (the session started again without the
+    flag) the tree is shared, for a reason that isn't the directory."""
+    for asked in (True, None):
+        text = _reply(REPO, asked=asked, wanted=True, is_git=True, flag_ran=False)
+        assert text == (
+            f"Started session {SID} in {REPO} — a worktree couldn't be created, so it shares the tree."
+        )
+
+
+def test_start_session_reply_when_the_flag_ran_but_no_move_shows():
+    """Neither outcome is known: it claims neither, and says what to distrust."""
+    text = _reply(REPO, asked=True, wanted=True, is_git=True, flag_ran=True)
+    assert REPO in text and "may be sharing" in text
+    assert "fresh worktree" not in text and NOT_A_CHECKOUT not in text
+
+
+def test_start_session_reply_in_a_directory_that_is_no_checkout():
+    """Only an explicit request gets an explanation: a project default has no
+    meaning there, and nobody asked this call for anything."""
+    plain = "/home/u/notes"
+    text = _reply(plain, asked=True, wanted=True, is_git=False, flag_ran=False)
+    assert text == f"Started session {SID} in {plain} — {NOT_A_CHECKOUT}, so it shares the tree."
+    text = _reply(plain, asked=None, wanted=True, is_git=False, flag_ran=False)
+    assert text == f"Started session {SID} in {plain}."
+
+
+def test_start_session_reply_with_no_worktree_wanted():
+    """`worktree=false`, or a default that is off, is a plain report, in a
+    checkout or out of one (nothing asked: is_git stays False)."""
+    for asked in (False, None):
+        text = _reply(REPO, asked=asked, wanted=False, is_git=False, flag_ran=False)
+        assert text == f"Started session {SID} in {REPO}."
+
+
+def test_start_session_reply_for_an_agent_that_moved_on_its_own():
+    """No flag, yet the agent is in a worktree (its prompt entered one): where
+    it is holds, with no claim about the launch."""
+    text = _reply(WORKTREE, asked=False, wanted=False, is_git=False, flag_ran=False)
+    assert text == f"Started session {SID} in {WORKTREE}."
+
+
+def test_start_session_unasked_names_the_directory_and_the_way_on():
+    text = mcptools.start_session_unasked(REPO)
+    assert text.startswith("Nothing was started") and REPO in text and "worktree=false" in text
+
+
 def test_start_session_cwd_is_an_optional_string():
     assert (
         mcptools.validate_args(

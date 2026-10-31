@@ -651,7 +651,19 @@ class SessionRecord:
 
     def session_resolved(self, session_id: str) -> None:
         self.core.session_resolved(self, session_id)
-        self._send_changed({"session": session_id, **self.box_facts(), **self.sandbox_facts()})
+        # Where the agent is and what it launched with go in the same event:
+        # a client acts on the id the moment it lands (start_session's reply),
+        # and the cwd poll may not have ticked since a `-w` launch moved the
+        # agent, nor a settle since a refused one dropped the flag.
+        self._send_changed(
+            {
+                "session": session_id,
+                "agent_cwd": self.session.current_agent_cwd(),
+                **self.launch_facts(),
+                **self.box_facts(),
+                **self.sandbox_facts(),
+            }
+        )
 
     def fork_resolved(self, session_id: str) -> None:
         self.core.session_forked(self, session_id)

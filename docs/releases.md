@@ -133,6 +133,15 @@ downloads of each version, see the
   ships in every package. `collins-service --check` says how to turn
   lingering on when it is off (`loginctl enable-linger <you>`), and why it
   cannot tell when it reads `unknown`.
+- **`start_session` says where the session really started.** Since the
+  split its reply read the agent's directory from a value refreshed every
+  2 s, so a session that had got its worktree could be reported as "this
+  isn't a git checkout", and an agent believed it was sharing your checkout.
+  The reply now reads what happened: the worktree it is in, or why it shares
+  the tree, with a CLI that refused to cut one no longer blamed on the
+  directory. And a wanted worktree no longer starts without one when the
+  service can't say whether the directory is a checkout: nothing starts, and
+  the reply says so.
 - **Restart service is in the app menu**, where the guide said it was:
   the action existed since the service split, but no menu item offered
   it, so a restart could only be reached from the protocol-mismatch
