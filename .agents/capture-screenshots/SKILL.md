@@ -271,7 +271,15 @@ bell — no real bell rings), `notification-card` (the same rows, two of them
 shown as in-app cards over the session through the window's card stack,
 their auto-hide clocks stopped), `preferences-notifications` (a PR shot,
 not a docs one: the Preferences dialog filtered to the Notifications
-group), `welcome` and `welcome-cli`
+group), `connect-dialog` (the app menu's Connect to… over one staged ssh connection
+written to `ui-state.json`, the add form filled in; Test and Connect are
+never pressed, nothing reaches a network), `sized-for` (a second bare
+`SocketLink` on another device attaches to the tab's pty and takes the size,
+so the tab is pinned under its *Sized for* banner; the shim clears
+scrollback too, or the redraw shows the typed command above it) and
+`path-picker` (the service-side folder picker on `~/dev`, titled as the
+sites title it; the entry is put back to `~/dev/` through the picker's quiet
+setter once the listing has landed) — the remote guide's three, `welcome` and `welcome-cli`
 (the first-launch dialog with the CLI found, and with it not found — the
 shot runs with `welcome_seen` set back to false, and the not-found one
 hides the service's `claude` from remotecli and seeds `~/.local/bin/claude`

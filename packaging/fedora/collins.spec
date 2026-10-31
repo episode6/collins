@@ -181,6 +181,12 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
   by the package): quitting or crashing the window ends no session, Detach
   leaves a session running, and Restart service runs new service code
   after an upgrade. App state is split into state.json and ui-state.json.
+- The service can be on another machine: Connect to... (or collins
+  --connect NAME) forwards a box's socket over ssh, with no port and no
+  token; folders on the box are picked in Collins' own path picker, two
+  windows on one session share the terminal's size, and a notification
+  command runs on the box when no window is attached. A service restart
+  keeps every session running (collins-keeper holds the terminals).
 - New subpackage collins-service: the service, the pty keeper
   (collins-keeper, which keeps sessions running across a service restart)
   and both systemd user units, never enabled by the package. It installs

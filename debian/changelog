@@ -22,6 +22,15 @@ collins (0.1.5) UNRELEASED; urgency=medium
   * App state is split in two: state.json for sessions and projects,
     ui-state.json for this computer. The first launch migrates and keeps
     state.json.pre-split.
+  * The service can be on another machine: Connect to... in the app menu
+    (or collins --connect NAME) forwards a box's socket over ssh -L, with
+    no port and no token. Folders on the box are picked in Collins' own
+    path picker; two windows on one session share the terminal's size
+    (Sized for banner); a Notification command runs on the box when no
+    window is attached. collins-service --check reports lingering and the
+    login shell it read. See docs/guide/remote.md.
+  * A service restart keeps every session running: collins-keeper holds
+    the terminals and the next service adopts them.
   * Fixes: closing a worktree session answers the CLI's numbered exit
     dialog; the .deb now ships every subpackage and the service command.
 
