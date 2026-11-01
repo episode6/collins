@@ -40,7 +40,7 @@ reading Collins' code. The
 [appendix](#appendix-claude-code-as-observed) collects the facts about
 Claude Code itself that such a reading rides on.
 
-The companion page on the terminal contract (`terminal.md`) says what a server does to
+The companion page, [the terminal contract](./terminal), says what a server does to
 a pty's byte stream; this one says what it reads off the session. The split
 is deliberate: a client sees the stream through its own terminal, and reads
 the facts off these events, never the other way round.
@@ -139,7 +139,7 @@ turn. A client that wants "working or not" reads `busy`.
 - may be `true` while the agent is streaming a reply, since the box is
   empty then; a server is not required to read it `false` mid-turn.
 - read from the server's own model of the screen, never from a client's
-  terminal (the terminal contract's rule), so that every client
+  terminal (the rule of [the terminal contract](./terminal#the-screen-model-of-record-normative)), so that every client
   of one pty reads the same answer.
 
 **What a reading contends with** (informative). The CLI draws its box
@@ -730,7 +730,7 @@ it exits ends with BEL even under the two variables, which a server that
 parses only ST-terminated sequences misses harmlessly (the process is
 gone). A server that runs the CLI directly sets them in its environment;
 one that types the command into a shell exports them first. They are the
-terminal contract's spawn environment. They fail soft: a release that
+[spawn environment](./terminal#the-spawn-environment-normative) of the terminal contract. They fail soft: a release that
 ignores them simply emits nothing, and the busy reading falls back to the
 screen and the process table.
 
