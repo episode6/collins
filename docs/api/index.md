@@ -388,8 +388,10 @@ ssh "${opts[@]}" -o ExitOnForwardFailure=yes \
     -N -L "$local:$remote" user@host
 ```
 
-Then connect to `$local` and say `hello` as usual. Both commands share
-`opts`, as Collins' two do. What the options are for:
+Then connect to `$local` and say `hello` as usual. Keep that path short: a
+Unix socket's path fits in about 100 bytes, and past that ssh says only `Bad
+local forwarding specification`. Both commands share `opts`, as Collins' two
+do. What the options are for:
 
 - `BatchMode=yes` stops ssh from prompting when nobody can answer. The key
   must be in the agent or have no passphrase, and the host's key must
