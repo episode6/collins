@@ -87,6 +87,22 @@ ones every server sends. A nullable field is null while the fact is not
 known yet (`model` before the first reply, `session` before the id is
 bound), and absent when the server does not read it at all.
 
+One property is **required of every fact**: an attach's snapshot and the
+`session` events that follow are **one series**. A client that attaches
+holds, after its snapshot, exactly what a client attached all along holds
+after the events, and every later event is a change from that. So a
+server must not read a fact once to fill the snapshot and again, apart,
+for its change detection: the two readings can differ, and a client told
+the odd one out is never corrected, because the change detection sees no
+change. What this contends with is that most facts are polled or
+re-read, and a polled fact can be misread for a moment (the process
+facts below give a case measured in fractions of a millisecond); the
+property makes such a misreading cost one poll period at most, where a
+snapshot read apart from the series could make it last until the fact
+really moves. A server that reads a fact once per period, keeps what it
+last sent, sends the difference, and fills the snapshot from what it
+last sent, has it.
+
 Four fields are **one-shots**: `landed`, `reset`, `finished` and `forked`
 are sent as `true` each time the thing happens and never as `false`. A
 client acts on each arrival and keeps no state for them. `forked` belongs
@@ -315,6 +331,12 @@ enters a worktree, and is what a client's footer and editor follow.
 - `agent_cwd` is an absolute path on the server's machine, refreshed often
   enough that a client polling every 2 seconds sees a worktree change
   within a few seconds.
+- `agent_running` is re-read at least every 2 seconds while the pty
+  lives, so that a wrong reading stands for at most one period; and the
+  value a snapshot carries is the value the events last carried (the
+  one-series property of [Reading the facts](#reading-the-facts)), so
+  that a client attaching mid-run and a client attached all along hold
+  the same word.
 
 **What a reading contends with** (informative). When the command is
 typed into a shell the agent is not the pty's child but a descendant of
@@ -331,6 +353,22 @@ from the terminal itself: the pty's foreground process group is the
 shell's own while nothing runs, so `running_command` needs no process
 walk. Collins polls every 2 seconds, which is what the refresh property
 asks, and reports a change on the next `session` event.
+
+The process table can be misread for an instant, which is why the last
+two properties exist. A process that execs on its way up shows an empty
+command line while the new image loads: measured at about 0.3 ms and
+never over 1 ms, but a reading that lands in that window sees no agent
+at all, and a zombie shows the same empty line, so the command line
+alone cannot tell the two apart. The re-read bounds the damage to one
+period. The one-series property is what makes the bound hold for a
+client that attaches: Collins once filled an attach's snapshot with a
+fresh read of the process facts while its change detection kept its own
+last reading, and an attach landing in that window told the client
+`false` while the detection held `true`, which no later poll corrected
+(one attach in fifteen hundred, with the attach's timing randomised);
+that client refused to offer a prompt until the fact really moved. A
+server fills the snapshot from what it last sent, and a misread lasts a
+poll.
 
 ### `session`, `transcript_path`, `landed`, `reset`
 
@@ -472,7 +510,8 @@ The required properties above, gathered for a test to tick off:
 | `busy` | true within 3 s of a prompt; false within 10 s of a turn's end; changes at most once a second |
 | `finished` | once per turn, after `busy` fell, with `item.unread` unless the row was looked at; `notify {kind: "finished"}` at Level 2 |
 | `model`, `effort`, `permission_mode` | null until the transcript says; a `switch` reflected within one turn |
-| `agent_cwd`, `agent_running`, `running_command`, `pid` | by the platform's means; null or absent when unreadable; `running_command` false once the agent has exited |
+| every fact | an attach's snapshot and the events are one series: the snapshot carries what the events last carried |
+| `agent_cwd`, `agent_running`, `running_command`, `pid` | by the platform's means; null or absent when unreadable; `running_command` false once the agent has exited; `agent_running` re-read at least every 2 s |
 | `session`, `transcript_path` | the file-name stem; bound within 10 s of the first record while a client is attached; never another live pty's file |
 | `landed`, `reset` | one-shots, `true` only |
 | `item` | `path` always; `status` and `unread` the client's; `running` is a live pty's `running_command`; archived rows on request |
