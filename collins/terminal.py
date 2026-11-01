@@ -2161,11 +2161,7 @@ class TerminalTab(Gtk.Box):
         # that goes dark.
         self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root)
-        # A move the editor queued while its follow dialog was up is judged
-        # again by the service (`cwd.settle` with `judge`, PR-2.4). With no
-        # `internal` there is nobody to judge it, and it is only offered.
-        if apilink.has(protocol.CAP_INTERNAL):
-            self._editor.set_follow_judge(self.session.judge_cwd)
+        self._sync_follow_judge()
         self._editor.image_session = self.image_session
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._image_asks = editorfiles.LatestAsk()  # the lightbox's opens, newest wins
@@ -3267,11 +3263,21 @@ class TerminalTab(Gtk.Box):
         self._pr_refresh_btn.set_visible(prs and apilink.has(protocol.CAP_INTERNAL))
         self._pr_sep.set_visible(prs)
 
+    def _sync_follow_judge(self) -> None:
+        """A move the editor queued while its follow dialog was up is judged
+        again by the service (`cwd.settle` with `judge`, PR-2.4). With no
+        `internal` there is nobody to judge it, and it is only offered."""
+        self._editor.set_follow_judge(self.session.judge_cwd if apilink.has(protocol.CAP_INTERNAL) else None)
+
     def apply_families(self) -> None:
         """A hello listed the service's families (the app's `_on_connected`,
-        a reconnect's service possibly another build's)."""
+        a reconnect's service possibly another build's): every `apilink.has`
+        read as this tab was built, again. The dock's strips too, whose pages
+        it opens and closes nothing of."""
         self._sync_family_surfaces()
         self._sync_attachments_handle()
+        self._sync_follow_judge()
+        self._dock.apply_families()
 
     def _start_cwd_tick(self) -> None:
         self._on_cwd_polled(self.session.current_agent_cwd())

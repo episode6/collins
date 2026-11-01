@@ -501,6 +501,7 @@ while True:
             apilink.current().families,
         )
         banner = win.reconnect_banner
+        road = [0, 0]  # the legacy run's stretch of the stub's record under a hello it faked
         if family == "legacy":
             check("it is read as a pre-family service", apilink.predates_families())
             check("the banner is up", wait_until(banner.get_revealed), banner.get_title())
@@ -546,14 +547,44 @@ while True:
                 dialog.force_close()
                 e2e_service.settle(200)
             win.get_application().cancel_service_restart()  # `service.restart`: served, and the record below says so
+            # What was built under this hello, read again by the next: the
+            # upgrade's own road (the review of PR 646). A strip that exists
+            # now, a docked composer's, is one of them.
+            tab.open_composer()
+            wait_until(lambda: tab.composer_open())
+            tab._composer.emit("dock-toggle-requested")
+            wait_until(lambda: bool(tab._dock.strips()))
+            strip = tab._dock.strips()[0] if tab._dock.strips() else None
+            built_down = {
+                "the New menu's chat": lambda: "win.new-session-in-chats" in actions(win._new_menu),
+                "Add project's Clone": lambda: "win.clone-project" in actions(win.sidebar._add_menu),
+                "the app menu's Restart": lambda: "win.restart-service" in actions(win.sidebar._menu),
+                "the editor's follow judge": lambda: tab._editor._follow_judge is not None,
+                "the strip's add button": lambda: strip is not None and strip._add_btn.get_visible(),
+                "the row's background button": lambda: session_row(win)._can_background,
+                "the footer's panel toggle": lambda: tab._panel_toggle_btn.get_visible(),
+                "the attachments handle": lambda: tab._attachments_btn.get_visible(),
+            }
+            for label, shows in built_down.items():
+                check(f"before the restart: no {label}", not shows())
             link = apilink.current()
             hello, families = link.hello, link.families
+            # While this hello stands the window rightly asks what it lists,
+            # and this one service still refuses it: that stretch of the
+            # record is the road's own, and is left out of the assertion below.
+            road_began = len(e2e_service.stub_calls())
             link.hello = {**hello, "implementation": "collins-service"}
-            link.families = families | {protocol.CAP_PRS}
+            link.families = families | frozenset(every)
             win.apply_families()
             check("the next hello that lists a family takes the banner down", not banner.get_revealed())
+            for label, shows in built_down.items():
+                check(f"…and {label} comes back", shows())
             link.hello, link.families = hello, families
             win.apply_families()
+            for label, shows in built_down.items():
+                check(f"another hello without it: no {label}", not shows())
+            e2e_service.settle(400)
+            road[:] = [road_began, len(e2e_service.stub_calls())]
         else:
             for cap in dropped:
                 instead(cap, win, tab, toasts)
@@ -564,7 +595,9 @@ while True:
         check("the tab closes", wait_until(lambda: win.tab_view.get_n_pages() == 0, 15.0), win.tab_view.get_n_pages())
         e2e_service.settle(200)
         # The legacy run's Restart went through, and stayed out of this list.
-        refused = sorted({call["args"][0] for call in e2e_service.stub_calls() if call["stub"] == "refused"})
+        calls = e2e_service.stub_calls()
+        calls = calls[: road[0]] + calls[road[1] :]
+        refused = sorted({call["args"][0] for call in calls if call["stub"] == "refused"})
         check("the service was asked nothing of what it does not list", not refused, refused)
 
     GLib.timeout_add(250, go)

@@ -1572,7 +1572,7 @@ is hidden rather than greyed out:
 | Without | Gone from the window |
 | --- | --- |
 | `git` | The footer's branch, the git page and its toggle, *Git pull* and *Checkout* |
-| `files` | Nothing: the editor stays, and its banner says the service has no files |
+| `files` | The file tree, quick open, and the worktree box and *Git pull*, since whether a folder is a checkout is a question about its files. The editor stays, and its banner says the service has no files. A window on another machine has no folder picker either |
 | `prs` | Pull request chips, pages and menus, the gh notice |
 | `sandbox` | The *Sandboxed* checkbox and pin, the footer chip, the Preferences group |
 | `tools` | The attachments panel, the session tool switches; a drop or an upload says no in a toast |

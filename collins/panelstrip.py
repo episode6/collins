@@ -153,7 +153,8 @@ class PanelStrip(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
-        add_btn.set_visible(apilink.has(protocol.CAP_SHELLS))  # hidden on a service with no shells (D5)
+        self._add_btn = add_btn
+        self.apply_families()
         max_btn = Gtk.Button(icon_name="view-fullscreen-symbolic")
         max_btn.add_css_class("flat")
         max_btn.set_tooltip_text(_("Overlay this tab over the whole session"))
@@ -270,6 +271,11 @@ class PanelStrip(Gtk.Box):
         worktree while it was off screen. Idle shells only; one with a
         command running is left alone (see PanelPage.open_shell)."""
         shell.open_shell(self._cwd())
+
+    def apply_families(self) -> None:
+        """The strip's *New terminal tab*, hidden on a service with no shells
+        (D5), as the last hello said: at build, and again on every hello."""
+        self._add_btn.set_visible(apilink.has(protocol.CAP_SHELLS))
 
     def set_sandboxed_shell_offer(self, offer) -> None:
         """`offer() -> bool` says whether the tab menu should carry *New

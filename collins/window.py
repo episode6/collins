@@ -534,15 +534,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._alt_new_pos = new_menu.get_n_items()
         self._alt_new_present = False
         self._alt_new_asked = 0  # which ask of the service the entry waits on
-        # The sidebar's Chats project: a session in a throwaway directory
-        # ("chat" here ≠ the native streaming chat entries below).
-        if apilink.has(protocol.CAP_JOBS):  # the folder is made by a job (chats.trust)
-            new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
         for provider in available_providers():
             new_menu.append(
                 _("Continue last {name} session…").format(name=provider.name),
                 f"win.continue-session::{provider.id}",
             )
+        self._sync_new_chat_item()
         # Native streaming chat runs the agent in this process, on this
         # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
         # client that is not on the service's machine, and slated for
@@ -1117,13 +1114,37 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._quit_requested = False
 
+    def _sync_new_chat_item(self) -> None:
+        """The New menu's scratch chat (the sidebar's Chats project: a session
+        in a throwaway directory, "chat" here ≠ the native streaming chat
+        entries below it), there only on a service with `jobs`: the folder is
+        made by a job (chats.trust). It sits right before the Continue items."""
+        menu = self._new_menu
+        actions = [
+            action.get_string() if action is not None else ""
+            for action in (
+                menu.get_item_attribute_value(index, Gio.MENU_ATTRIBUTE_ACTION, None)
+                for index in range(menu.get_n_items())
+            )
+        ]
+        wanted = apilink.has(protocol.CAP_JOBS)
+        if "win.new-session-in-chats" in actions:
+            if not wanted:
+                menu.remove(actions.index("win.new-session-in-chats"))
+        elif wanted:
+            continues = "win.continue-session" in actions
+            before = actions.index("win.continue-session") if continues else len(actions)
+            menu.insert(before, _("New chat (scratch folder)"), "win.new-session-in-chats")
+
     def apply_families(self) -> None:
         """A hello listed the service's families (the app's `_on_connected`):
-        what this window built from the last one's follows. Everything else
-        asks `apilink.has` as it is shown or sent. Nothing is closed or
-        opened here (no dock surgery on a hello): a page whose family went
-        ends as its pty's or its next request's refusal says."""
+        what this window built from the last one's follows, which is every
+        `apilink.has` read at construction; everything else asks as it is
+        shown or sent. Nothing is closed or opened here (no dock surgery on
+        a hello): a page whose family went ends as its pty's or its next
+        request's refusal says."""
         self.sync_legacy_banner()
+        self._sync_new_chat_item()
         self.sidebar.apply_families()
         for index in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(index).get_child()

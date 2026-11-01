@@ -350,6 +350,12 @@ class PanelDock(Adw.Bin):
             and strip.selected_page_widget() is shell
         )
 
+    def apply_families(self) -> None:
+        """A hello listed the service's families: what each strip built from
+        the last one's follows. Nothing is opened or closed."""
+        for strip in self.strips():
+            strip.apply_families()
+
     def strips(self) -> list:
         """Every strip, in the tree's spatial order."""
         return [leaf for leaf in self._tree.leaves() if leaf is not self._terminal]

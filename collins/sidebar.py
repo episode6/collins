@@ -1390,6 +1390,8 @@ class SessionSidebar(Gtk.Box):
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         inner.append(self._view)
         # Claude subscription usage readout, tucked under the session list.
+        # What the rows read as they were built (apply_families).
+        self._families_built = getattr(apilink.current(), "families", None)
         self.usage_panel = UsagePanel(store.state)
         self.usage_panel.set_visible(
             bool(store.state.get_setting("show_usage_panel")) and apilink.has(protocol.CAP_USAGE)
@@ -1731,13 +1733,20 @@ class SessionSidebar(Gtk.Box):
         )
 
     def apply_families(self) -> None:
-        """A hello listed the service's families: the panel and the two menu
-        items built from the last one's follow (`MainWindow.apply_families`).
-        Every other menu here is built as it opens, and asks then."""
+        """A hello listed the service's families: the panel and the menu items
+        built from the last one's follow (`MainWindow.apply_families`), and so
+        do the rows when the families moved: a row's background button and the
+        Chats header are read as the rows are built, and a refresh rebuilds
+        them only when the order changed, which a restart under the same rows
+        does not. Every other menu here is built as it opens, and asks then."""
         self.refresh_usage_panel()
         self._sync_add_menu()
         self._sync_restart_item()
         self._refresh_package_repo_item()
+        families = getattr(apilink.current(), "families", None)
+        if families != self._families_built:
+            self._families_built = families
+            self._rebuild_rows()
 
     def _sync_add_menu(self) -> None:
         """*Clone repository…* is a job (the list and the clone), so it is

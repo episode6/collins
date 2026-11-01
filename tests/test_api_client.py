@@ -93,6 +93,19 @@ def test_a_mismatch_carries_what_the_server_listed():
     assert ProtocolMismatch("x", 0, 1, ["internal"]).caps == frozenset({"internal"})
 
 
+def test_a_refusal_that_names_caps_that_are_no_list_offers_nothing(monkeypatch):
+    """Only a refusal that names none is read as a pre-family service."""
+    link = SocketLink("")
+
+    def refused(_channel, _message, _wait):
+        raise RequestRefused(protocol.ERROR_PROTOCOL, "no", {"service": 0, "caps": "internal"})
+
+    monkeypatch.setattr(link, "_blocking", refused)
+    with pytest.raises(ProtocolMismatch) as mismatch:
+        link._hello(link._primary, time.monotonic() + 1)
+    assert mismatch.value.caps == frozenset()
+
+
 def test_a_blocking_call_on_the_main_thread_is_answered(link):
     hello = link.connect()
     assert hello["protocol"] == protocol.PROTOCOL and "debug" in hello["caps"]

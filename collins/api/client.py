@@ -109,6 +109,16 @@ class ProtocolMismatch(ConnectionLost):
 DRAINED = frozenset({"subscribe", "store.lookup", "store.page-archived"})
 
 
+def _named_caps(details: dict) -> list | tuple | None:
+    """The caps a `protocol` refusal names: None only when it names none (a
+    pre-family service), and what is there but no list reads as listing
+    nothing, which offers nothing."""
+    if "caps" not in details:
+        return None
+    caps = details["caps"]
+    return caps if isinstance(caps, list) else ()
+
+
 def new_client_id() -> str:
     return str(uuid.uuid4())
 
@@ -383,7 +393,7 @@ class SocketLink(apilink.Link):
                     refusal.msgid.format_map(details),
                     service if isinstance(service, int) and not isinstance(service, bool) else None,
                     protocol.PROTOCOL,
-                    caps if isinstance((caps := details.get("caps")), list) else None,
+                    _named_caps(details),
                 ) from None
             raise ConnectionLost(f"hello refused: {refusal.msgid}") from None
 

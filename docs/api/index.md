@@ -671,7 +671,7 @@ connected, empty sidebar with no dialog. Without a family:
 | Family | What the window does without it |
 | --- | --- |
 | `git` | No branch, git toggle, git page or git menu items. |
-| `files` | The editor stays, and its banner says the service has no files. |
+| `files` | The editor opens nothing, and its banner says the service has no files. The file tree and quick open stay empty. A client that is not local has no folder picker, and whether a folder is a checkout can't be asked, so the worktree box and *Git pull* go too. |
 | `prs` | No pull request chips, pages or menus, and no gh notice. |
 | `sandbox` | No Sandboxed checkbox, pin, chip or Preferences group. |
 | `tools` | No attachments gallery or session-tool settings. A drop is refused with a toast. |
