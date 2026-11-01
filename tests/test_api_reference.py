@@ -11,7 +11,10 @@ them), since the rest of the repository is GPL and a reader of any one of
 them must be able to tell; the list here, docs/api/LICENSE and
 debian/copyright move together. The terminal contract's tables parse in
 the page's own notation, so scripts/check_termstream_answers.py can hold
-every row to VTE.
+every row to VTE. The session-facts page (docs/api/sessions.md) names no
+Collins module but the two MIT ones, so a move of the pages to a shared
+repository is a copy, and describes every core field of the `session` and
+`item` events.
 """
 
 import ast
@@ -42,13 +45,14 @@ _tc_spec.loader.exec_module(termcontract)
 
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "streams")
 # The MIT files, as docs/api/LICENSE and debian/copyright list them: the
-# three pages, the generator, the two modules, and every file under the
+# four pages, the generator, the two modules, and every file under the
 # stream fixtures (scenarios.py with a tag of its own, the data files under
 # the directory's LICENSE).
 MIT_SOURCES = (
     ("docs", "api", "index.md"),
     ("docs", "api", "messages.md"),
     ("docs", "api", "terminal.md"),
+    ("docs", "api", "sessions.md"),
     ("scripts", "gen_api_reference.py"),
     ("collins", "api", "protocol.py"),
     ("collins", "sshremote.py"),
@@ -139,7 +143,7 @@ def test_the_prose_keeps_a_server_author_out_of_the_services_code():
 PRIVATE_REFERENCE = re.compile(
     r"\brule \d+\b|\brulings?\b|§|\bPR-[0-9S]|\bPR \d+\b|\bD\d{1,2}\b|\bF\d{1,2}\b"
 )
-MIT_PAGES = ("index.md", "messages.md", "terminal.md")
+MIT_PAGES = ("index.md", "messages.md", "terminal.md", "sessions.md")
 
 
 @pytest.mark.parametrize("page", MIT_PAGES)
@@ -253,7 +257,7 @@ def _outside_code(markdown: str) -> str:
 
 
 def test_pages_keep_angle_brackets_in_code():
-    for page in ("index.md", "messages.md", "terminal.md"):
+    for page in ("index.md", "messages.md", "terminal.md", "sessions.md"):
         prose = _outside_code(_read("docs", "api", page))
         assert not re.search(r"<[A-Za-z]", prose), page
 
@@ -264,7 +268,7 @@ def test_mit_files_carry_their_spdx_tag():
         assert "SPDX-License-Identifier: MIT" in head, path
     assert "MIT License" in _read("docs", "api", "LICENSE")
     license_text = _read("docs", "api", "LICENSE")
-    for name in ("terminal.md", "tests/fixtures/streams/", "collins/sshremote.py"):
+    for name in ("terminal.md", "sessions.md", "tests/fixtures/streams/", "collins/sshremote.py"):
         assert name in license_text, name
     stanza = _read("debian", "copyright").split("Files: collins/api/protocol.py", 1)[1].split("\n\n", 1)[0]
     for name in ("docs/api/*", "scripts/gen_api_reference.py", "tests/fixtures/streams/*", "License: Expat"):
@@ -290,6 +294,39 @@ def test_the_stream_fixtures_are_mit_as_a_directory():
     recorded = {name[: -len(".bin")] for name in names if name.endswith(".bin")}
     for session in recorded:
         assert f"{session}.marks.json" in names and f"{session}.golden.json" in names, session
+
+
+# The modules a new MIT page may name (spec §3.5): the two that are MIT
+# themselves. Anything else would tie the page to the Collins tree.
+NEW_PAGE_MODULES = {"collins/api/protocol.py", "collins/sshremote.py"}
+NEW_PAGES = (("docs", "api", "sessions.md"),)
+
+
+def test_the_new_pages_name_no_collins_module_but_the_mit_two():
+    for page in NEW_PAGES:
+        text = _read(*page)
+        named = set(re.findall(r"collins/[A-Za-z0-9_/]+\.py", text))
+        assert named <= NEW_PAGE_MODULES, (page, named - NEW_PAGE_MODULES)
+        # No bare module name of the service's or the data layer's either.
+        assert not re.search(
+            r"\b(?:service|providers|tracking|activity|sessions|session|hosting|finish|bgagents|"
+            r"transcript|termscreen|termstream|ptyserver|core)\.py\b",
+            text,
+        ), page
+
+
+def test_the_sessions_page_describes_every_core_field():
+    """The page is the contract behind the core `session` and `item` fields:
+    a field the conformance table lists at Level 1 or 2 is named on it."""
+    text = _read("docs", "api", "sessions.md")
+    fields = (
+        p.CONFORMANCE_LEVELS[1].session_fields
+        + p.CONFORMANCE_LEVELS[1].item_fields
+        + p.CONFORMANCE_LEVELS[2].item_fields
+    )
+    assert fields
+    missing = [field for field in fields if f"`{field}`" not in text]
+    assert not missing, missing
 
 
 def test_no_other_source_file_claims_mit():

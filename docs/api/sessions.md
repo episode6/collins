@@ -1,0 +1,749 @@
+<!--
+SPDX-License-Identifier: MIT
+Copyright (c) 2026 episode6, Inc.
+
+This document is licensed MIT, not GPL-3.0 like the rest of Collins: see the
+License section of index.md. It is written from the behaviour the Collins
+service shows on the wire and from Claude Code as its users observe it, not
+from Collins' source: nothing here is a copy or a paraphrase of code in
+collins/service/ or of any other GPL-licensed file.
+-->
+
+# Session facts
+
+A Level 1 server of [the service API](./index#implementing-a-server) runs a
+Claude Code session on a pty and tells its clients what is going on in it:
+the `session` event's fields, and the `item` fields of the session's list
+row. This page is the contract behind those fields. The
+[message reference](./messages#session) gives each field's type and bounds;
+this page gives its **meaning** (what a client may assume), the **required
+properties** every server must satisfy, and, informatively, **how Collins
+derives it**, so that an implementer knows what a working reading looks like
+without reading Collins' code. The
+[appendix](#appendix-claude-code-as-observed) collects the facts about
+Claude Code itself that such a reading rides on.
+
+The companion page on the terminal contract (`terminal.md`) says what a server does to
+a pty's byte stream; this one says what it reads off the session. The split
+is deliberate: a client sees the stream through its own terminal, and reads
+the facts off these events, never the other way round.
+
+::: warning Stability
+What [the specification](./index) says of stability holds here. The facts
+below are what the Collins service does on `main` on the day; none of them
+is declared stable yet, and the ones that lean on Claude Code's own
+behaviour lean on behaviour nobody has promised to keep (the appendix says
+so of each). This page lives in the Collins repository for now and may move
+to a shared repository once it settles; every link between the MIT pages is
+relative, so a move is a copy.
+:::
+
+## What a session is
+
+A **session** is one Claude Code conversation: a process the server started
+on a pty it owns, and the transcript file that process writes. The server
+starts it in answer to a `spawn {kind: "agent"}` request and assembles the
+command itself: no client sends a command line. Collins runs the user's
+login shell on the pty and types the `claude` command into it, with a
+trailing newline, as a person would; a server may do that or run the CLI
+directly, and the facts below are defined so that either works. Everything
+the server knows about the session comes from three places: the pty's
+screen (what the CLI has drawn), the server's process table (what runs on
+the pty) and the transcript (what the CLI has recorded). Each fact says
+which.
+
+The session's **id** is the one Claude Code mints: the file name of its
+transcript, less the `.jsonl` suffix. A session has no id until the CLI has
+written that file, which happens after the first prompt is submitted, so a
+fresh spawn is known by the `handle` the spawn reply names until the server
+binds it to an id (`session` below). A resumed session has its id from the
+start.
+
+## Reading the facts
+
+The `session` event is sent whole to a client when it attaches to the pty,
+and after that with only the fields that moved. A field a client has never
+received is unknown to it, not false; the message reference marks which
+fields a server may leave out, and the Level 1
+[conformance](./messages#level-1-sessions-and-terminals) list says which
+ones every server sends. A nullable field is null while the fact is not
+known yet (`model` before the first reply, `session` before the id is
+bound), and absent when the server does not read it at all.
+
+Four fields are **one-shots**: `landed`, `reset`, `finished` and `forked`
+are sent as `true` each time the thing happens and never as `false`. A
+client acts on each arrival and keeps no state for them. `forked` belongs
+to the `internal` family and is not described here.
+
+Fields outside the Level 1 core belong to families and are described with
+them in the reference: the sandbox chip's five fields to `sandbox`, `prs`
+to `prs`, `attachments` to `tools`, `touched_files` to `files`, the
+composer's `entered`, `foreign_paste` and `prompt_block` to `composer`,
+and the rest to `internal`. A server that lists none of those families
+sends none of those fields.
+
+## The facts
+
+### `takes_prompt`
+
+**Meaning.** A prompt typed into the pty now would land in an empty input
+box and be submitted whole when the typing ends with a carriage return:
+nothing would be appended to text already in the box, and no menu, dialog
+or permission prompt would take the keys instead. It is what the `prompt`
+request checks before it types, and what a client reads before it offers a
+"send" of its own.
+
+It is **not** "the agent is idle". Claude Code empties its box as soon as a
+prompt is submitted and keeps it empty, and typeable, for the whole of the
+reply that follows: a prompt typed then is queued by the CLI behind the
+turn. A client that wants "working or not" reads `busy`.
+
+**Required.**
+
+- `false` while no agent runs on the pty (`agent_running` false, or no
+  child at all).
+- never `true` while the box holds text, a stand-in for a paste included.
+- may be `true` while the agent is streaming a reply, since the box is
+  empty then; a server is not required to read it `false` mid-turn.
+- read from the server's own model of the screen, never from a client's
+  terminal (the terminal contract's rule), so that every client
+  of one pty reads the same answer.
+
+**How Collins derives it** (informative). The service keeps a screen model
+of each pty and judges the row the cursor is on. The row must open with the
+CLI's prompt mark, `❯` (U+276F) followed by a no-break space (U+00A0), with
+the cursor in the third column, and the rest of the row must be empty,
+drawn dim (the CLI's hint, judged as a faint rendering of the foreground
+colour against the active client's colours) or begin with the hint's
+opening `Try "`. The glyphs and the hint are the appendix's
+[input box](#c-the-input-box) entry. The judgment is made again on every
+settle of the pty's output, so the field tracks the screen within about
+50 ms.
+
+### `busy`
+
+**Meaning.** The server's reading that the agent is working: a turn is in
+progress, a tool is running, a sub-process of the agent's is alive. A client
+shows it (Collins paints a moving guide line on the row) and does not act on
+it beyond that; the edge that matters for notifications is `finished`.
+
+**Required.**
+
+- `true` within 3 seconds of the agent beginning a turn after a `prompt`
+  request, or after a carriage return typed into the pty.
+- `false` within 10 seconds of the agent's turn ending with no further
+  activity: no output, no progress report, no live sub-process of the
+  agent's.
+- never flaps more than once per second: a reading that changes is held
+  for at least a second before it changes back.
+- sent on the `session` event for the pty, and mirrored as the `item`
+  field `busy` on every row that stands for the session.
+
+**How Collins derives it** (informative). Several readings feed one
+tracker, and the latest reading that says "working" sets a deadline the
+others cannot bring forward. In order of how much the service trusts them:
+the CLI's own progress reports (OSC 9;4 on the pty's stream, which the CLI
+emits only under the environment the appendix's
+[progress](#f-progress-reports-and-the-two-environment-variables) entry
+names: a state of 1 to 4 marks the session busy, and a state of 0 arms a
+finish that lands after a 3-second grace unless another busy report
+arrives, since the CLI clears the report for a moment between tool calls);
+the pty's output, coalesced to a 50 ms settle, which marks the session for
+a 2-second window, or 60 seconds while a progress report stands, with the
+service's own writes discounted by an echo gate for 250 ms after each key;
+motion in the first screen column, where the CLI draws its spinner, sampled
+every 350 ms and counted after a 1.4-second streak; a carriage return typed
+into the pty, which marks the session for 2 seconds before anything is
+drawn; a poll of the process table every 2 seconds for live descendants of
+the agent, against a baseline of the long-lived children the CLI always has
+(its MCP servers), captured 5 seconds after a fresh spawn; and, for a
+session attached to a background agent (whose environment the CLI scrubs,
+so it reports no progress), the CLI's own listing of its agents every
+3 seconds. A sweep every 250 ms clears a reading whose deadline has passed.
+Going busy drops a finish that was being held.
+
+### `finished`
+
+**Meaning.** A turn ended that a person has not seen yet: the moment to
+notify. One-shot, sent `true` once per turn.
+
+**Required.**
+
+- sent at most once per turn. A repaint, a resize, a scroll or an
+  interrupted turn does not produce a second one; a turn that produced no
+  reply produces none.
+- sent only after `busy` has fallen for the session.
+- accompanied by `unread: true` on the `item` of every row that stands for
+  the session, unless the row is being looked at: a client says so with
+  `store.flags {unread: false}`, and a server that has heard that for the
+  row since the turn began leaves `unread` alone. A row whose chain is
+  still busy, or whose status is `background`, is left alone too.
+- accompanied by a `notify {kind: "finished"}` event where the server
+  serves Level 2.
+
+**How Collins derives it** (informative). The service does not trust the
+busy tracker's falling edge alone, because the CLI repaints its screen
+while idle and such a repaint reads as a short burst of activity. Each
+falling edge is judged against the transcript: the service keeps a stamp
+of the file (the count of the records that mark a turn's end, the count of
+assistant records on the main chain, and the file's size) and compares it
+with the stamp at the last counted finish. A stamp that moved is a finish.
+An unchanged stamp holds the edge for 4 seconds and judges it again when
+the transcript next lands; if nothing has landed by then and the file has
+grown, the edge counts, otherwise it is dropped. A counted finish sets
+`unread` and broadcasts the notification.
+
+### `model`, `effort`, `permission_mode`
+
+**Meaning.** The model the agent is answering with, the effort level it is
+running at and the permission mode in force, as the CLI reports them in its
+own records. `null` until known. A client shows them (the footer's chips)
+and offers to change them: the `switch` request types the CLI's own
+`/model` or `/effort` command into the box.
+
+**Required.**
+
+- `null` until the transcript says, never a guess from the server's
+  configuration (the defaults a client needs for a *new* session come from
+  `models.defaults`, a `usage` family request, not from here).
+- read from the transcript, so they are the CLI's word and survive a resume.
+- a `switch` request is reflected within one turn: the CLI confirms a
+  `/model` or `/effort` it accepted with a line of its own (the appendix's
+  [switches](#i-model-and-effort) entry), and a server that reads the
+  confirmation reports the change then; one that does not reads the next
+  reply's model and effort instead, within the turn after the switch.
+- a switch the CLI refused changes nothing.
+- the strings are the CLI's own: a model id as the record carries it
+  (`claude-opus-5-5`), an effort level as the CLI names it (`high`), a
+  permission mode as the CLI names it (`auto`, `plan`, …). A client does
+  not match them against a list of its own.
+
+**How Collins derives it** (informative). The transcript's tail is read on
+every change of the file. The model is the `model` of the last assistant
+record on the main chain whose model is a real id (the CLI writes a
+placeholder model into some synthetic records; those are skipped); the
+effort is that record's top-level `effort`; the permission mode is the
+last `permissionMode` a user record carried. A `/model` or `/effort` the
+person typed is read off the two user records the CLI writes for a local
+command, the second of which holds the confirmation line: the effort level
+is taken from the line itself (so one picked in the CLI's own menu counts
+too) and the model from the command's argument (a bare `/model` picked in
+the CLI's menu waits for the next reply's record). Records off the main
+chain (sidechains) are ignored throughout.
+
+### `agent_cwd`, `agent_running`, `running_command`, `pid`
+
+**Meaning.** The server's reading of its process table for the pty.
+`pid` is the process the server started on the pty (in Collins the shell;
+a server that runs the CLI directly reports the CLI). `running_command`
+says the pty's foreground is something other than that process: a command
+runs in it. `agent_running` says that something is a Claude Code agent.
+`agent_cwd` is the agent's current directory, which moves when the CLI
+enters a worktree, and is what a client's footer and editor follow.
+
+**Required.**
+
+- read by whatever means the server's platform gives (`/proc` on Linux,
+  libproc on macOS, a `ps` as a last resort); a server that cannot read
+  one of them sends `null` for it or leaves it out, and a client then falls
+  back: `agent_cwd` unknown reads as `cwd`; `agent_running` unknown reads
+  as `running_command`; `running_command` unknown means a client cannot
+  tell whether a graceful close worked and will force the close with
+  `close {mode: "kill"}` once its budget runs out.
+- `running_command` is the field that decides whether a session is
+  **running** on the server: the `item`'s `running`, the pty table's rows
+  and the refusal of a second `spawn` for the same session all follow it.
+  A server must not report it `true` for a pty whose agent has exited and
+  left only the shell.
+- `agent_cwd` is an absolute path on the server's machine, refreshed often
+  enough that a client polling every 2 seconds sees a worktree change
+  within a few seconds.
+
+**How Collins derives it** (informative). Every 2 seconds the service walks
+the processes under the pty's child, takes those whose command line names
+`claude`, and reads the deepest one's current directory. `running_command`
+compares the pty's foreground process group with the shell's own.
+`agent_running` is "some process in that walk names `claude`". On a change
+the `session` event carries the new values; the walk also feeds the busy
+tracker's process reading.
+
+### `session`, `transcript_path`, `landed`, `reset`
+
+**Meaning.** `session` is the session's id, the transcript's file-name
+stem; `transcript_path` is the file. Both are `null` for a fresh spawn
+until the server has found the transcript the CLI started writing (the
+**resolver**), and from then on name it; a `resumed` session has both from
+the spawn. `landed` says the server has just read the transcript and the
+facts read from it are fresh; it comes with every read, so expect it often,
+even from an idle session. `reset` says the server started over on the
+transcript (the file was replaced, truncated or moved) and a client drops
+what it derived from the old one.
+
+**Required.**
+
+- the id is the file-name stem of the transcript and nothing else; the
+  transcript's own `sessionId` field is not consulted (the appendix's
+  [files](#a-the-transcript-directory-and-its-files) entry says why).
+- for a fresh spawn, bound within 10 seconds of the CLI writing the
+  transcript's first record, while a client is attached. A server may slow
+  or stop the search while no client is attached, and a client re-arms it
+  with `resolver.arm` when it shows the tab again; a server with no such
+  search answers `resolver.arm` `ok` and ignores it.
+- never bound to a transcript another live pty of the server's already
+  holds, nor to one that existed before the spawn (a directory often holds
+  older sessions).
+- once bound, the `item` for that id appears in the list (a Level 1
+  server scans the transcript directory, or at least the one it just
+  bound), and the pty table's row names the session.
+- `transcript_path` follows the file if the CLI moves it (Claude Code
+  moves a transcript into the worktree's directory when a session enters
+  one); a move sends the new path with `reset`.
+
+**How Collins derives it** (informative). The service knows the directory
+the CLI will write to from the spawn's working directory (the appendix's
+encoding rule). It lists the UUID-named files there before the command is
+typed, as a baseline, and then every 1.5 seconds looks for a file that is
+not in the baseline and not held by another live pty, taking the newest by
+modification time; for a `claude -w` launch it follows into the worktree's
+directory, baselining only files older than the launch. The search runs
+without limit while a client is attached and gives up after 120 rounds
+otherwise; `resolver.arm`, a typed carriage return and a prompt the
+service itself typed start it again. A pty adopted after a service restart
+with no id recorded is matched by the first record's timestamp against the
+child's start time. From then on the file is watched (a file monitor and a
+poll, debounced) and each read lands as `landed`.
+
+### `cwd`, `handle`, `pty`
+
+`pty` and `handle` are the event's keys: the pty the session runs on and
+the server's name for the session, minted at spawn and returned in the
+spawn reply, the name a client uses for the session before (and beside)
+its id. `cwd` is the directory the pty started in, as the spawn reply
+reported it, which may differ from the one the client asked for when that
+one does not exist on the server's machine.
+
+## The `item`
+
+An `item` is one row of the session list: a session the server found on
+disk, with what a client needs to draw it. The snapshot sends one per
+session; after that an `item` carries only the fields that moved, and
+`removed` set `true` when the row goes away (the transcript was deleted,
+or the session was forgotten). The list's order and grouping is the `rows`
+event's.
+
+**Meanings.** `session` is the id. `path` is the transcript file. `cwd` is
+where the session began, read from the transcript; `resume_cwd` is where a
+resume should start, the last directory the transcript records, which
+differs from `cwd` for a session that entered a worktree. `project` names
+the group the row sits in, the project's root directory (a worktree's row
+sits under its repository). `display_name` is the name to show: a person's
+own name for the row if they gave one, else the CLI's title, else a title
+the server made from the first prompt. `cli_title` is the CLI's own title
+as its records carry it. `subtitle` is a one-line note under the name (in
+Collins, how long ago the session was active). `preview` is the first
+prompt's text, cut short. `mtime`, `created` and `size` describe the
+transcript: its modification time, when the session began and its size in
+bytes. `state` is `""` or `interrupted`, the latter when the transcript's
+last turn is one the person cut short (the appendix's
+[interruption](#b-the-records) entry). `busy` is the busy tracker's word
+for the row. `running` says a live agent pty of the server's runs this
+session. `provider` is `claude`. `syncing` marks a row that a newer
+transcript is about to replace (a server with no such notion never sends
+it). `favorite`, a Level 2 field, is the person's star on the row, written
+with `store.favorite`.
+
+**Required.**
+
+- `path` is always sent: a client builds no row without it.
+- `status` and `unread` carry what a person did at a client's screen, and
+  a client writes them with `store.flags`: `status` is the client's word
+  (`open` while a tab shows the session, `attention`, `""`; the
+  `background` family adds `background`), stored in memory and echoed back
+  to every client; `unread` is set `true` by the server on a counted
+  finish and cleared by a client's `unread: false` (a client may set it
+  `true` too). A server refuses `busy`, `backgrounding` and
+  `can_background` from a client: they are its own verdicts.
+- `busy` on a row is `busy` of the session that stands for it (or of the
+  pty's handle while the session has no row yet), and follows the same
+  bounds.
+- `running` follows `running_command` of a live agent pty for the session
+  and is `false` once the CLI has exited, even while the shell lives on.
+- a row for an archived session is not in the snapshot and is not sent
+  until a client asks for the archived rows (`store.page-archived`) or
+  looks a session up (`store.lookup`), both Level 2; archiving a listed
+  row sends `put-away`.
+- the optional fields (`project`, `cli_title`, `provider`, `state`,
+  `syncing`) read as absent when a server never sends them.
+
+**How Collins derives it** (informative). A scan of the transcript
+directory on a worker thread reads a small prefix of each file for the
+first `cwd`, the first user prompt and the first timestamp, and the last
+64 KiB for the interruption marker, the title records and the last `cwd`;
+stub files the CLI writes for a session that never got a prompt are
+skipped. Names, favorites, archives and order come from the service's own
+state; `busy` and `unread` from the tracker; `running` from the pty table.
+The scan runs on a file monitor over the directory and on demand.
+
+## A checklist for a server
+
+The required properties above, gathered for a test to tick off:
+
+| Fact | Property |
+| --- | --- |
+| `takes_prompt` | false with no agent; never true with text in the box; read from the server's screen model |
+| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end; changes at most once a second |
+| `finished` | once per turn, after `busy` fell, with `item.unread` unless the row was looked at; `notify {kind: "finished"}` at Level 2 |
+| `model`, `effort`, `permission_mode` | null until the transcript says; a `switch` reflected within one turn |
+| `agent_cwd`, `agent_running`, `running_command`, `pid` | by the platform's means; null or absent when unreadable; `running_command` false once the agent has exited |
+| `session`, `transcript_path` | the file-name stem; bound within 10 s of the first record while a client is attached; never another live pty's file |
+| `landed`, `reset` | one-shots, `true` only |
+| `item` | `path` always; `status` and `unread` the client's; `running` follows `running_command`; archived rows on request |
+
+## Appendix: Claude Code as observed
+
+Everything above that the server reads off the CLI rests on how Claude Code
+happens to behave: where it writes, what it draws, what it answers. **None
+of it is promised by Anthropic.** It is what the program does as its users
+see it on their own screens and in their own files, confirmed on the
+versions each entry names, and any release may change any of it without
+notice. A server must therefore **fail soft** on every entry: when one of
+them stops holding, the fact that rode on it goes null, absent or false and
+the session carries on; a server never crashes on it, never writes anything
+to the CLI's files because of it, and never reports a fact it cannot read as
+if it could.
+
+Each entry is self-contained and names the version it was last confirmed
+on. 2.1.316 is the CLI installed when this page was written (re-checked on
+2026-11-01, headlessly: a real `claude` on a bare pty in a throwaway home,
+with no prompt sent except where an entry says so); 2.1.288 is the version
+the recorded terminal streams in Collins' test fixtures were made with. An
+entry can be removed without disturbing the others.
+
+### A. The transcript directory and its files
+
+*Confirmed on 2.1.316.*
+
+The CLI keeps one directory per working directory under
+`~/.claude/projects/`. The directory's name is the working directory's
+absolute path with every character that is not an ASCII letter or digit
+replaced by `-`: `/home/me/src/app` becomes `-home-me-src-app`. The encoding
+is not reversible (a `-` and a `.` in the path both become `-`), which is
+why a session's own directory is read from its transcript rather than from
+the directory's name.
+
+Inside, each session is one file named by a UUID with the suffix `.jsonl`,
+one JSON object per line, appended to as the session goes. The UUID is the
+session id: it is what `claude --resume` takes, and every record of the
+file carries it again as `sessionId`. The file-name stem is the id a
+server uses, because the file is the thing that exists before anything
+else is known of the session, and because a copy of a transcript made for
+a fork carries the original's ids inside while its name is the fork's.
+
+No file exists before the first prompt is submitted: a CLI started and left
+at its empty box writes nothing. A file holding metadata records only, which
+some launches leave without a prompt (a `-w` launch's worktree agent among
+them), is not a conversation and a list should skip it. A session that enters a worktree (`claude -w`, or a worktree the CLI
+re-enters on resume) has its transcript moved to the worktree's own
+directory, `<repo>/.claude/worktrees/<name>` encoded as above, at that
+moment.
+
+### B. The records
+
+*Confirmed on 2.1.316.*
+
+A transcript's records are typed by a top-level `type`. The ones a server
+reads:
+
+- **The first records are metadata.** A file written by 2.1.316 opens with
+  records such as `last-prompt`, `bridge-session`, `mode` and
+  `permission-mode`, which carry a `sessionId` and no `timestamp` and no
+  `cwd`. The session's start time and directory are read from the first
+  record that carries `timestamp` and `cwd`, not from line one.
+- **`user`** records carry the person's prompts and the tools' results.
+  Each has `cwd`, `timestamp`, `uuid`, `parentUuid`, `isSidechain`,
+  `gitBranch` and `version` (the CLI's version), and `message.content`,
+  which is a string or a list of parts. A typed prompt's record also
+  carries `permissionMode` (`auto`, `plan`, …), the mode in force when it
+  was typed; a tool result's record does not.
+- **`assistant`** records carry a reply, or one block of one. Each has
+  `message.model` (the model id, `claude-opus-5-5`) and a top-level
+  `effort` (`low`, `medium`, `high`, `xhigh`, …). A record the CLI makes
+  up locally carries the placeholder model `<synthetic>` and is skipped.
+- **The main chain** is the records with `isSidechain` false; sub-agent
+  transcripts (sidechains) live in the same file with `isSidechain` true
+  and are ignored for the session's model, effort and finishes.
+- **A turn's end** is a `system` record with `subtype` `turn_duration`
+  (and a `durationMs`). Counting them counts turns.
+- **An interrupted turn** leaves a `user` record whose text begins with
+  `[Request interrupted by user` (as a string, or as the text of the first
+  part of a list). A transcript whose last conversational record is one of
+  these is in the `interrupted` state until the session moves on.
+- **A local slash command** the CLI ran itself (`/model`, `/effort`,
+  `/login`, …) is two `user` records in a row. The first's text is
+  `<command-name>`, the command, `</command-name>`, then
+  `<command-message>…</command-message>` and
+  `<command-args>…</command-args>` (the args element empty when there were
+  none); the second's text begins with `<local-command-stdout>` and holds
+  what the command printed. The content may be a string or a one-part list.
+- **Titles and names.** An `ai-title` record (`aiTitle`) holds the title
+  the CLI generated; a `custom-title` record holds one the person set; an
+  `agent-name` record holds the name a background agent was given. The
+  last of any of them wins. (`custom-title` and `agent-name` were last seen
+  in a transcript on 2.1.2xx; the 2.1.316 program still carries both
+  record names.)
+- **`worktree-state`** records (`worktreeSession`) say which worktree a
+  session lived in; **`pr-link`** records (`prNumber`, `prRepository`,
+  `prUrl`) name a pull request the session opened or was pointed at;
+  a **`relocated`** record (`relocatedCwd`) notes a directory move. None of
+  these is needed for the Level 1 facts; Collins reads them for its own
+  rows.
+
+The `sessionId` inside the records and the `gitBranch` on them are not
+read for any fact on this page.
+
+### C. The input box
+
+*Confirmed on 2.1.316 (classic mode) and 2.1.288 (both modes, from the
+recorded streams).*
+
+At rest the CLI draws its input box as a full-width rule of `─` (U+2500),
+a row that opens with `❯` (U+276F) followed by a **no-break space**
+(U+00A0), and another full-width rule. The cursor rests in the third
+column of the prompt row, right after the no-break space. The CLI's other
+prompts and menus use `❯` with an ordinary space, which is what tells the
+input box from them.
+
+While the box is empty the CLI draws a hint in the rest of the prompt row,
+rendered **dim** (SGR 2): one of several sentences, on 2.1.316
+`Try "edit <filepath> to..."` or `Try "fix typecheck errors"`, every one of
+them opening with `Try "`. The hint is drawn in pieces with cursor movement between
+words, so a server reads it from its screen model, not from the byte
+stream.
+
+The box is `columns − 4` cells wide: two for the prompt mark and the space,
+two of right margin. Text that does not fit wraps onto rows that open with
+two ordinary spaces; a word is moved down whole, and a word longer than the
+row fills it before breaking. A row that keeps trailing space cells was
+ended by a typed line break rather than a wrap (the CLI erases to the end
+of a wrapped row), though a repaint sometimes removes that cell. A box
+taller than the screen scrolls inside itself with nothing on screen to say
+so.
+
+After a prompt is submitted the box is redrawn empty within about a second
+and stays empty, and typeable, while the reply streams above it.
+
+Below the box the CLI draws a status line (the permission mode, the effort
+level, hints), which is not part of the box.
+
+### D. Editing the box, and pastes
+
+*Confirmed on 2.1.316.*
+
+- **Keys.** Down moves to the next row of the box and is a no-op on the
+  last; Ctrl+E moves to the end of the row; Backspace deletes one character,
+  and at the box's start is a no-op. So a box of any content is emptied by
+  Down once per row below the cursor, Ctrl+E, and one Backspace per
+  character, in one write. Escape is not used for this: pressed twice it
+  interrupts a running turn.
+- **A carriage return submits**, provided it arrives on its own after the
+  text (a few milliseconds later): a carriage return inside the same chunk
+  as the text is read as part of a paste and becomes a line break.
+- **Pastes.** A bracketed paste (`ESC [ 200 ~` … `ESC [ 201 ~`) of any
+  size is a paste event, and so is a plain chunk of more than 800
+  characters. A paste of **more than 800 characters, or more than two line
+  breaks** (counting `\r\n`, `\r` and `\n` each as one), is not put into
+  the box as text: the box shows a stand-in, `[Pasted text #1]`, or
+  `[Pasted text #1 +3 lines]` when the paste had line breaks, numbered per
+  CLI process; the text is kept by the CLI and sent with the prompt. A
+  paste of exactly 800 characters, or of two line breaks, lands as text.
+  (The two-break allowance is the smaller of two and the terminal's rows
+  minus ten, so a terminal under 12 rows folds sooner.) Several bracketed
+  pastes in one write are separate events, each judged alone. One
+  Backspace at the end of a stand-in deletes it whole.
+- **Typing speed.** Keys written to the pty faster than a few milliseconds
+  apart are read as one chunk, and a chunk over the limit above is a paste;
+  a server that types on a person's behalf spaces its keys or uses a
+  bracketed paste.
+
+### E. The spinner column
+
+*Confirmed on 2.1.316 (one prompt sent) and 2.1.288 (the recorded streams).*
+
+While the CLI works it animates a spinner at the left edge of the screen,
+below the reply so far and above the box: a glyph from a small set
+(`✢`, `✶`, `✻`, `✽`, `✳`) redrawn several times a second, beside a
+word and the elapsed time. The terminal's title animates with it (OSC 0,
+alternating `◐` and `◑` ahead of the title's text). Motion in that column
+over a second or so is a sign of work; a still column is not a sign of
+idleness.
+
+### F. Progress reports, and the two environment variables
+
+*Confirmed on 2.1.316 (two prompts sent: one answered in a second, one
+with a 12-second tool run) and 2.1.288 (the recorded streams).*
+
+The CLI can report its progress to the terminal with the OSC 9;4 sequence
+(`ESC ] 9 ; 4 ; <state> ; <percent> <terminator>`): state 0 clears the
+report, 1 to 4 are the terminal-progress states (1 a definite percentage,
+2 an error, 3 indeterminate, 4 paused). The CLI uses state 3 while it
+works and 0 when it stops. On 2.1.316 the percent field is present and
+**empty** (`ESC ] 9 ; 4 ; 3 ; ESC \`), so a parser must accept an empty
+field; 2.1.288 wrote `3` and `0` with no fourth field. Every turn reports
+3 once, within half a second of the submitting carriage return, and 0
+once as the turn ends (measured on a turn of one second and one of
+fifteen); the CLI also clears the report for a moment between tool calls
+and while a permission prompt waits. It is the earliest and the most
+reliable sign of a turn's start and end, and the only one that comes from
+the CLI rather than from reading its screen. The setting that turns it off
+is `terminalProgressBarEnabled` in `~/.claude.json` (on by default), so a
+server still needs the other readings for a person who turned it off.
+
+It is emitted only when the CLI believes the terminal can show it, and it
+is terminated with BEL for every terminal but one. Two environment
+variables, set for the CLI's process, make it emit the sequence and
+terminate it with ST, which is the form a VTE-based terminal parses:
+
+| Variable | Value | Effect |
+| --- | --- | --- |
+| `ConEmuANSI` | `ON` | The CLI emits OSC 9;4 at all. |
+| `TERM_PROGRAM` | `kitty` | The CLI terminates it with ST (`ESC \`) instead of BEL. |
+
+A server that runs the CLI directly sets them in its environment; one that
+types the command into a shell exports them first. They are the
+terminal contract's spawn environment. They fail soft: a release that
+ignores them simply emits nothing, and the busy reading falls back to the
+screen and the process table.
+
+Two side effects of the `kitty` name, both harmless to a VTE-based client,
+which ignores them: the CLI terminates its title sequences with ST as well,
+and it sends its desktop notifications as kitty's OSC 99 (on 2.1.316, "Claude
+is waiting for your input" a minute after a turn ends unattended). The CLI
+also sets the terminal's title (OSC 0 and 2) as it works and rings the bell
+(BEL) when it wants attention; a server forwards all of these to its clients
+unchanged.
+
+### G. Leaving a session
+
+*Confirmed on 2.1.316 (Ctrl+C Ctrl+C) and 2.1.2xx (`/bg`).*
+
+- **Ctrl+C twice**, within a second or two, exits the CLI cleanly: it
+  writes its last records and returns to the shell. A first Ctrl+C
+  during a turn interrupts the turn instead, and one with text in the box
+  clears the box, so a server that wants the exit sends the pair, waits,
+  and sends it again if the CLI is still there.
+- **`/bg`**, typed as a prompt, hands the conversation to the CLI's
+  background daemon and exits the foreground process; the conversation
+  keeps running under the same id (older versions forked it to a new id),
+  and `claude attach <id>` opens it again. The daemon is a separate
+  process tree that no server owns.
+- A session that was started with `-w` asks a question on exit (entry H).
+
+### H. Worktrees: the exit dialog and the failure line
+
+*Confirmed on 2.1.288 (the recorded streams) and, the failure line, on
+2.1.316 (the program's text).*
+
+- **The exit dialog.** When a session started with `claude -w` is exited
+  with changes in its worktree, the CLI draws a menu headed `Exiting
+  worktree session`, with a line counting the uncommitted files, two
+  options, `1. Keep worktree` and `2. Remove worktree`, and the footer
+  `Enter to confirm · Esc to cancel`. Enter takes the highlighted option
+  (`❯` with an ordinary space marks it); `1` then Enter keeps the worktree.
+  A server driving a graceful close answers it, with keep, before it can
+  expect the shell back. A worktree with nothing to keep is removed, with
+  its branch, without asking.
+- **The failure line.** A `-w` launch that cannot create its worktree
+  prints `Error creating worktree:` and the reason to stderr and exits
+  with status 1 at once; nothing else is drawn. A server that launched
+  with `-w` watches for that line and may retype the command without the
+  flag.
+- The CLI re-enters an existing worktree whenever its directory exists on
+  resume, and recycles an unchanged worktree for a new `-w` session.
+
+### I. `/model` and `/effort`
+
+*Confirmed on 2.1.316 (the records and the program's text).*
+
+Typing `/model <id>` or `/effort <level>` into the box and submitting it
+changes the session's model or effort without a reply from the model. Each
+leaves the two user records of entry B: the command, then its output. The
+output line for the model is
+`Set model to <display name> and saved as your default for new sessions`
+(the display name, such as `Opus 5.5`, not the id; the id is read from the
+command's argument, or from the next reply's record), and for the effort
+`Set effort level to <level>`, possibly followed by more. A refused
+switch prints something else and changes nothing.
+
+Both commands also **write the person's defaults** into
+`~/.claude/settings.json` (entry M). A server that posts them does so on a
+person's request, never on its own, since it is changing their
+configuration.
+
+### J. The command line
+
+*Confirmed on 2.1.316 (`claude --help`).*
+
+The forms a server uses, all documented by the CLI's own help:
+
+| Purpose | Command |
+| --- | --- |
+| a new session | `claude` |
+| resume a session | `claude --resume <id>` |
+| resume as a new session (a fork) | `claude --resume <id> --fork-session` |
+| continue the most recent session in the directory | `claude --continue` |
+| a new session in a fresh worktree | `claude -w` or `claude --worktree <name>` |
+| the model, effort and permission mode for the session | `--model <model>`, `--effort <level>`, `--permission-mode <mode>` |
+| the server's MCP server, and nothing else | `--mcp-config <file>` and `--strict-mcp-config` |
+| open a background agent | `claude attach <id>` |
+| a headless run | `claude -p <prompt>` with `--tools ""` to run no tools |
+
+A headless `-p` run does not ask for folder trust; Collins runs its title
+and icon generation that way, from a scratch directory of its own, so that
+those runs never list as sessions. The background daemon refuses a plain `--resume` of
+an id it still lists (finished ones included): such a session is opened
+with `attach`.
+
+### K. `claude agents --json`
+
+*Confirmed on 2.1.316.*
+
+`claude agents --json` prints a JSON array of the sessions the CLI's
+daemon knows and exits; it needs no terminal, but it puts a terminal it is
+given into raw mode, so a server runs it with its standard input closed.
+Each element has `kind`, `sessionId`, `cwd`, `pid`, `startedAt` (epoch
+milliseconds), `name` and `status` (`idle` or `busy`). On 2.1.316 the
+array lists interactive sessions too (`kind: "interactive"`); a background
+agent's element (`kind: "background"`) also carries an `id`, which is what
+`attach` takes, and a `state` (last seen on 2.1.2xx). `--all` includes
+completed ones. The listing is how a server knows whether a session runs
+as a background agent, and the only busy reading it has for one, since the
+daemon scrubs its agents' environment and they report no progress (entry
+F).
+
+### L. Folder trust
+
+*Confirmed on 2.1.316.*
+
+The CLI asks "Do you trust the files in this folder?" before its first
+interactive session in a directory, and records the answer in
+`~/.claude.json` under `projects`, keyed by the directory's absolute path,
+as `hasTrustDialogAccepted: true`. The answer is inherited by
+subdirectories: a session in a directory with a trusted ancestor is not
+asked. A `-w` launch checks the worktree's exact directory. Collins writes
+that one key, in the same form, before a launch the person confirmed, and
+nothing else into the file; a server either does the same or lets the CLI
+ask (the dialog is on the pty, and `takes_prompt` is false while it
+shows).
+
+### M. The model and effort defaults in `settings.json`
+
+*Confirmed on 2.1.316.*
+
+`~/.claude/settings.json` holds the person's default model as the top-level
+`model` key and the default effort per model under
+`modelSettings.<model id>.effortLevel`; a top-level `effortLevel` key also
+exists in older files and is not what the CLI reads for a model that has
+an entry. A `managed-settings.json` under the system's configuration
+directory, when present, overrides them. These are the defaults a client
+shows for a *new* session (`models.defaults`); they are never a session's
+`model` or `effort`, which come from its transcript.

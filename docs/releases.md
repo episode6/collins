@@ -97,6 +97,18 @@ downloads of each version, see the
   real VTE and to the service, so the page cannot drift from either. The
   message reference's line on `paint` says what the message does, where it
   cited a rule of a private design document.
+- **The session facts have a contract.** A new MIT page,
+  [Session facts](/api/sessions), says what each field of the `session`
+  event and of a list row means, what every server must guarantee of it
+  (`busy` within 3 s of a prompt and off within 10 s of a turn's end, one
+  `finished` per turn, a session bound to its transcript within 10 s, …)
+  and, informatively, how the Collins service reads it. Its appendix,
+  *Claude Code as observed*, collects the facts about the CLI itself that
+  such a reading rides on, from the transcript's records to the input box's
+  glyphs and the paste folds, each dated with the CLI version it was last
+  confirmed on and none of them promised by Anthropic: a server fails soft
+  when one moves. Written from the spec, not from the service's code, and
+  MIT like the rest of `docs/api/`.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another
