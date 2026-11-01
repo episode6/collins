@@ -346,8 +346,13 @@ remote machine, adding `--app-id ID` for a service that does not run under
 the default app id:
 
 ```bash
-remote=$(ssh -o BatchMode=yes user@host \
-    '"$SHELL" -lc "collins-service --print-socket"' | tail -n 1)
+opts=(-o BatchMode=yes -o ControlMaster=no -o ControlPath=none
+      -o RemoteCommand=none -o RequestTTY=no
+      -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+output=$(ssh "${opts[@]}" user@host \
+    '"$SHELL" -lc "collins-service --print-socket"')
+code=$?
+remote=$(printf '%s\n' "$output" | tail -n 1)
 ```
 
 Always ask for the path. The remote runtime directory is not yours to
@@ -357,7 +362,7 @@ is there because the plain command `ssh host cmd` runs with a non-login
 `collins-service`. Some profiles need more than this; the
 [remote guide](../guide/remote#what-ssh-does-for-you) describes the shell
 wrapper Collins uses. Put a time limit on this run (Collins gives it 10
-seconds), and read its exit status:
+seconds), and read its exit status, `$code` above:
 
 | Exit | Meaning |
 | --- | --- |
@@ -378,31 +383,29 @@ connection lasts:
 ```bash
 mkdir -p -m 700 "$XDG_RUNTIME_DIR/my-client"
 local="$XDG_RUNTIME_DIR/my-client/host.sock"
-ssh -o BatchMode=yes -o ExitOnForwardFailure=yes \
+ssh "${opts[@]}" -o ExitOnForwardFailure=yes \
     -o StreamLocalBindUnlink=yes \
-    -o ControlMaster=no -o ControlPath=none \
-    -o RemoteCommand=none -o RequestTTY=no \
-    -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
     -N -L "$local:$remote" user@host
 ```
 
-Then connect to `$local` and say `hello` as usual. What the options are for:
+Then connect to `$local` and say `hello` as usual. Both commands share
+`opts`, as Collins' two do. What the options are for:
 
 - `BatchMode=yes` stops ssh from prompting when nobody can answer. The key
   must be in the agent or have no passphrase, and the host's key must
-  already be in `known_hosts`. Use it on the first command too.
-- `ExitOnForwardFailure=yes` makes ssh exit when it cannot set up the
-  forward, instead of staying up without one.
-- `StreamLocalBindUnlink=yes` removes a stale socket left at `$local`, which
-  would otherwise stop ssh from binding the path.
-- `ControlMaster=no` and `ControlPath=none` give the forward a connection of
-  its own. Under a shared control master the forward would live in the
+  already be in `known_hosts`.
+- `ControlMaster=no` and `ControlPath=none` give each command a connection
+  of its own. Under a shared control master the forward would live in the
   master, so ending this child would end nothing.
 - `RemoteCommand=none` and `RequestTTY=no` keep the user's `~/.ssh/config`
-  from changing what the command is. A `RemoteCommand` there makes
-  `ssh host cmd` fail with exit 255, so set these on the first command too.
+  from changing what the commands are. A `RemoteCommand` there makes
+  `ssh host cmd` fail with exit 255.
 - The `ServerAlive` pair is ssh's own liveness check, which gives up after
   45 seconds.
+- `ExitOnForwardFailure=yes`, on the forward, makes ssh exit when it cannot
+  set up the forward, instead of staying up without one.
+- `StreamLocalBindUnlink=yes`, on the forward, removes a stale socket left
+  at `$local`, which would otherwise stop ssh from binding the path.
 
 **Guard the local socket.** Whoever can open it acts as the service's user
 on the remote machine, with no further credential. Keep it in a 0700
