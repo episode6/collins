@@ -636,6 +636,10 @@ server, and only a value that asks for a feature the server lacks is refused.
 and your product's name in `implementation`. A family you do not list is one
 you do not serve. Leave `local` out and omit `local_proof` if you offer no proof.
 
+**How a client reaches you.** Over ssh a client runs a discovery command to
+learn your socket's path, so document yours.
+[Connecting over ssh](#connecting-over-ssh) says how it must behave.
+
 **State.** A Level 1 server answers `state.get` for every key it emits
 `state.set` for, and refuses any other `gone`. A state key, or a field of
 `service.status`, `session` or `item`, that belongs to a family, such as
