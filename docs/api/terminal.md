@@ -446,9 +446,10 @@ look like. The constraints below are the terminal's, each with the fact
 behind it; how a server orders its work within them is its own affair, and
 the kit's scenarios judge the result, not the method.
 
-- **History is filled only by scrolling.** A terminal's scrollback holds
-  the rows that scrolled off its top while text was being written; nothing
-  can be placed into history directly. So the scrollback has to be written
+- **History is filled from the screen.** A terminal's scrollback holds the
+  rows that left its screen, scrolled off the top while text was being
+  written or pushed there by `CSI 2 J`; nothing can be placed into history
+  directly. So the scrollback has to be written
   as ordinary rows and scrolled off before the screen is painted, and a
   repaint that wants an exact screen afterwards has to leave the cursor
   somewhere it knows.
@@ -456,7 +457,8 @@ the kit's scenarios judge the result, not the method.
   row as continued only when text runs past its right edge into the next
   row. A row that wrapped in the model must therefore be written without a
   line ending and allowed to wrap, and a row that did not must be ended
-  before the margin; otherwise `pty.capture`'s joins and a later resize
+  before anything runs past the margin (a full row that stops at it and
+  then ends is not a wrap); otherwise `pty.capture`'s joins and a later resize
   differ between the two sides. For the same reason a pending wrap (the
   cursor held on the last column with that cell written) exists only once a
   character has landed in the last column, so a model that holds one
@@ -464,11 +466,14 @@ the kit's scenarios judge the result, not the method.
 - **Erased is not never-written, and neither is a space.** A terminal
   remembers whether a cell was touched: a cell erased under a background
   colour carries that colour and counts towards the row's length, a cell
-  nothing ever wrote does not, and a written space is text. `pty.capture`
-  and VTE's own text extraction end a row where the touched cells end, so a
+  nothing ever wrote does not, and a written space is text. The two
+  readings treat them differently: VTE's own text extraction counts the
+  erased cells in a row's text, while `pty.capture` drops them at a row's
+  end as the normative half says, and written spaces stay in both. So a
   repaint reproduces erased cells by erasing (`CSI <n> X`, `CSI K`) with
-  the background set, not by writing spaces and not by skipping them, and
-  leaves never-written cells alone.
+  the background set, not by writing spaces, which would turn them into
+  text in both readings, and not by skipping them, and leaves never-written
+  cells alone.
 - **A tab is a tab only while its stop exists.** The cells a tab skipped can
   be reproduced only by writing a tab with the same stops in place, so
   stops that differ from the default go in before any content that relies
@@ -480,34 +485,47 @@ the kit's scenarios judge the result, not the method.
   cursor). They are asserted after the cells are in place, and the final
   cursor position is placed after them.
 - **The alternate screen saves the cursor it finds.** `CSI ? 1049 h` saves
-  the main screen's cursor and switches, so the main screen, its saved
-  cursor (`ESC 7`) included, has to be complete before the switch, and what
-  is written after the switch is the alternate screen's content.
+  the cursor's position as it stands at the switch, and that saved position
+  is the one `CSI ? 1049 l` restores (it replaces what an earlier `ESC 7`
+  saved, as `ESC 8` then shows). So the main screen has to be complete
+  before the switch, the cursor must be standing where the program will
+  expect it back when it leaves the alternate screen, and what is written
+  after the switch is the alternate screen's content.
 - **What the last cell left behind is not the state.** Writing the cells
   leaves the terminal with the last run's pen and the cursor after the last
-  cell, so the model's current pen and cursor are set after all content,
-  and a hidden cursor (`CSI ? 25 l`) last of all, since anything that
-  writes after it would show the cursor again.
+  cell, so the model's current pen and cursor are set after all content. A
+  hidden cursor is not such a case: `CSI ? 25 l` stays in force through
+  text, SGR, cursor moves and mode changes, so it may be asserted at any
+  point.
+- **The kitty keyboard flags are a stack.** `CSI > <flags> u` pushes and
+  `CSI = <flags> u` sets the base, so the same two sequences in the other
+  order leave a different stack (`>5u` then `=3u` reads back as `>3u`,
+  the reverse as `=3u`, `>5u`). A repaint asserts the base first and the
+  pushed entries in stack order; the other modes may be asserted in any
+  order, since each sets its own state.
 
 Collins bounds a redraw at 2 MiB. When the scrollback does not fit, it
 leaves out the oldest rows: the screen is what the person is looking at,
-and the newest history is nearest to it. Three things no redraw can carry:
-a tab whose stop has since moved, a soft wrap on a row with no character to
-write through the margin, and OSC 8 hyperlinks, which the model does not
-keep.
+and the newest history is nearest to it. Three things Collins' redraw does
+not carry: a tab whose stop has since moved, a soft wrap on a row with no
+character to write through the margin, and OSC 8 hyperlinks, which its
+model does not keep.
 
 **The state a model has to hold.** The normative half and the kit's
 scenarios together say what a server's model must be able to answer, and the
-published scenarios are the test of it. A model that passes them holds, for
-each pty: the cells of the main and the alternate screen, each with its
-text, its width and the pen it was written with, the touched, erased and
-tab-skipped distinctions above among them; the current pen (bold, faint,
-italic, underline and its style, blink, inverse, hidden, strikethrough,
-overline, foreground, background, underline colour); a saved cursor;
-scrollback for the main screen only; a pending wrap; **a scroll region
-that is the same on either screen** (measured on VTE: set on one screen,
-it is found set on the other); the tab stops; the designated character sets and the
-shift; and the origin, autowrap and insert settings. VTE's reading of the
+published scenarios are the test of it. Grouped by what each decides, a
+model that passes them holds, for each pty: what `pty.capture` and the box
+readings are made of (the cells of the main and the alternate screen, each
+with its text, its width and the pen it was written with, the touched,
+erased and tab-skipped distinctions above among them; the main screen's
+scrollback, the alternate screen having none); what DECRQSS and the cursor
+reports answer from (the current pen: bold, faint, italic, underline and
+its style, blink, inverse, hidden, strikethrough, overline, foreground,
+background, underline colour; the cursor and its pending wrap; a saved
+cursor); and what decides where the next write lands (the origin, autowrap
+and insert settings; the tab stops; the designated character sets and the
+shift; **a scroll region that is the same on either screen**, measured on
+VTE: set on one screen, it is found set on the other). VTE's reading of the
 operations that move rows between screen and history is recorded in the
 scenarios (`CSI 2 J` pushes the screen's used rows into history, `CSI 3 J`
 blanks the history's rows but keeps their count; which rows count after a
@@ -538,7 +556,8 @@ answers afterwards are measured against VTE's. The attach reply's `modes`
 is the list of modes the redraw asserts from this state, as described under
 [the redraw](#an-attach-s-redraw-normative); in what order a redraw asserts
 them does not matter to the client's terminal, which ends in the same state
-either way, with the one exception of the hidden cursor noted above.
+either way, except for the kitty keyboard flags, whose base must come
+before the pushed entries, as noted above.
 
 **What `pty.capture` and the facts share.** The capture is the model's
 text as above; `takes_prompt` and the other box readings are made of the
