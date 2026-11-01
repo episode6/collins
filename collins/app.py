@@ -2469,7 +2469,7 @@ class App(Adw.Application):
             log.warning("the first subscribe was refused: %s", refusal.msgid)
             self._open_tabs_frozen = True
             if self._connection is not None:
-                self._connection.lost(_("The service refused the subscription"))
+                self._connection.lost(_(connection.SUBSCRIPTION_REFUSED))
             return
         self._refresh_service_status()
 
@@ -2603,8 +2603,11 @@ class App(Adw.Application):
             # No snapshot is coming: the mirror announces what it has (the
             # emptied rows) rather than holding its listeners for ever.
             self.notification_center.resynced()
-            if refusal.error == protocol.ERROR_GONE and self._connection is not None:
-                self._connection.lost("the resubscribe found the link gone")
+            # Whatever its code (spec D6, ruling 32): left connected, a window
+            # sits on empty mirrors with no banner and no retry. The lost road
+            # holds the open tabs and schedules the next try.
+            if self._connection is not None:
+                self._connection.lost(_(connection.resubscribe_refused_words(refusal.error)))
             return
         # The snapshot was drained inside the call: the notification mirror
         # announces once, with the history whole, so no standing desktop

@@ -322,7 +322,8 @@ family forms, blob kinds and uploads `unknown`, recording each as a `refused`
 stub call. `check_server_families.py` is the pattern: a process per family, a
 few at a time (a window builds from the hello it finds), its `SURFACES` table
 asserted gone there and shown in a run that drops nothing, so a "hidden" cannot
-pass vacuously. `stubs={"refuse_subscribe": 1}` is a first subscribe refused,
+pass vacuously. `stubs={"refuse_subscribe": 2}` is a first subscribe refused and
+the reconnect's after it (the number is how many),
 and `"legacy_hello": True` beside a `caps_drop` is a pre-family Collins service
 (no `implementation` in the hello, `service.restart` still served). The stub
 otherwise keeps `implementation`, so a service with every family dropped is not

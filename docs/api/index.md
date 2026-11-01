@@ -682,9 +682,10 @@ connected, empty sidebar with no dialog. Without a family:
 | `composer` | Typing goes to the agent. The composer sends through `prompt`, into an empty box only, as the model and effort menus do with `/model` and `/effort`. A closed draft is kept and never typed back. |
 | `internal` | No *Restart service* or CLI path row. The editor follows `agent_cwd` itself, a close is timed by the window and ends in `kill`, and a protocol mismatch offers only Quit. |
 
-Three more things matter for a server. A first `subscribe` you refuse or do not
-answer in time is a failed connect, not a failed startup: the window opens under
-its Reconnecting banner and tries again. An `item` with no `path` is a row with
+Three more things matter for a server. A `subscribe` you refuse, or a first one
+you do not answer in time, is a failed connect, not a failed startup: on a
+reconnect as at launch, the window shows its Reconnecting banner and tries again.
+An `item` with no `path` is a row with
 no transcript, so the row's transcript actions are hidden. And a few refusals
 are matched by their exact sentence, which
 [Conformance](./messages#refusal-sentences-a-client-matches) lists.

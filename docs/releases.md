@@ -75,8 +75,9 @@ downloads of each version, see the
   after the tab is closed and reopened.
 - **A server that doesn't answer no longer stops the window.** A refused first
   subscribe opens the window under its Reconnecting banner instead of ending
-  the launch, and the tab's two-second tick no longer waits on the service, so a
-  slow answer can't freeze the window.
+  the launch, a refused one on a reconnect keeps the banner up and tries again
+  instead of sitting on an empty sidebar, and the tab's two-second tick no longer
+  waits on the service, so a slow answer can't freeze the window.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another

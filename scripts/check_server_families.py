@@ -556,7 +556,8 @@ while True:
     os.environ.pop("COLLINS_KEEPER", None)
     banner_read: list = []
     if family == "refused-subscribe":
-        e2e_service.start_service(stubs={"refuse_subscribe": 1})
+        # Twice: the first subscribe's refusal and the reconnect's (ruling 32).
+        e2e_service.start_service(stubs={"refuse_subscribe": 2})
         # The reconnect's first backoff is a second, which a window built on a
         # loaded runner can outlast: it would be connected, and the banner down,
         # before anybody read it. So the retry waits for the read, on the
@@ -593,6 +594,8 @@ while True:
                     "the reconnect subscribes, and the row comes",
                     wait_until(lambda: session_row(win) is not None and header_row(win) is not None, 20.0),
                 )
+                refusals = [call for call in e2e_service.stub_calls() if call["stub"] == "refused_subscribe"]
+                check("…past a second refusal, whose retry came too", len(refusals) == 2, refusals)
                 check("the banner comes down", wait_until(lambda: not win.reconnect_banner.get_revealed()))
                 # The launch it held back, whole (the review of PR 646).
                 check("the launch's last session comes back", wait_until(lambda: win._page_for(SID) is not None))

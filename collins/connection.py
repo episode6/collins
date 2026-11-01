@@ -86,6 +86,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import APP_ID
+from .api import protocol
 from .api import server as api_server
 from .i18n import N_
 
@@ -296,6 +297,22 @@ def spawn_starter(app_id: str) -> str:
     return "spawned"
 
 
+# What a refused subscription says (spec D6): a failed connect, not a failed
+# startup, on the first subscribe and on a reconnect's alike (the app
+# translates it with `_()`).
+SUBSCRIPTION_REFUSED = N_("The service refused the subscription")
+RESUBSCRIBE_GONE = "the resubscribe found the link gone"
+
+
+def resubscribe_refused_words(error: str | None) -> str:
+    """Why a refused resubscribe is a lost link, whatever its code (§5 ruling
+    32): the owner hands this to `lost`, so the banner goes up and the retry is
+    scheduled, where a window left connected would sit on empty mirrors with no
+    word. `gone` keeps its own words: that link is dead, the service refused
+    nothing."""
+    return RESUBSCRIBE_GONE if error == protocol.ERROR_GONE else SUBSCRIPTION_REFUSED
+
+
 class ConnectionManager:
     """See the module docstring.
 
@@ -376,6 +393,9 @@ class ConnectionManager:
         self.path = ""
         self.started_how = ""  # "", "systemd" or "spawned": how this client started it
         self.attempts = 0  # reconnect attempts since the last loss
+        # What `attempts` was as a connect landed, while the owner's
+        # `on_connected` runs (`_land_connected`); None outside it.
+        self._landing_attempts: int | None = None
         self.connected_once = False
         self.stopped = False
         # Each handshake is one attempt: a landing from an attempt the link
@@ -645,12 +665,24 @@ class ConnectionManager:
             # a forward it would only be refused (D11): it never leaves.
             self.link.prove_local()
         self._connected_how(self._systemd_regained())
+        self._land_connected()
+
+    def _land_connected(self) -> None:
+        """A connect landed: connected, and the owner told. The ladder starts
+        over, unless the owner loses the link from inside `on_connected` (a
+        subscribe it was refused, §5 ruling 32): that is the same round failing,
+        and a service refusing every time climbs the ladder as one that does not
+        answer does, instead of a reconnect, its mirrors reset, once a second
+        for ever."""
         first = not self.connected_once
         self.connected_once = True
-        self.attempts = 0
+        self._landing_attempts, self.attempts = self.attempts, 0
         self._set_state(CONNECTED)
-        if self.on_connected is not None:
-            self.on_connected(first)
+        try:
+            if self.on_connected is not None:
+                self.on_connected(first)
+        finally:
+            self._landing_attempts = None
 
     # -- loss and reconnect, on the owner's loop ----------------------------------------
 
@@ -675,6 +707,8 @@ class ConnectionManager:
                 self.last_error = reason
                 self._set_state(LOST)
             return
+        if self._landing_attempts is not None:
+            self.attempts = self._landing_attempts  # the same round: `_land_connected`
         self._generation += 1  # a handshake in flight is nobody's now
         # A poll chain still running from a WAITING round (the forward died
         # before it bound) is cancelled too: two chains would find the
@@ -838,12 +872,7 @@ class ConnectionManager:
                 self._retry_later()
             return
         self._connected_how(regained)
-        first = not self.connected_once
-        self.connected_once = True
-        self.attempts = 0
-        self._set_state(CONNECTED)
-        if self.on_connected is not None:
-            self.on_connected(first)
+        self._land_connected()
 
     def _connect_failed(self, exc: Exception, generation: int | None = None) -> None:
         if self.stopped or (generation is not None and generation != self._generation):
