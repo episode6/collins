@@ -9,13 +9,16 @@ one in use marked. *Connect* hands the selected one to
 sessions keep running where they are), resets the mirrors and reconnects
 through `sshforward`; the window shows "Reconnecting to <name>" meanwhile.
 
-*Add ssh connection* takes a name and ``user@host[:port]``. *Test* runs
-`sshforward.print_socket` (``ssh -o BatchMode=yes TARGET collins-service
---print-socket``, 10 s) on a thread and shows the socket's path, or ssh's
-last line with what exit 255 means under BatchMode (a key in the agent or
-without a passphrase; the host already in known_hosts). Nothing typed here
-is ever formatted into a shell line: `connections.parse_target` refuses a
-target ssh could read as an option, and `sshforward` builds an argv.
+*Add ssh connection* takes a name and ``user@host[:port]``, and under
+*Advanced* a discovery command for a server that documents one in place of
+``collins-service --print-socket``. *Test* runs `sshforward.print_socket`
+(``ssh -o BatchMode=yes TARGET collins-service --print-socket``, 10 s) on a
+thread and shows the socket's path, or ssh's last line with what exit 255
+means under BatchMode (a key in the agent or without a passphrase; the host
+already in known_hosts). `connections.parse_target` refuses a target ssh
+could read as an option and `sshforward` builds an argv; the discovery
+command is the one thing typed here that a shell reads, the login shell on
+the far side, and `sshremote.remote_command` hands it over as typed.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from . import connections, sshforward  # noqa: E402
+from . import connections, sshforward, sshremote  # noqa: E402
 from .i18n import _  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -95,6 +98,23 @@ class ConnectDialog(Adw.Dialog):
         self.target_row.connect("entry-activated", lambda *_a: self._add())
         add.add(self.name_row)
         add.add(self.target_row)
+        # A Gtk.Entry in an ActionRow, not an Adw.EntryRow: an EntryRow's title
+        # sits where the placeholder would, and the default is what shows here.
+        self.command_entry = Gtk.Entry(
+            placeholder_text=sshremote.REMOTE_COMMAND,
+            max_length=sshremote.COMMAND_MAX,
+            valign=Gtk.Align.CENTER,
+            hexpand=True,
+            width_chars=28,
+        )
+        self.command_row = Adw.ActionRow(
+            title=_("Discovery command"),
+            subtitle=_("Run on the host to print the socket's path"),
+        )
+        self.command_row.add_suffix(self.command_entry)
+        self.advanced_row = Adw.ExpanderRow(title=_("Advanced"))
+        self.advanced_row.add_row(self.command_row)
+        add.add(self.advanced_row)
         body.append(add)
 
         self.status = Gtk.Label(wrap=True, xalign=0.0, selectable=True)
@@ -207,9 +227,13 @@ class ConnectDialog(Adw.Dialog):
         if need_name and any(c.name == name for c in self._app.connections.all()):
             self._say(_("A connection named {name} exists already.").format(name=name), error=True)
             return None
+        command = self.command_entry.get_text().strip()
+        if command and not sshremote.valid_command(command):
+            self._say(_("The discovery command must be one line."), error=True)
+            return None
         # A Test with no name yet: the target stands in, cut to a name's
         # length (a valid target can be longer than NAME_MAX).
-        return connections.new_ssh(name or target[: connections.NAME_MAX], target)
+        return connections.new_ssh(name or target[: connections.NAME_MAX], target, command=command)
 
     def _test(self) -> None:
         if self._testing:
@@ -255,6 +279,8 @@ class ConnectDialog(Adw.Dialog):
             return
         self.name_row.set_text("")
         self.target_row.set_text("")
+        self.command_entry.set_text("")
+        self.advanced_row.set_expanded(False)
         self._say(_("Added {name}.").format(name=connection.name))
         self._rebuild()
         self.select(connection.id)

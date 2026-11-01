@@ -496,6 +496,12 @@ seconds), and read its exit status, `$code` above:
 | 127 | The remote shell did not find `collins-service`, or `$SHELL` names a shell that is not installed. |
 | 1 | `collins-service` could not start a service, or none answered in time. |
 
+A server that is not `collins-service` documents its own discovery command,
+which must behave as the table says: print the socket path as the last line
+of stdout and exit 0, or exit non-zero. A client that lets a connection name
+one runs it in place of `collins-service --print-socket`, and keeps the rest
+of this section as it is.
+
 **Check the path before using it.** ssh expands `${VAR}` and `%` tokens in
 both halves of `-L` on your side, so a machine that prints such a path
 chooses which of your environment variables reach it. Accept only an
@@ -584,10 +590,10 @@ the unit suite, so the two never disagree.
 and is MIT-licensed too. It imports nothing but the standard library, so a
 Python client may vendor it as one file. It gives `parse_target` for a
 `[user@]host[:port]` destination, `print_socket` for the first command (a
-failure comes back as a code, and the words are yours to choose), `Forward`
-for the child that holds the forward (its `on_exit` is the signal to
-reconnect) and `sweep_orphans` for a forward a crashed client left behind.
-Its checks on a recorded pid read `/proc`, so they work on Linux only.
+failure comes back as a code, and the words are yours to choose; `command=`
+names a server's own discovery command), `Forward` for the child that holds
+the forward (its `on_exit` is the signal to reconnect) and `sweep_orphans`
+for a forward a crashed client left behind.
 
 The GPL-licensed parts of Collins are the worked examples for a client:
 `collins/api/client.py` is the window's end, `collins/connection.py` the

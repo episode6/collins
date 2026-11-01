@@ -762,7 +762,11 @@ window's `detach_all_tabs()` (the quit's detach loop without the quit),
 resets the mirrors and reopens the new service's `open_tabs`. **From the
 review of PR 623 (ruled 2026-10-29):** the remote command runs through the
 box's login shell (`exec "$SHELL" -lc 'exec collins-service
---print-socket'`, one fixed string, the app id validated inside it), since
+--print-socket'`, the app id validated inside it, a connection's own
+`command` in its place: `sshremote.valid_command` bounds it, a bad one read
+off the file costs only itself, and `remote_command` writes the outer layers'
+specials as octal `printf`s so the wrapper keeps its two single quotes and
+no `!` or doubled backslash whatever the command holds), since
 `ssh host cmd` gets a non-login PATH without `~/.local/bin`; the printed
 path is taken only when it matches `sshremote.SOCKET_PATH_RE` (ssh
 expands `${VAR}` and `%u` of a `-L` path on the client, so an attacker's
@@ -770,6 +774,9 @@ line would pick this device's variables); `RemoteCommand=none` and
 `RequestTTY=no` join `ControlMaster=no`; each forward writes
 `<id>.pid` beside its socket (ssh pid, client pid, socket) and
 `Forward.start` ends a recorded forward whose cmdline is still that `-L`
+(`/proc/<pid>/cmdline`, else `ps -o args=` with `COLUMNS` set, since `ps`
+cuts its line on a pipe; anything but `ssh` first, `-N` and the word after
+`-L` is "not ours", and `pid_alive` is signal 0, a zombie counting as there)
 before unlinking, while `sweep_orphans` at app start ends those whose
 client pid no longer lives (no `PR_SET_PDEATHSIG`: `preexec_fn` in a
 threaded client, and the signal is per parent thread); `RemoteTransport`

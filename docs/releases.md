@@ -60,6 +60,12 @@ downloads of each version, see the
   new `implementation` field names the product. A newer window talking to an
   older service before this change sees none of the new names; nothing reads
   them yet.
+- **A connection can name its own discovery command.** **Connect to…** has
+  an *Advanced* row, *Discovery command*: what runs on the box in place of
+  `collins-service --print-socket`, for a server that documents another
+  (empty keeps the default). `collins/sshremote.py` no longer needs `/proc`:
+  its checks on a recorded forward are POSIX (`ps` where there is no
+  `/proc`), so a Mac client ends a forward a crash left behind.
 - **The service can be on another machine.** **Connect to…** in the app
   menu keeps a list of ssh connections (a name and `user@host[:port]`);
   **Test** runs `ssh -o BatchMode=yes TARGET collins-service
