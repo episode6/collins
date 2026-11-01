@@ -122,7 +122,7 @@ query in this table.
 | --- | --- | --- |
 | `CSI c` | `CSI ?61;1;21;22;28c` | DA1, primary device attributes. |
 | `CSI 0 c` | `CSI ?61;1;21;22;28c` | The same with an explicit 0. |
-| `CSI > c` | `CSI >61;<vte>;1c` | DA2. `<vte>` is the `vte` of the `term` the colour queries follow (below; VTE's version as one number: 0.84.0 is `8400`), `8400` when none has been sent. |
+| `CSI > c` | `CSI >61;<vte>;1c` | DA2. `<vte>` is the pty's version (VTE's as one number: 0.84.0 is `8400`): the most recent `vte` any `term` the colour queries follow has brought to this pty; before any did, the `vte` the stand-in had when the pty was spawned, or `8400` (below). |
 | `CSI > 0 c` | `CSI >61;<vte>;1c` | The same with an explicit 0. |
 | `CSI = c` | `DCS !\|7E565445 ST` | DA3, the unit id: the hex of the ASCII `~VTE`. |
 | `CSI = 0 c` | `DCS !\|7E565445 ST` | The same with an explicit 0. |
@@ -131,7 +131,7 @@ query in this table.
 | `CSI 5 n` | `CSI 0n` | DSR 5, device status: always OK. |
 | `CSI 6 n` | `CSI <row>;<col>R` | CPR. 1-based, from the server's screen model and clamped to the grid; measured from the scroll region's top row when origin mode is on; and the last column rather than the one beyond it when a wrap is pending. |
 | `CSI ? 6 n` | `CSI ?<row>;<col>;1R` | DECXCPR: the same position, page 1. |
-| `CSI ? 996 n` | `CSI ?997;<scheme>n` | The colour-scheme report: `<scheme>` is `1` for dark, `2` for light, from the `term.scheme` of the client the colour queries follow; with no `scheme`, from that client's `term.bg`: `2` when its luminance is one half or more, else `1`; with neither, `1`. |
+| `CSI ? 996 n` | `CSI ?997;<scheme>n` | The colour-scheme report: `<scheme>` is `1` for dark, `2` for light, from the `term.scheme` of the client the colour queries follow; with no `scheme`, from that client's `term.bg`: `2` when the weighted sum 0.2126 R + 0.7152 G + 0.0722 B of its channels, each as a fraction of full and taken as sent (not gamma-decoded), is one half or more, else `1` (`#808080` answers `2`); with neither, `1`. |
 | `CSI ? <n> $ p` | `CSI ?<n>;<s>$y` | DECRQM, a DEC private mode. `<s>` is `1` set, `2` reset, `3` permanently set, `4` permanently reset, `0` for a mode VTE does not know; from the server's mode tracker over VTE's mode table. `<n>` is 0 to 65535. |
 | `CSI <n> $ p` | `CSI <n>;<s>$y` | DECRQM, an ANSI mode, the same states. |
 | `CSI 18 t` | `CSI 8;<rows>;<cols>t` | The grid in cells, the pty's size. |
@@ -194,7 +194,8 @@ unchanged, like everything else.
   at `ST` alone.
 - An `ESC` arriving inside a CSI sequence or a string ends that sequence
   unfinished and starts the next one: in `OSC 10 ; ? ESC [ 6 n` the OSC is
-  dropped and the CPR query that follows is answered.
+  abandoned, its bytes forwarded like any other non-query, and the CPR query
+  that follows is answered.
 - A CSI sequence in which a parameter byte follows an intermediate one is
   malformed: `CSI $ 6 n` is no query.
 - A string that has reached 64 KiB without its terminator is abandoned at
@@ -235,7 +236,7 @@ re-measures it is Collins' own.
 the device of the client the pty is sized for (`sized_for`: its own when it
 is active), and `modes`: the modes the redraw sets away from a fresh
 terminal's defaults, on or off, each as the bytes between `CSI` and the end
-of its sequence as it was asserted, such as `"?1004h"`, `"?2004h"`, `"?7l"`,
+of its sequence as the redraw asserts it, such as `"?1004h"`, `"?2004h"`, `"?7l"`,
 `">5u"`. Four are left out of the list because the redraw handles them
 itself: `?3`, `?25`, `?1048` and the alternate-screen modes. The redraw
 follows as output frames flagged `0x01` (redraw), the last also `0x02`
@@ -360,15 +361,21 @@ sized to it, and the `tool` events a running agent raises go to it.
   pty resized to it before its redraw.
 - **The colour queries follow the active client.** `OSC 10`, `OSC 11`,
   `OSC 12`, `CSI ? 996 n`, DA2 and XTVERSION are answered from one `term`
-  (`fg`, `bg`, `scheme`, `vte`). With an active client on the pty, that
-  `term` is the active client's own: the one in its hello, superseded by
-  every `theme` it sends afterwards. With no active client, a **stand-in**
-  `term` answers: the most recent `theme` that reached the server from any
-  client on any pty, or, before any has, what VTE itself would say (`8400`,
-  VTE's default foreground and background, and dark). Only a `theme`
-  updates the stand-in, never a hello, so until some client has sent one, a
-  pty with no active client answers with VTE's defaults; the Collins window
-  therefore sends `theme` with every attach. A pty's
+  (`fg`, `bg`, `scheme`, `vte`). With an active client on the pty whose
+  `term` is not empty, that `term` is the active client's own: the one in
+  its hello, superseded by every `theme` it sends afterwards. With no active
+  client, or an active one whose `term` is empty, a **stand-in** `term`
+  answers: the most recent `theme` that reached the server from any client
+  on any pty, or, before any has, what VTE itself would say (VTE's default
+  foreground and background, and dark). Only a `theme` updates the
+  stand-in, never a hello, so until some client has sent one, a pty with no
+  active client answers with VTE's defaults; the Collins window therefore
+  sends `theme` with every attach. **The version sticks where the colours
+  do not.** A `term` without a `vte` field changes nothing about the
+  version a pty reports, which therefore stays whatever the most recent
+  `term` with one set, or what the stand-in held when the pty was spawned,
+  or `8400`: after the client that brought `7000` detaches, DA2 still
+  says `7000` while the colour queries go back to the stand-in's. A pty's
   colours are answered for its active client, not for a client that merely
   watches it, and attaching to a pty does not change the colours it is
   answered with until the attaching client becomes active.
@@ -432,91 +439,106 @@ is the login shell's laid over the server's own, with a few of the server's
 private variables removed, the table above added, and the `--mcp-config`
 the session tools ride on.
 
-**The mode tracker.** Beside the screen model, Collins follows a small
-amount of terminal state per pty that a repaint of the cells would not
-carry and that DECRQM asks about:
+**What a repaint must get right, and why.** Any server has to turn its
+model back into a stream that a real terminal will read into the same
+state, and the terminal's own rules decide much of what that stream can
+look like. The constraints below are the terminal's, each with the fact
+behind it; how a server orders its work within them is its own affair, and
+the kit's scenarios judge the result, not the method.
 
-- the state of every private (DEC) and ANSI mode a program has set or reset
-  since the terminal was last reset;
-- the kitty keyboard protocol's flags, both the base value and the pushed
-  entries (a stack bounded at 32), and the modifyOtherKeys level;
-- the scroll region; the designations of G0 to G3 and which of them is
-  shifted in; whether the cursor is hidden;
-- how the alternate screen was entered (mode 47, 1047 or 1049), when it is
-  up.
+- **History is filled only by scrolling.** A terminal's scrollback holds
+  the rows that scrolled off its top while text was being written; nothing
+  can be placed into history directly. So the scrollback has to be written
+  as ordinary rows and scrolled off before the screen is painted, and a
+  repaint that wants an exact screen afterwards has to leave the cursor
+  somewhere it knows.
+- **A soft wrap is made by writing through the margin.** A terminal marks a
+  row as continued only when text runs past its right edge into the next
+  row. A row that wrapped in the model must therefore be written without a
+  line ending and allowed to wrap, and a row that did not must be ended
+  before the margin; otherwise `pty.capture`'s joins and a later resize
+  differ between the two sides. For the same reason a pending wrap (the
+  cursor held on the last column with that cell written) exists only once a
+  character has landed in the last column, so a model that holds one
+  reproduces it by writing that one cell last, and once.
+- **Erased is not never-written, and neither is a space.** A terminal
+  remembers whether a cell was touched: a cell erased under a background
+  colour carries that colour and counts towards the row's length, a cell
+  nothing ever wrote does not, and a written space is text. `pty.capture`
+  and VTE's own text extraction end a row where the touched cells end, so a
+  repaint reproduces erased cells by erasing (`CSI <n> X`, `CSI K`) with
+  the background set, not by writing spaces and not by skipping them, and
+  leaves never-written cells alone.
+- **A tab is a tab only while its stop exists.** The cells a tab skipped can
+  be reproduced only by writing a tab with the same stops in place, so
+  stops that differ from the default go in before any content that relies
+  on them; a terminal's capture then reads the cells as a tab (`d\te`).
+- **Modes that change how writing lands stay off while painting.** Insert
+  mode, autowrap off, origin mode and a scroll region all alter where
+  written cells go (a region scrolls content written inside it; origin mode
+  changes what row 1 means; a region or origin change also homes the
+  cursor). They are asserted after the cells are in place, and the final
+  cursor position is placed after them.
+- **The alternate screen saves the cursor it finds.** `CSI ? 1049 h` saves
+  the main screen's cursor and switches, so the main screen, its saved
+  cursor (`ESC 7`) included, has to be complete before the switch, and what
+  is written after the switch is the alternate screen's content.
+- **What the last cell left behind is not the state.** Writing the cells
+  leaves the terminal with the last run's pen and the cursor after the last
+  cell, so the model's current pen and cursor are set after all content,
+  and a hidden cursor (`CSI ? 25 l`) last of all, since anything that
+  writes after it would show the cursor again.
 
-`RIS` clears the whole of it. `DECSTR` does as VTE's does: modes return to
-their defaults, the region is dropped and the designations forgotten, while
-the cells of the screen are untouched. From this state come the DECRQM answers, the
-**preamble** a redraw ends with, and the attach reply's `modes`, which names
-the preamble's mode assertions. The preamble asserts, in this order: the
-private modes that are off their defaults, then the ANSI modes likewise,
-skipping `3`, `25`, `1048` and the alternate-screen modes; the kitty flags
-as `CSI = <base> u` followed by one `CSI > <flags> u` per pushed entry;
-modifyOtherKeys as `CSI > 4 ; <n> m`; the character-set designations and the
-shift; and, when the cursor is hidden, `CSI ? 25 l` as the very last thing.
+Collins bounds a redraw at 2 MiB. When the scrollback does not fit, it
+leaves out the oldest rows: the screen is what the person is looking at,
+and the newest history is nearest to it. Three things no redraw can carry:
+a tab whose stop has since moved, a soft wrap on a row with no character to
+write through the margin, and OSC 8 hyperlinks, which the model does not
+keep.
 
-**The screen model.** Two grids of cells, main and alternate, each cell
-holding its text, its width and its pen; the current pen, which is a set of
-attribute bits plus a foreground, a background and an underline colour; **a
-single scroll region that both grids share** (measured on VTE: set it on
-one screen and it holds on the other); the tab stops; the designated
-character sets; and the origin, autowrap and insert settings. The main screen keeps up to
-10 000 rows of scrollback within a cost budget of 8 Mi; the alternate
-screen keeps none. **A resize never reflows**: a row is cut or padded to
-the new width and never re-wrapped. Three kinds of blank cell are kept
-apart, one nothing ever wrote, one a program wrote a space into, and one a
-tab jumped over, so that a redraw can write the tab again instead of
-spaces. `CSI 2 J` pushes the screen's used rows into scrollback as VTE does
-(the synthetic scenarios record which rows count after a cursor move, an
-erase, an insert, a resize or a round trip through the alternate screen);
-`CSI 3 J` blanks the scrollback rows but keeps their count. A pending wrap (a character written in the last column, the cursor still
-on it) survives or is cleared by each operation just as on VTE; the
-operations that matter are the erase, insert and delete sequences,
-cursor movement, `SGR`, `DECSC`/`DECRC`, the C0 controls, the alternate-
-screen switch and `REP`, and VTE's answer for each is recorded in the
-synthetic scenarios the conformance kit ships (the `pending-*` cases), and
-`CSI 6 n` reports the last column for as long as the wrap is pending. Character
-widths follow VTE 0.84, which disagrees with Unicode's East Asian Width
-tables for a few hundred code points; Collins carries that skew as a table
-and the kit's screens data exercises the ones the scenarios touch.
+**The state a model has to hold.** The normative half and the kit's
+scenarios together say what a server's model must be able to answer, and the
+published scenarios are the test of it. A model that passes them holds, for
+each pty: the cells of the main and the alternate screen, each with its
+text, its width and the pen it was written with, the touched, erased and
+tab-skipped distinctions above among them; the current pen (bold, faint,
+italic, underline and its style, blink, inverse, hidden, strikethrough,
+overline, foreground, background, underline colour); a saved cursor;
+scrollback for the main screen only; a pending wrap; **a scroll region
+that is the same on either screen** (measured on VTE: set on one screen,
+it is found set on the other); the tab stops; the designated character sets and the
+shift; and the origin, autowrap and insert settings. VTE's reading of the
+operations that move rows between screen and history is recorded in the
+scenarios (`CSI 2 J` pushes the screen's used rows into history, `CSI 3 J`
+blanks the history's rows but keeps their count; which rows count after a
+cursor move, an erase, an insert, a resize or a trip through the alternate
+screen), as is its verdict on the pending wrap for every operation that can
+touch it (the `pending-*` cases: the erase, insert and delete sequences,
+cursor movement, `SGR`, `DECSC`/`DECRC`, the C0 controls, the
+alternate-screen switch, `REP`), with `CSI 6 n` reporting the last column
+for as long as the wrap is pending. Collins' own choices, which a server
+need not share: the main screen's history capped at 10 000 rows; no reflow on resize
+(a row is cut or padded to the new width, never re-wrapped); character
+widths that follow VTE 0.84 where it disagrees with Unicode's East Asian
+Width tables for a few hundred code points, carried as a table the kit's
+screens data exercises where the scenarios touch it.
 
-**The redraw, step by step.** Collins paints a fresh terminal into the
-state of its model in this order, each step chosen so that the next finds
-the terminal where it expects it:
-
-1. A plain pen (`CSI 0 m`), so the scrollback starts from known attributes.
-2. The scrollback, oldest row first. A row that ended at the margin and
-   continued on the next is written without a line ending, so the terminal
-   wraps it again and remembers the wrap; every other row ends with
-   `\r\n`.
-3. A `\r` and one line feed fewer than the screen has rows, which scrolls
-   every scrollback row off the screen and leaves the cursor at the bottom.
-4. The tab stops, but only where the model's differ from a stop every
-   eighth column.
-5. The main screen's cells, as runs placed by absolute cursor position
-   (`CSI <row> ; <col> H`), the full SGR written out whenever the pen
-   changes from the run before. Cells nothing ever wrote are not visited.
-   Cells a background erase coloured are erased again with `CSI <n> X`
-   rather than written as spaces, which keeps the terminal's idea of where
-   the row's content ends the same as the model's.
-6. The saved cursor, by moving there and writing `ESC 7`.
-7. If the model is on the alternate screen: `CSI ? 1049 h`, then that
-   screen's cells as in step 5.
-8. The scroll region, then the preamble described under the mode tracker.
-9. Origin mode (`CSI ? 6 h`), autowrap off (`CSI ? 7 l`) and insert mode
-   (`CSI 4 h`), each only when in force, and the character-set
-   designations.
-10. The cursor. When the model holds a pending wrap, the character in the
-    last column is written once more as the final act, which puts the
-    terminal's cursor into the same pending state.
-11. The current pen.
-
-The budget is 2 MiB. When the scrollback does not fit, the oldest rows are
-the ones left out; the screen is never cut. Three things no redraw can
-carry: a tab whose skipped cells no longer reach a tab stop, a wrap flag in
-front
-of an empty row, and OSC 8 hyperlinks.
+**What DECRQM and a redraw need to know.** Beyond the cells, a server has
+to answer DECRQM for any mode and tell an attaching client the modes in
+force, so it keeps the state of every private (DEC) and ANSI mode a program
+has set or reset since the last reset, the kitty keyboard flags (the base
+value and the pushed entries, which Collins caps at 32), the modifyOtherKeys
+level, and whether the cursor is hidden; a redraw also needs the scroll
+region, the character-set designations and shift, and whether the
+alternate screen is up (Collins also records which of modes 47, 1047 and
+1049 entered it). `RIS` clears all of this. `DECSTR` on VTE resets the
+modes to their defaults and forgets the region and the designations while
+leaving the cells alone, and a server's tracker has to agree, since DECRQM
+answers afterwards are measured against VTE's. The attach reply's `modes`
+is the list of modes the redraw asserts from this state, as described under
+[the redraw](#an-attach-s-redraw-normative); in what order a redraw asserts
+them does not matter to the client's terminal, which ends in the same state
+either way, with the one exception of the hidden cursor noted above.
 
 **What `pty.capture` and the facts share.** The capture is the model's
 text as above; `takes_prompt` and the other box readings are made of the

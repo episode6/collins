@@ -26,7 +26,7 @@ collects what VTE commits, and compares it with what
   placeholder tried with a few sample values, every OSC query with both
   terminators, and the grid placeholders (`<rows>`, `<cols>`, `<row>`,
   `<col>`, `<height>`, `<width>`, `<vte>`) bound to the terminal's own
-  values so a swapped pair cannot pass; a silent row gets nothing from
+  values, the cursor placed off the diagonal first, so a swapped pair fails; a silent row gets nothing from
   either; a pass-through row is forwarded untouched and unanswered by the
   responder; and every query of this script's own table is a row of the
   page (two exceptions below, stated in the page's prose). A row's notes
@@ -360,11 +360,15 @@ term = fresh_terminal()
 # The reply placeholders that name the terminal's geometry or identity are
 # bound to this terminal's values (the cursor is at 1;1 after RIS), so that
 # `CSI 8;<cols>;<rows>t` does not pass as `CSI 8;<rows>;<cols>t`.
+# The cursor is placed off the diagonal first, so that `<row>;<col>` cannot
+# pass swapped either; the responder gets a screen model so its cursor
+# follows the same move.
+PLACE = CSI + b"3;7H"
 GRID = {
     "rows": str(base_state.rows),
     "cols": str(base_state.cols),
-    "row": "1",
-    "col": "1",
+    "row": "3",
+    "col": "7",
     "height": str(base_state.rows * base_state.cell_height),
     "width": str(base_state.cols * base_state.cell_width),
     "vte": "8400",
@@ -379,16 +383,17 @@ for row in page_tables[termcontract.ANSWERED]:
             page_queries.add(query)
             wanted = termcontract.pattern(reply_parts, {**GRID, **values})
             name = f"page: {' '.join(row.cells[0].split())} {values if values else ''}".rstrip()
-            expected = vte_answers(RIS + query)
+            expected = vte_answers(RIS + PLACE + query)
             check(
                 f"{name}: VTE answers as the page says",
                 len(expected) == 1 and wanted.fullmatch(expected[0]) is not None,
                 f"VTE {expected!r} vs {wanted.pattern!r}",
             )
-            out = StreamFilter(state_for_vte()).feed(RIS + query)
+            model = termscreen.Screen(base_state.cols, base_state.rows)
+            out = StreamFilter(state_for_vte(), screen=model).feed(RIS + PLACE + query)
             detail = f"{out.replies!r} != {expected!r}"
             check(f"{name}: the responder answers as VTE", out.replies == expected, detail)
-            check(f"{name}: stripped", out.forward == RIS, repr(out.forward))
+            check(f"{name}: stripped", out.forward == RIS + PLACE, repr(out.forward))
 for row in page_tables[termcontract.SILENT]:
     query = termcontract.render(row.query, {})
     page_queries.add(query)
