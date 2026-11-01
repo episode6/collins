@@ -199,10 +199,14 @@ connecting over ssh), `docs/api/terminal.md` the terminal contract (the
 queries a server answers in the child's place with VTE 0.84.0's measured
 reply to each, the silent list and the pass-through rule, the attach
 redraw, the screen model of record and `pty.capture`'s rules, the active
-client, input frames written without an attach, the spawn environment;
-the informative half is Collins' model, redraw order and tokenizer; written
-from the server-side spec and from measurements of VTE, never from
-`collins/service/`, and read by `scripts/check_termstream_answers.py`,
+client, input frames written without an attach, the spawn environment,
+and the tokenizer rules where they decide whether a tabled query is
+recognised; the informative half is Collins' model, redraw order, which
+end of a long capture it keeps and its one DECRQSS divergence; written
+from the server-side spec, the `.agents/` skills and measurements of VTE,
+the spec and the skills being sources of facts and never of sentences,
+never from `collins/service/`, and read by
+`scripts/check_termstream_answers.py`,
 which holds every row of its tables to a real VTE and to `termstream`
 through the GTK-free `scripts/termcontract.py` parser of its notation),
 `docs/api/messages.md` the message reference that

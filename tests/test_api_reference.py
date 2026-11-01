@@ -21,6 +21,8 @@ import os
 import re
 import sys
 
+import pytest
+
 from collins import gitloads, gitmodel, gitops, mcptools, state
 from collins.api import protocol as p
 
@@ -134,17 +136,22 @@ def test_the_prose_keeps_a_server_author_out_of_the_services_code():
         assert module in examples, module
 
 
-PRIVATE_REFERENCE = re.compile(r"\(rule \d|\brule \d+\b|\brulings?\b|§|\bPR-[0-9S]|\bD\d{1,2}\b")
+PRIVATE_REFERENCE = re.compile(
+    r"\brule \d+\b|\brulings?\b|§|\bPR-[0-9S]|\bPR \d+\b|\bD\d{1,2}\b|\bF\d{1,2}\b"
+)
+MIT_PAGES = ("index.md", "messages.md", "terminal.md")
 
 
-def test_the_reference_cites_no_private_spec():
-    """What the generator prints is read by a server author who has no
-    design spec: a summary that said "(rule 2)", a section comment's D-number
-    or PR reference means nothing to them. The generator strips the section
-    titles' references; the summaries and field descriptions are held here."""
-    for number, line in enumerate(_read(gen.OUTPUT).splitlines(), 1):
+@pytest.mark.parametrize("page", MIT_PAGES)
+def test_the_pages_cite_no_private_spec(page):
+    """The pages are read by a server author who has no design spec: a
+    summary that said "(rule 2)", a D-number, an F-number or a PR reference
+    means nothing to them. The generator strips the section titles'
+    references; the summaries, the field descriptions and the two prose
+    pages are held here."""
+    for number, line in enumerate(_read("docs", "api", page).splitlines(), 1):
         match = PRIVATE_REFERENCE.search(line)
-        assert match is None, f"docs/api/messages.md:{number} cites the private spec: {match.group(0)!r}"
+        assert match is None, f"docs/api/{page}:{number} cites the private spec: {match.group(0)!r}"
 
 
 def test_the_git_builders_table_is_the_registry():
@@ -269,7 +276,11 @@ def test_the_stream_fixtures_are_mit_as_a_directory():
     the server-side spec): the one Python file by its tag, the data files
     by the directory's LICENSE, and nothing else is there, so a new kind of
     file lands under a licence somebody chose."""
-    names = sorted(name for name in os.listdir(FIXTURES) if os.path.isfile(os.path.join(FIXTURES, name)))
+    entries = sorted(os.listdir(FIXTURES))
+    names = [name for name in entries if os.path.isfile(os.path.join(FIXTURES, name))]
+    # A subdirectory would be covered by debian/copyright's glob but by no
+    # pin here, so none is allowed but Python's cache.
+    assert [name for name in entries if name not in names] in ([], ["__pycache__"])
     assert "LICENSE" in names and "scenarios.py" in names
     assert "MIT License" in _read("tests", "fixtures", "streams", "LICENSE")
     for name in names:
@@ -350,6 +361,13 @@ def test_the_notation_is_exact():
     pattern = termcontract.pattern(parse("CSI ?<n>;<s>$y"), {"n": "2004"})
     assert pattern.fullmatch(b"\x1b[?2004;2$y") and not pattern.fullmatch(b"\x1b[?2005;2$y")
     assert termcontract.placeholders(parse("OSC 10;rgb:<rrrr>/<gggg>/<bbbb> ST")) == ["rrrr", "gggg", "bbbb"]
+    indented = _read("docs", "api", "terminal.md").replace("\n| `CSI 0 c` |", "\n | `CSI 0 c` |", 1)
+    try:
+        termcontract.tables(indented)
+    except termcontract.NotationError as exc:
+        assert "does not start with a pipe" in str(exc)
+    else:
+        raise AssertionError("an indented row parsed")
     for bad in ("CSI <nope> c", "CSI \x07", "", "OSC ü"):
         try:
             parse(bad)

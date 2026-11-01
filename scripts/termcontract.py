@@ -7,8 +7,10 @@ standing for a value the row explains. `scripts/check_termstream_answers.py
 --table` reads the page with this module and feeds each row to a real VTE
 and to the service's filter, so the page cannot drift from the measurement;
 `tests/test_api_reference.py` reads it too, so a row that does not parse
-fails the unit suite before the e2e shard runs. GTK-free, standard library
-only, GPL like the rest of `scripts/` (the page it reads is MIT).
+fails the unit suite before the e2e shard runs. Only the query and reply
+cells are read: a row's notes are prose the check cannot hold to anything.
+GTK-free, standard library only, GPL like the rest of `scripts/` (the page
+it reads is MIT).
 """
 
 from __future__ import annotations
@@ -163,6 +165,11 @@ def tables(markdown: str) -> dict[str, list[Row]]:
             raise NotationError(f"the page has no {heading!r}")
         section = markdown.split(heading + "\n", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
         rows = [line for line in section.splitlines() if line.startswith("|")]
+        for line in section.splitlines():
+            if "|" in line and not line.startswith("|"):
+                # An indented row still renders as a row; dropping it would
+                # let a wrong row into the page unchecked.
+                raise NotationError(f"a table line that does not start with a pipe: {line!r}")
         if len(rows) < 3:
             raise NotationError(f"{heading!r} has no table")
         body = rows[2:]  # the header and its rule

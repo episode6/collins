@@ -846,7 +846,7 @@ No fields.
 
 ### `paint`
 
-Insert text into a pty's output stream as if the child had written it: the screen model takes it and every attached client sees it. The pty itself is not written.
+Insert text into a pty's output stream, past the filter: the screen model takes it and every attached client sees it. The pty itself is not written.
 
 Family: `core` · Level 1
 

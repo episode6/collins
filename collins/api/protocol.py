@@ -101,7 +101,7 @@ any code shaped like one, since a newer peer may add codes behind a cap:
 - ``sequence``: a request this connection may not make yet (anything
   before hello, a second hello, a sync channel before its primary). An
   input frame for a pty the client has not attached is not one: it is
-  written to the pty all the same (docs/api/terminal.md, D11).
+  written to the pty all the same (docs/api/terminal.md).
 - ``gone``: what the request names does not exist (any more): a pty, a
   session, a tool call.
 - ``refused``: the service understood and declined (a prompt that would not
@@ -1466,8 +1466,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "paint",
-        "Insert text into a pty's output stream as if the child had written it: the screen model takes "
-        "it and every attached client sees it. The pty itself is not written.",
+        "Insert text into a pty's output stream, past the filter: the screen model takes it and every "
+        "attached client sees it. The pty itself is not written.",
         family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
     ),
