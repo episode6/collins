@@ -195,7 +195,20 @@ framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
 window (a client speaks the service's protocol or the one before it).
 **The API is published and MIT-licensed**: `docs/api/index.md` is the
 prose spec (transport, frames, handshake, errors, the client's life,
-connecting over ssh),
+connecting over ssh), `docs/api/terminal.md` the terminal contract (the
+queries a server answers in the child's place with VTE 0.84.0's measured
+reply to each, the silent list and the pass-through rule, the attach
+redraw, the screen model of record and `pty.capture`'s rules, the active
+client, input frames written without an attach, the spawn environment,
+and the tokenizer rules where they decide whether a tabled query is
+recognised; the informative half is Collins' model, redraw order, which
+end of a long capture it keeps and its one DECRQSS divergence; written
+from the server-side spec, the `.agents/` skills and measurements of VTE,
+the spec and the skills being sources of facts and never of sentences,
+never from `collins/service/`, and read by
+`scripts/check_termstream_answers.py`,
+which holds every row of its tables to a real VTE and to `termstream`
+through the GTK-free `scripts/termcontract.py` parser of its notation),
 `docs/api/messages.md` the message reference that
 `scripts/gen_api_reference.py` renders from the table and from what its free
 fields name (`protocol.GIT_BUILDERS`, `STATE_KEYS`, `SERVICE_SETTINGS`,
@@ -203,9 +216,13 @@ fields name (`protocol.GIT_BUILDERS`, `STATE_KEYS`, `SERVICE_SETTINGS`,
 there too) (run it after any
 table edit; `tests/test_api_reference.py` fails on a stale copy or an
 unlisted name, and pins
-the five MIT files — the two pages, the generator, `protocol.py` and
-`sshremote.py` — to their SPDX tags and everything else to none; `debian/copyright` has the
-stanza). Keep `protocol.py` standard-library only and free of
+the MIT files — the three pages, the generator, `protocol.py`,
+`sshremote.py` and every file of `tests/fixtures/streams/` (the SPDX tag
+on `scenarios.py`, the directory's `LICENSE` for the data files, which
+cannot carry one; the user's relicensing decision of 2026-11-01, the
+files being already distributed with the repository and its source
+packages) — to their SPDX tags and everything else to none; `debian/copyright` and `docs/api/LICENSE` have the
+stanza, and the four move together). Keep `protocol.py` standard-library only and free of
 Collins-private references in what the generator prints (a section
 comment's text up to its first colon is a heading of the public spec;
 spec-section and PR references are stripped). Every type names a `family`

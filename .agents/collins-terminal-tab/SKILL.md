@@ -637,7 +637,15 @@ tokens, events)`:
 
 `scripts/check_termstream_answers.py` compares every answer with a real
 childless VTE's; when VTE is upgraded and it fails, the responder follows
-VTE (update the tables and the module docstring's measurements).
+VTE (update the tables and the module docstring's measurements). The same
+check reads the published terminal contract, `docs/api/terminal.md` (MIT;
+the server-side API spec's PR-S3), through `scripts/termcontract.py` and
+holds every row of its three tables (answered, silent, passed through) to
+VTE and to the responder, so the page follows VTE too: a responder change
+that moves a reply's bytes is a page edit in the same PR, and the page is
+written from the spec and from measurements, never from this module (a
+clean-room rule: no code of `collins/service/` is quoted or paraphrased
+into an MIT file).
 
 ## The service's screen model (termscreen)
 
@@ -696,7 +704,15 @@ made of it, never of a client's VTE:
 - **Fidelity is pinned two ways.** The goldens in `tests/fixtures/streams/`
   are what VTE 0.84 showed for every recorded scenario (two real CLI
   sessions in each mode, the worktree dialog in each) and every synthetic
-  one (`scenarios.py`: the spike's tables plus the pending-wrap table);
+  one (`scenarios.py`: the spike's tables plus the pending-wrap table).
+  The whole directory is MIT since PR-S3 of the server-side spec (the
+  user's decision of 2026-11-01: the streams are already distributed with
+  the repository and its source packages; `scenarios.py` carries the SPDX
+  tag, the directory's `LICENSE` covers the data files, and
+  `tests/test_api_reference.py` pins both, with `debian/copyright` and
+  `docs/api/LICENSE` naming them), so a re-recording lands in an MIT
+  directory: nothing of the CLI's beyond the recorded streams goes there
+  without the user's say;
   `tests/test_termscreen.py` holds the model to them (rows, cursor, every
   drawn cell's colours and attributes, the soft wraps, the scrollback, the
   dim tail and the grammar's reads), and `scripts/check_termscreen_parity.py`

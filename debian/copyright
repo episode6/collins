@@ -4,7 +4,7 @@ Upstream-Contact: Máté Molnár <molnar.mate@zengo.eu>
 Source: https://github.com/r4nd3l/agent-session-manager
 Comment: Modified from the original agent-session-manager
  (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
- fork. Last modified: 2026-10-31. Full change history: git log for this file.
+ fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 Files: *
 Copyright: 2026 Máté Molnár
@@ -62,15 +62,24 @@ Files: collins/api/protocol.py
        collins/sshremote.py
        docs/api/*
        scripts/gen_api_reference.py
+       tests/fixtures/streams/*
 Copyright: 2026 episode6, Inc.
 License: Expat
 Comment: The service API: the message table every client of collins-service
- speaks, the published specification of it (docs/api/), the script that
- renders the message reference from the table and the module that connects
- to a service over ssh. MIT (Expat) so that another development environment
- can vendor the modules or the spec to be a client;
- docs/api/LICENSE and each file's SPDX tag say so. The service and the
- window that implement the protocol remain GPL-3.0-or-later.
+ speaks, the published specification of it (docs/api/, the terminal
+ contract docs/api/terminal.md included), the script that renders the
+ message reference from the table, the module that connects to a service
+ over ssh, and the terminal stream fixtures the terminal contract is
+ measured against (tests/fixtures/streams/: the synthetic scenarios and
+ their golden, which are Collins' own measurements of VTE, and the
+ recorded streams of a Claude Code session with their marks and goldens,
+ relicensed on 2026-11-01 as a deliberate act of the copyright holder, the
+ files being already distributed with this repository and its source
+ packages). MIT (Expat) so that another development environment can vendor
+ the modules or the spec to be a client, or write a server from the spec;
+ docs/api/LICENSE, each source file's SPDX tag and
+ tests/fixtures/streams/LICENSE say so. The service and the window that
+ implement the protocol remain GPL-3.0-or-later.
 
 Files: collins/gitpatch.py
        collins/gitmodel.py
