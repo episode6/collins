@@ -367,6 +367,10 @@ while True:
 
     def instead(cap: str, win, tab, toasts: list) -> None:
         """What each family's absence does beyond hiding."""
+
+        def box_is_empty() -> bool:
+            return bool(tab.probe_call("takes_prompt"))
+
         if cap == protocol.CAP_GIT:
             check("no git asks: no branch", gitinfo.current_branch(PROJECT) is None)
             check("F6 opens no git page", tab.toggle_git_page() is False and tab._git_page is None)
@@ -462,9 +466,11 @@ while True:
             check("the tool's way in is refused", tab.open_panel_shell() is None)
             tab.feed_message("a line in the tab")  # `paint` is core (ruling 22): no refusal in the record
             # The line moved the cursor off the box. The CLI redraws its own;
-            # this stub redraws on input.
+            # this stub redraws on input. Asked of the live screen, as a prompt
+            # into an empty box is: the mirror's word is a settle behind, and
+            # still says yes while the line is landing.
             tab.session.write_text("x\x7f")
-            check("…and the box is back under it", wait_until(tab.takes_prompt))
+            check("…and the box is back under it", wait_until(box_is_empty))
             check("a saved layout's shell does not come back", "shell" not in tab._restorable_kinds())
         elif cap == protocol.CAP_COMPOSER:
             check("a key is the CLI's own", tab._typing_opens_composer(ord("a"), 0) is False)
@@ -475,10 +481,13 @@ while True:
             tab._on_composer_send(None, "composed prompt")
             check("Send goes through prompt", wait_until(lambda: shim_said("composed prompt")))
             check("…and clears the draft", wait_until(lambda: not tab._composer.peek_text()))
+            wait_until(box_is_empty)
             tab.switch_model("sonnet")
             check("the model menu types /model", wait_until(lambda: shim_said("/model sonnet")))
+            wait_until(box_is_empty)
             tab.switch_effort("low")
             check("the effort menu types /effort", wait_until(lambda: shim_said("/effort low")))
+            wait_until(box_is_empty)
             tab.session.write_text("half")
             wait_until(lambda: not tab.takes_prompt())
             tab._on_composer_send(None, "a second one")
@@ -712,6 +721,7 @@ while True:
             for cap in dropped:
                 instead(cap, win, tab, toasts)
 
+        check("the box is empty on the service", wait_until(lambda: tab.probe_call("takes_prompt")))
         check("a prompt lands", tab.inject_prompt("a prompt", when_empty=True))
         check("…in the agent", wait_until(lambda: shim_said("a prompt")))
         win._graceful_close(page)
