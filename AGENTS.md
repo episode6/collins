@@ -191,7 +191,8 @@ direction, fields and bounds), `validate` / `validate_response`, JSON
 framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
 window (a client speaks the service's protocol or the one before it).
 **The API is published and MIT-licensed**: `docs/api/index.md` is the
-prose spec (transport, frames, handshake, errors, the client's life),
+prose spec (transport, frames, handshake, errors, the client's life,
+connecting over ssh),
 `docs/api/messages.md` the message reference that
 `scripts/gen_api_reference.py` renders from the table (run it after any
 table edit; `tests/test_api_reference.py` fails on a stale copy, and pins
