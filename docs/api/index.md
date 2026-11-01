@@ -493,14 +493,17 @@ seconds), and read its exit status, `$code` above:
 | --- | --- |
 | 0 | The last non-empty line of stdout is the path. A login banner may come before it. |
 | 255 | ssh itself failed: no route, a refused key, an unknown host key. The last line of stderr says which. |
-| 127 | The remote shell did not find `collins-service`, or `$SHELL` names a shell that is not installed. |
+| 127 | The remote shell did not find the discovery command's program (`collins-service` by default), or `$SHELL` names a shell that is not installed. |
 | 1 | `collins-service` could not start a service, or none answered in time. |
 
 A server that is not `collins-service` documents its own discovery command,
 which must behave as the table says: print the socket path as the last line
-of stdout and exit 0, or exit non-zero. A client that lets a connection name
-one runs it in place of `collins-service --print-socket`, and keeps the rest
-of this section as it is.
+of stdout and exit 0, or exit non-zero. It is one program and its arguments,
+because a client may run it under `exec` through the remote login shell, as
+Collins does: for a variable write `env VAR=value program`, and use no shell
+builtin, no pipeline and no leading `-`. A client that lets a connection name
+one runs it verbatim in place of `collins-service --print-socket`, adds no
+`--app-id` to it, and keeps the rest of this section as it is.
 
 **Check the path before using it.** ssh expands `${VAR}` and `%` tokens in
 both halves of `-L` on your side, so a machine that prints such a path

@@ -142,6 +142,9 @@ def drive(app) -> None:
     dialog.command_entry.set_text("clinic‮server")
     words = run_test(dialog)
     check("Test refuses a format character", "one line" in words and len(ssh_commands()) == ran, words)
+    dialog.command_entry.set_text("-l env")
+    words = run_test(dialog)
+    check("Test refuses a leading dash", "a program" in words and len(ssh_commands()) == ran, words)
 
     # Add saves it, and clears the form.
     dialog.command_entry.set_text("clinic-server --socket")

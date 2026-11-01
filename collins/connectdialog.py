@@ -109,7 +109,7 @@ class ConnectDialog(Adw.Dialog):
         )
         self.command_row = Adw.ActionRow(
             title=_("Discovery command"),
-            subtitle=_("Run on the host to print the socket's path"),
+            subtitle=_("A program and its arguments, run on the host with exec; prints the socket's path"),
         )
         self.command_row.add_suffix(self.command_entry)
         self.advanced_row = Adw.ExpanderRow(title=_("Advanced"))
@@ -229,7 +229,10 @@ class ConnectDialog(Adw.Dialog):
             return None
         command = self.command_entry.get_text().strip()
         if command and not sshremote.valid_command(command):
-            self._say(_("The discovery command must be one line of plain text."), error=True)
+            self._say(
+                _("The discovery command must be a program and its arguments, on one line of plain text."),
+                error=True,
+            )
             return None
         # A Test with no name yet: the target stands in, cut to a name's
         # length (a valid target can be longer than NAME_MAX).

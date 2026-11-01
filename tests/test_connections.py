@@ -117,7 +117,10 @@ def test_a_row_without_a_command_is_the_default_and_stays_without_one():
 
 @pytest.mark.parametrize(
     "command",
-    ["x" * 513, "a\nb", "a\0b", "a\rb", "a\x1bb", "a‮b", "", "   ", None, 3, ["clinic"], {"a": 1}, True],
+    [
+        "x" * 513, "a\nb", "a\0b", "a\rb", "a\x1bb", "a‮b", "-l env", "", "   ",
+        None, 3, ["clinic"], {"a": 1}, True,
+    ],
 )
 def test_a_command_that_does_not_fit_costs_only_itself(command):
     """Rule 5: the row stays and the default is used, never the bad value."""
@@ -152,7 +155,7 @@ def test_new_ssh_takes_a_command():
     assert connections.new_ssh("box", "h").command == ""
     assert connections.new_ssh("box", "h", command="  ").command == ""
     assert connections.new_ssh("box", "h", command=" clinic --x ").command == "clinic --x"
-    for bad in ("a\nb", "x" * 513):
+    for bad in ("a\nb", "x" * 513, "-l env"):
         with pytest.raises(ValueError, match="command"):
             connections.new_ssh("box", "h", command=bad)
 

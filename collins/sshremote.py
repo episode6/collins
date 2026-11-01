@@ -61,7 +61,10 @@ and the ServerAlive options would be the master's.
 
 A server that is not `collins-service` documents its own discovery command:
 pass it as *command* to `print_socket`. It must print the socket's path as the
-last line of stdout and exit 0, or exit non-zero.
+last line of stdout and exit 0, or exit non-zero. It runs verbatim, through the
+far login shell as ``exec <command>``, so it is one program and its arguments,
+as ``exec`` takes them: no leading ``VAR=value`` (write ``env VAR=value
+program``), no shell builtin, no pipeline.
 
 A pid file beside each forward's socket names the ssh child, this client
 and the socket, so a forward left by a client that crashed is ended before
@@ -260,8 +263,13 @@ def valid_command(command: object) -> bool:
     """A discovery command that may be handed to `print_socket_argv`: not
     blank, at most `COMMAND_MAX` characters, one line, no control character
     and no Unicode format character (a right-to-left override, a zero-width
-    joiner): its program's name is shown back to a person when it fails."""
+    joiner: its program's name is shown back to a person when it fails), and
+    no leading ``-``, which ``exec`` would read as its own option, differently
+    per shell. What else ``exec`` refuses (see the module docstring) is the
+    far shell's to say."""
     if not isinstance(command, str) or not command.strip() or len(command) > COMMAND_MAX:
+        return False
+    if command.lstrip(" '\"").startswith("-"):
         return False
     return not any(ord(c) < 32 or c == "\x7f" or unicodedata.category(c) == "Cf" for c in command)
 
@@ -276,17 +284,26 @@ def command_program(command: str) -> str:
     return os.path.basename(words[0]) if words else ""
 
 
+def _names_program(detail: str, command: str) -> bool:
+    """Whether a shell's line *detail* names *command*'s program, as a word of
+    its own or the end of a path: a short name inside another word ("x" in
+    "exec:") is not it."""
+    program = command_program(command)
+    return bool(program and re.search(rf"(?<![\w.-]){re.escape(program)}(?![\w.-])", detail))
+
+
 def print_socket_argv(target: Target, app_id: str = "", command: str = REMOTE_COMMAND) -> list[str]:
-    """``ssh … TARGET <command> [--app-id ID]``, *command* being
-    ``collins-service --print-socket`` unless the server documents another,
-    the app id for a service that does not run under the default one. Raises
-    ValueError on a command `valid_command` refuses and on an app id a shell
-    could read."""
+    """``ssh … TARGET <command>``, *command* being ``collins-service
+    --print-socket [--app-id ID]`` unless the server documents another. The
+    app id, for a service that does not run under the default one, goes on the
+    default command alone: another command runs verbatim, and one that needs
+    an app id writes it in. Raises ValueError on a command `valid_command`
+    refuses and on an app id a shell could read."""
     if not valid_command(command):
         raise ValueError(f"not a discovery command: {command!r}")
-    if app_id:
-        if not _APP_ID_RE.fullmatch(app_id):
-            raise ValueError(f"an app id a shell could read: {app_id!r}")
+    if app_id and not _APP_ID_RE.fullmatch(app_id):
+        raise ValueError(f"an app id a shell could read: {app_id!r}")
+    if app_id and command == REMOTE_COMMAND:
         command = f"{command} --app-id {app_id}"
     return [SSH, *ssh_options(target), target.destination, remote_command(command)]
 
@@ -401,8 +418,7 @@ def print_socket(
             # 127 is "not found": the command's program when the shell says
             # so, else the login shell itself ($SHELL naming one not
             # installed: both rounds fail the same way).
-            program = command_program(command)
-            failure = NOT_ON_PATH if program and program in detail else NO_SHELL
+            failure = NOT_ON_PATH if _names_program(detail, command) else NO_SHELL
         return PrintSocketResult(ok=False, code=code, detail=detail, failure=failure)
     path = last_line(completed.stdout)
     if not valid_socket_path(path):
@@ -463,7 +479,10 @@ def read_pid_file(path: str) -> dict | None:
 def pid_alive(pid: int) -> bool:
     """Whether a process has *pid*: signal 0, on any POSIX system. A process
     of another user is there (`PermissionError`), and so is a zombie its
-    parent has not reaped yet (`is_our_forward` tells that one apart)."""
+    parent has not reaped yet (`is_our_forward` tells that one apart). Both
+    err on signalling nothing: a dead client whose pid another user's process
+    took, or one still a zombie, reads as living and keeps its forward until
+    that pid goes."""
     if pid <= 0:  # to `kill` these name a process group, not a process
         return False
     try:
@@ -478,10 +497,11 @@ def pid_alive(pid: int) -> bool:
 def _ps_words(pid: int) -> list[bytes] | None:
     """*pid*'s command line as ``ps -o args=`` prints it, split on whitespace,
     or None when the answer is anything but one bounded line from a `ps` that
-    succeeded. `ps` cuts its line to a width that is undefined on a pipe (80
-    columns is common, and a socket's path runs past that) and a terminal's
-    when it finds one on any stream: `COLUMNS` is POSIX's override, and no
-    stream of the run is a terminal."""
+    succeeded. `ps` cuts its line to a terminal's width when it finds one on
+    any stream and to an inherited `COLUMNS` (a login shell or tmux can export
+    one), its width on a pipe being otherwise undefined, and a socket's path
+    runs long: `COLUMNS` is POSIX's override, and no stream of the run is a
+    terminal."""
     try:
         completed = subprocess.run(
             [PS, "-o", "args=", "-p", str(pid)],

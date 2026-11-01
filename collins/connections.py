@@ -19,7 +19,9 @@ ssh is handed as its destination, ``[user@]host[:port]``; `remote_app_id`
 is the app id the remote service runs under when it is not the default;
 `command` is the discovery command run on the far side in place of
 `collins-service --print-socket`, for a server that documents another
-(empty, or absent from the file: that default).
+(empty, or absent from the file: that default): one program and its
+arguments, run verbatim, so `remote_app_id` reaches the default command
+alone.
 
 Everything read off the file is foreign content (CLAUDE.md rule 5):
 shapes are checked, sizes bounded, a row that does not fit is dropped,

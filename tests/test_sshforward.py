@@ -389,6 +389,16 @@ def test_every_failure_code_has_its_word(failure):
     assert sshforward._failure_text(plain, "box", 10.0, "collins-service")
 
 
+def test_a_connections_app_id_stays_off_its_own_command():
+    connection = connections.Connection(
+        id="a" * 32, name="box", kind="ssh", target="me@box",
+        remote_app_id="com.x.Y", command="clinic-server --socket",
+    )
+    run = FakeRun(stdout=b"/run/c/api.sock\n")
+    sshforward.print_socket(connection, run=run)
+    assert run.calls[0][0][-1] == sshremote.remote_command("clinic-server --socket")
+
+
 def test_print_socket_runs_the_connections_command():
     connection = connections.new_ssh("box", "me@box", command="clinic-server --socket")
     run = FakeRun(stdout=b"/run/c/api.sock\n")

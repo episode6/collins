@@ -792,9 +792,22 @@ def test_print_socket_argv_takes_another_command():
     )
 
 
-def test_a_remote_app_id_follows_any_command():
+def test_a_remote_app_id_goes_on_the_default_command_alone():
+    """A custom command runs verbatim: another server does not know the flag,
+    and a command ending in `#` or `;` would swallow or misroute it."""
     argv = sshremote.print_socket_argv(TARGET, "com.x.Y", "clinic-server")
-    assert argv[-1] == sshremote.remote_command("clinic-server --app-id com.x.Y")
+    assert argv[-1] == sshremote.remote_command("clinic-server")
+    assert "--app-id" not in argv[-1] and "com.x.Y" not in argv[-1]
+    default = sshremote.print_socket_argv(TARGET, "com.x.Y")
+    assert default[-1] == sshremote.remote_command(f"{sshremote.REMOTE_COMMAND} --app-id com.x.Y")
+    # Written into the command, it is the command's own.
+    own = sshremote.print_socket_argv(TARGET, command="clinic-server --app-id com.x.Y")
+    assert own[-1] == sshremote.remote_command("clinic-server --app-id com.x.Y")
+
+
+def test_a_bad_app_id_is_refused_whatever_the_command():
+    with pytest.raises(ValueError):
+        sshremote.print_socket_argv(TARGET, "x;reboot", "clinic-server")
 
 
 @pytest.mark.parametrize(
@@ -802,6 +815,7 @@ def test_a_remote_app_id_follows_any_command():
     [
         "", "   ", "a\0b", "a\nb", "a\rb", "a\x1bb", "a\tb", "a\x7fb", "x" * 513, None, 3, ["a"],
         "a‮b", "a‍b", "﻿clinic",  # Unicode format characters: shown back to a person
+        "-l env", "  -l env", "--x", "'-l' env", '"-l" env',  # exec would read it as its own option
     ],
 )
 def test_a_command_that_does_not_fit_is_refused(command):
@@ -810,7 +824,9 @@ def test_a_command_that_does_not_fit_is_refused(command):
         sshremote.print_socket_argv(TARGET, command=command)
 
 
-@pytest.mark.parametrize("command", ["x", "x" * 512, "/opt/é/x --flag 'a b' \"c\" $HOME"])
+@pytest.mark.parametrize(
+    "command", ["x", "x" * 512, "/opt/é/x --flag 'a b' \"c\" $HOME", "env A=1 x -l", "x-y --z"]
+)
 def test_a_command_that_fits_is_taken(command):
     assert sshremote.valid_command(command)
     assert sshremote.print_socket_argv(TARGET, command=command)
@@ -846,6 +862,14 @@ def test_command_program_is_what_a_shell_would_name(command, program):
         # A word about the default program says nothing about this one's.
         ("clinic-server", b"collins-service: not found\n", sshremote.NO_SHELL),
         ("''", b"sh: 1: exec: : not found\n", sshremote.NO_SHELL),
+        # A short name inside another word is not the program being named.
+        ("x --print", b"sh: 1: exec: /usr/bin/zsh: not found\n", sshremote.NO_SHELL),
+        ("clinic", b"sh: 1: exec: clinic-server: not found\n", sshremote.NO_SHELL),
+        ("clinic", b"sh: 1: exec: /opt/clinic.sh: not found\n", sshremote.NO_SHELL),
+        ("x --print", b"sh: 1: exec: x: not found\n", sshremote.NOT_ON_PATH),
+        ("c++ --x", b"bash: exec: c++: not found\n", sshremote.NOT_ON_PATH),
+        ("clinic", b"zsh:1: command not found: clinic\n", sshremote.NOT_ON_PATH),
+        ("clinic", b"fish: Unknown command: clinic\n", sshremote.NOT_ON_PATH),
     ],
 )
 def test_exit_127_is_read_against_the_commands_own_program(command, stderr, failure):

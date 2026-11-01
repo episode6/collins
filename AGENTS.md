@@ -248,7 +248,8 @@ optional discovery `command`, a bad one dropped alone;
 `collins/sshremote.py` (stdlib only and MIT, so another client can vendor
 it: no Collins import and no user-facing text, a failure is a code) the two
 ssh runs — `ssh TARGET collins-service --print-socket`, or the connection's
-`command` in its place (10 s; exit 255 is
+`command` in its place, verbatim (one program and its arguments under the
+wrapper's `exec`; `--app-id` goes on the default alone) (10 s; exit 255 is
 "could not connect", its stderr's last line the detail) and the `-N -L`
 child holding the forward of the Unix socket (unlinked first; only ever a
 socket), with the target's grammar and the pid files, whose checks are POSIX

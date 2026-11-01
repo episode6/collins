@@ -56,8 +56,11 @@ place of `collins-service --print-socket`, for a server that is not
 shown as its placeholder. The command must print the socket's path as the
 last line of its output and exit 0, or exit non-zero. It goes through the
 same login-shell wrapper and your login shell reads it as `exec <command>`,
-so it is one program and its arguments, with your shell's quoting and
-`$VARIABLES`; one line of plain text, at most 512 characters. Error
+so it is one program and its arguments, as `exec` takes them: your shell's
+quoting and `$VARIABLES` in the arguments work, but a leading `VAR=value`
+does not (write `env VAR=value program`), nor does a shell builtin or a
+pipeline, and it cannot start with `-`. It runs verbatim, with nothing
+added, and takes one line of plain text, at most 512 characters. Error
 messages name the program it runs.
 
 From a terminal, `collins --connect NAME` opens the window on a saved
