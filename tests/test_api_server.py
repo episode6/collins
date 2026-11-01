@@ -142,7 +142,8 @@ def test_hello_answers_the_services_facts(served):
     reply = client.hello()
     assert reply["ok"] and reply["protocol"] == protocol.PROTOCOL
     assert reply["min_protocol"] == protocol.MIN_PROTOCOL
-    assert set(reply["caps"]) == {"local", "debug", "git", "files"}
+    assert set(reply["caps"]) == protocol.CAPABILITIES
+    assert reply["implementation"] == "collins-service"
     assert reply["local_proof"] == {"path": server.proof_file, "length": 32}
     assert reply["service_id"] and reply["version"]
     assert "client-1" in server.clients and server.clients["client-1"].device == "laptop"

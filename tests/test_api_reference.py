@@ -59,6 +59,30 @@ def test_index_names_every_error_code_and_capability():
         assert f"`{cap}`" in text, cap
 
 
+def test_the_reference_says_who_serves_each_type():
+    text = _read("docs", "api", "messages.md")
+    assert text.index("## Conformance\n") < text.index("## Message types\n")
+    for entry in p.TYPES.values():
+        section = text.split(f"### `{entry.name}`\n", 1)[1]
+        assert section.lstrip().split("\n\n", 2)[1] == f"Family: `{entry.family}` · Level {entry.level}"
+    for level in p.CONFORMANCE_LEVELS:
+        assert f"### Level {level}: " in text, level
+    for family in p.CONFORMANCE_FAMILIES:
+        assert f"### Family `{family}`: " in text, family
+    for name, _meaning in gen.MATCHED_MSGIDS:
+        assert f"`{getattr(p, name)}`" in text, name
+
+
+def test_the_prose_has_a_section_for_a_server_and_reads_the_license_for_one():
+    text = _read("docs", "api", "index.md")
+    section = text.split("## Implementing a server\n", 1)[1].split("\n## ", 1)[0]
+    for name in (*p.CONFORMANCE_FAMILIES.keys() - {p.CAP_DEBUG}, "core", "unknown", "implementation"):
+        assert f"`{name}`" in section, name
+    interoperability = text.split("## Interoperability\n", 1)[1].split("\n## ", 1)[0]
+    assert "implements the\n*service's* side of this API" in interoperability
+    assert "a derivative of Collins" in interoperability
+
+
 def test_the_git_builders_table_is_the_registry():
     assert set(p.GIT_BUILDERS) == set(gitops.BUILDERS)
     for name, entry in gitops.BUILDERS.items():

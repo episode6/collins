@@ -156,6 +156,19 @@ import it. It holds:
   `OPTIONAL_TYPES` in `protocol.py`, pinned by the same test to
   `gitops.BUILDERS` and `state`; a new builder, shared key or service
   setting fails it until listed, and regenerating the page follows.
+- **Every type has a `family` and a `level`** (required keywords on
+  `MessageType`): `FAMILY_CORE` at level 0, 1 or 2, or a cap's name at
+  `LEVEL_FAMILY` (3). `OPTIONAL_TYPES` is what a client may leave out and
+  `family` what a server may; `CONFORMANCE_LEVELS` and
+  `CONFORMANCE_FAMILIES` say what each covers inside a message (a field, a
+  mode, a state key, a blob kind). A new type names both, and
+  `tests/test_protocol.py`'s `LEVELS` / `FAMILIES` table fails until it is
+  written down there too; a type the design names nowhere is `internal`.
+  `service/core.py` answers every type today, and `api/server.py`'s hello
+  lists every cap (`debug` only with the debug API on) and `IMPLEMENTATION`.
+  A refusal sentence a client matches (`ALREADY_RUNNING_MSGID`,
+  `PTY_GONE_MSGID`, `FOLDER_GONE_MSGID`) is a constant here and listed by
+  the generator's `MATCHED_MSGIDS`.
 
 The module docstring's "Shapes the spec left to this module" records each
 field shape chosen beyond the spec's text; read it before adding a field.

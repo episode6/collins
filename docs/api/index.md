@@ -77,13 +77,17 @@ that has said nothing after 5 seconds is closed.
 ```
 
 The service answers with its own facts: the protocol it agreed on, the
-oldest it speaks, its package version, its id, its hostname, the
-capabilities it offers (`caps`) and where its local proof is.
+oldest it speaks, its package version, its id, its hostname, its product
+name (`implementation`, optional: for a log line or a settings row, and never
+a reason to behave differently), the capabilities it offers (`caps`) and where
+its local proof is.
 
 ```json
 {"re": 1, "ok": true, "protocol": 1, "min_protocol": 1,
  "version": "0.1.5", "service_id": "a1b2…", "host": "laptop",
- "caps": ["local", "git", "files"],
+ "implementation": "collins-service",
+ "caps": ["background", "composer", "files", "git", "internal", "jobs", "local",
+          "prs", "sandbox", "shells", "tools", "usage"],
  "local_proof": {"path": "/run/user/1000/collins/com.episode6.Collins/local-proof", "length": 32}}
 ```
 
@@ -112,12 +116,21 @@ the newest protocol both windows share and answers with it, or refuses
 connection. Each side's window is at most two wide. New message types and
 fields do not bump the protocol: they ship behind a name in `caps`, and a
 client uses one only when the service lists it. The names today: `local`
-(the service offers a local proof), `git` (the `git.*` requests, `fs.trash`,
-`git-changed` and the `git` blob kind), `files` (the `fs.*` requests and
-their events) and `debug` (the service was started with its debug API on
-and serves `debug.*`, which no client outside Collins' own test suite
-should rely on). The list is also in the
-[enumerations](./messages#enumerations).
+(the service offers a local proof), `git` (the `git.*` requests,
+`git-changed` and the `git` blob kind), `files` (every `fs.*` request and
+their events), `prs` (pull requests), `sandbox` (sandboxed sessions), `tools`
+(the session tools that need a screen, a diff's marks, files handed between a
+client and a session), `jobs` (long-running operations), `usage` (token use,
+the model catalog and project icons), `background` (background agents),
+`shells` (panel shells), `composer` (reading and editing the CLI's input box),
+`internal` (what the Collins service keeps for its own window and tests) and
+`debug` (the service was started with its debug API on and serves `debug.*`,
+which no client outside Collins' own test suite should rely on). Every name
+but `local` is also a family of message types: see
+[Conformance](./messages#conformance). The list is also in the
+[enumerations](./messages#enumerations). `collins-service` lists every family,
+`debug` only when its debug API is on, and `local`, which a server lists only
+with a proof.
 
 ## Frames
 
@@ -305,7 +318,7 @@ The sequence the Collins window follows, which any client can:
    `store.flags` carries what a person did at a client's screen; the
    service's own verdicts (`busy`, `unread`, `background`) come back as
    `item` fields and are refused when a client sends them.
-8. **Everything else** is one of the families in the reference: the PR hub
+8. **Everything else** is one of the [families](./messages#conformance) in the reference: the PR hub
    and every `gh` call (`pr.*`), notifications (`notify.*`, `seen`), jobs
    (`job.start` and `job` events for a clone, a login repair, an icon
    generation), token use (`usage.get`, `models.get`), the session tools a
@@ -581,6 +594,64 @@ the find-start-connect-reconnect loop and `collins/sshforward.py` the transport
 that drives `sshremote` for it. Read them for how, not to copy from: their
 license is Collins'.
 
+## Implementing a server
+
+A client is not the only program this specification allows: a program may
+serve the same API in place of `collins-service`. The Collins window is one
+client such a server would meet, and the other clients are the ones these pages
+describe. Write it from these pages and the [message reference](./messages),
+not from the service's code: see [Interoperability](#interoperability).
+
+**Levels and families.** Every message type has a family and a level, printed
+under its summary in the reference and gathered in
+[Conformance](./messages#conformance).
+
+| Level | Name | What a client can do with it |
+| --- | --- | --- |
+| 0 | The wire | Connect and show an empty list. |
+| 1 | Sessions and terminals | Run a Claude Code session in a terminal, with its list row, whether it is busy or unread, its model and effort, a typed prompt, and closing it. |
+| 2 | The store | Organise the list: names, favorites, archives, projects, trash, folder trust, notifications. |
+
+Levels 0 to 2 are the `core` family and build on each other, and Levels 1 and 2
+together are the *sessions* profile to aim for first. Everything else is a
+family behind a `caps` name, optional at any level: `git`, `files`, `prs`,
+`sandbox`, `tools`, `jobs`, `usage`, `background`, `shells`, `composer` and
+`internal`. A family may also cover part of a core message, such as `spawn`'s
+`kind: "shell"` or `close`'s `background` mode; Conformance lists those parts.
+
+**What you say you serve.** List the families you serve in your hello's `caps`
+and your product's name in `implementation`. A family you do not list is one
+you do not serve. Leave `local` out and omit `local_proof` if you offer no proof.
+
+**State.** A Level 1 server answers `state.get` for every key it emits
+`state.set` for, and refuses any other `gone`. A state key that belongs to a
+family, such as `session_forwards` to `background`, is emitted, read and written
+only by a server that lists the family, and a client reads a key it never
+received as empty.
+
+**Answer every request.** A server must answer every request it receives, and
+a type outside its families gets `unknown` with nothing changed. Answer within
+the client's call timeout (10 seconds for most of the Collins window's calls),
+and a refusal promptly: a few hundred milliseconds at most. A client depends on
+this to carry on without a feature, and the window blocks on some of its calls
+while it waits, so a request left unanswered freezes it where a refusal costs a
+round trip.
+
+**What the Collins window does without a family.** It does not yet read most of
+these names. It sends the request anyway and treats `unknown` as any other
+refusal: the feature shows the refusal or stays empty. Two exceptions matter
+for a server. A refused first `subscribe` is fatal to the window's startup, and
+a few refusals are matched by their exact sentence, which
+[Conformance](./messages#refusal-sentences-a-client-matches) lists.
+
+**What is still to be written.** These pages specify the messages. What a Level
+1 server has to do to a terminal stream, and how it reads a session's facts from
+Claude Code, are not published yet.
+
+**Where this lives.** This documentation is kept in the Collins repository for
+now, and may move to a repository both projects share once it settles. Every
+link between the MIT pages is relative, so a move is a copy.
+
 ## Interoperability
 
 In the view of Collins' authors, a program that communicates with
@@ -592,6 +663,13 @@ the files this page names as MIT. This is a statement of how the copyright
 holder reads the license it chose, offered so that nobody has to guess; it
 is not legal advice, and it does not grant permissions the GPL withholds
 for the GPL-licensed code.
+
+The same holds, in the authors' view, for a program that implements the
+*service's* side of this API, written from this specification: it is an
+independent work, whatever its license, and the GPL continues to cover
+Collins' own implementation. This specification describes behaviour;
+it does not grant a license to Collins' code, and a server that copies
+from `collins/service/` is a derivative of Collins.
 
 ## License
 

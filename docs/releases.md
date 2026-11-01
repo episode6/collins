@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-31. Full change history: git log for this file.
+fork. Last modified: 2026-11-01. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -50,6 +50,16 @@ downloads of each version, see the
   environment can vendor the modules or read the spec and be a client; the
   service and the window stay GPL, and a program that talks to the service
   only through the documented API is, in our view, an independent work.
+- **The API says what a server must serve.** Every message type in the
+  reference now has a family and a conformance level, and the new
+  [Conformance](/api/messages#conformance) section and
+  [Implementing a server](/api/#implementing-a-server) spell out what a
+  program serving this API in place of `collins-service` has to answer. The
+  same independent-work reading now covers such a server, written from the
+  spec. The hello's `caps` lists every family, with nine new names, and its
+  new `implementation` field names the product. A newer window talking to an
+  older service before this change sees none of the new names; nothing reads
+  them yet.
 - **The service can be on another machine.** **Connect to…** in the app
   menu keeps a list of ssh connections (a name and `user@host[:port]`);
   **Test** runs `ssh -o BatchMode=yes TARGET collins-service

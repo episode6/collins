@@ -15,7 +15,7 @@ import pytest
 from inproc import LoopbackLink
 
 from collins import uistate
-from collins.api.protocol import RequestRefused
+from collins.api.protocol import ERROR_GONE, RequestRefused
 from collins.remotestate import RemoteState
 from collins.remotestore import RemoteStore
 from collins.service.core import ServiceCore
@@ -288,6 +288,14 @@ def test_state_get_answers_from_the_service(world):
     _store, _remote, _state, ids, link = world
     reply = link.call({"t": "state.get", "key": "names", "entry": ids["alpha1"]})
     assert reply["value"] == "Named alpha"
+
+
+def test_state_get_refuses_a_key_it_does_not_hold_as_gone(world):
+    """What the Conformance section promises of a Level 1 server."""
+    _store, _remote, _state, _ids, link = world
+    with pytest.raises(RequestRefused) as refused:
+        link.call({"t": "state.get", "key": "no_such_key"})
+    assert refused.value.error == ERROR_GONE
 
 
 def test_a_core_without_state_refuses_the_store(tmp_path):
