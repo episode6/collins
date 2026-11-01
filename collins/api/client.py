@@ -28,8 +28,9 @@ service sent them. The one request `call` sends on the primary is
 `subscribe`: its snapshot arrives as events ahead of its reply on the same
 connection, and the main thread drains the queue while it waits, so the
 mirrors are filled when `subscribe` returns
-(the connection manager asks for it at startup and on every reconnect, and
-nowhere else does a main-thread call drain).
+(the connection manager asks for it at startup and on every reconnect). The
+store's `store.lookup` and `store.page-archived` do the same from the main
+thread, for the same reason (`DRAINED`); no other main-thread call drains.
 
 **Flow control** (§3.2): every live output frame fed is counted per pty,
 and an `ack {pty, offset}` goes back every `ACK_BYTES` or `ACK_MS` after
@@ -88,12 +89,22 @@ class ProtocolMismatch(ConnectionLost):
     """The service and this client speak no protocol in common (the hello
     refused ``protocol``, or the hello's window and ours do not meet):
     *service* and *client* are the two protocol versions, which the
-    mismatch dialog names (§3.21)."""
+    mismatch dialog names (§3.21). *caps* is what the server listed, its
+    hello's or its refusal's `caps` (empty when it named none): the dialog
+    offers *Restart Service* only to a server that lists `internal` (D5)."""
 
-    def __init__(self, message: str, service: int | None, client: int) -> None:
+    def __init__(self, message: str, service: int | None, client: int, caps=()) -> None:
         super().__init__(message)
         self.service = service
         self.client = client
+        self.caps = frozenset(str(cap) for cap in caps or ())
+
+
+# What a main-thread `call` sends on the primary and drains the landing queue
+# for: the events a reply depends on arrive ahead of it on that connection, so
+# the mirrors are filled when the call returns (spec D6 for the store's two:
+# `RemoteStore.get_session` reads `known_sessions` right after).
+DRAINED = frozenset({"subscribe", "store.lookup", "store.page-archived"})
 
 
 def new_client_id() -> str:
@@ -284,6 +295,7 @@ class SocketLink(apilink.Link):
                 f"and this Collins speaks {protocol.PROTOCOL}",
                 int(hello["protocol"]),
                 protocol.PROTOCOL,
+                hello.get("caps"),
             )
         self._open(self._sync, deadline)
         self._hello(self._sync, deadline)
@@ -369,6 +381,7 @@ class SocketLink(apilink.Link):
                     refusal.msgid.format_map(details),
                     service if isinstance(service, int) and not isinstance(service, bool) else None,
                     protocol.PROTOCOL,
+                    caps if isinstance((caps := details.get("caps")), list) else (),
                 ) from None
             raise ConnectionLost(f"hello refused: {refusal.msgid}") from None
 
@@ -528,7 +541,7 @@ class SocketLink(apilink.Link):
         if not self.connected:
             raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
         wait = CALL_TIMEOUT_S if timeout is None else max(0.1, float(timeout))
-        if message.get("t") == "subscribe" and threading.current_thread() is threading.main_thread():
+        if message.get("t") in DRAINED and threading.current_thread() is threading.main_thread():
             return self._primary_blocking(message, wait)
         return self._blocking(self._sync, message, wait)
 

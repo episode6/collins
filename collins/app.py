@@ -2454,34 +2454,54 @@ class App(Adw.Application):
         # (PR-3.0 item 5: no local fallback; a service without the `git`
         # capability refuses each ask).
         self._install_git_transport()
-        # And the editor's files (PR-2.3): behind the `files` capability,
-        # decided on every hello like git's.
+        # And the editor's files (PR-2.3), decided on every hello like git's.
         self._install_file_transport()
-        self.store.subscribe()
+        self._note_families()
+        try:
+            self.store.subscribe()
+        except RequestRefused as refusal:
+            # A server that refuses or never answers the first subscribe is
+            # a failed connect, not a failed startup (spec D6): the mirrors
+            # stay empty, the window opens under the Reconnecting banner and
+            # the reconnect path subscribes again. The open tabs are held
+            # first: this "loss" comes before any window, and a write now
+            # would empty the list the reconnect reopens.
+            log.warning("the first subscribe was refused: %s", refusal.msgid)
+            self._open_tabs_frozen = True
+            if self._connection is not None:
+                self._connection.lost(_("The service refused the subscription"))
+            return
         self._refresh_service_status()
+
+    def _note_families(self) -> None:
+        """What this hello's server is and serves, for the log (D2: nothing
+        is gated on the name). Every surface asks `apilink.has` itself."""
+        log.info(
+            "connected to %s, which lists: %s",
+            apilink.implementation() or "a server with no name",
+            ", ".join(sorted(self._service_link.families)) or "no family",
+        )
 
     def _install_git_transport(self) -> None:
         """Route git through the service, on every hello (the first connect
-        and each reconnect: the service may be another build). There is no
-        local fallback any more (PR-3.0 item 5): the repositories are the
-        service's, and every service since PR-2.1 has the `git`
-        capability; one without it refuses each ask, which fails soft."""
+        and each reconnect: the service may be another build). The transport
+        stays installed with no `git` (ruling 17): it asks `apilink.has`
+        before anything crosses the wire, and a client never reads a
+        repository itself (PR-3.0 item 5)."""
         link = self._service_link
-        if protocol.CAP_GIT not in (link.hello.get("caps") or ()):
-            log.warning("the service has no git capability: its git asks will be refused")
+        if not apilink.has(protocol.CAP_GIT):
+            log.info("the service has no git capability: its surfaces are hidden")
         remotegit.install(link)
 
     def _install_file_transport(self) -> None:
         """The editor's reads, writes and file watches go to the service
-        when its hello lists the `files` capability (PR-2.3, §3.23);
-        without it the editor opens nothing (every open lands in its
-        banner) and sends no watch — decided on every hello, like git's."""
+        (PR-2.3, §3.23), on every hello. With no `files` the transport stays
+        installed and asks `apilink.has` before anything crosses the wire
+        (ruling 17): the editor's banner says the service has no files."""
         link = self._service_link
-        if protocol.CAP_FILES in (link.hello.get("caps") or ()):
-            remotefiles.install(link)
-        else:
-            log.warning("the service has no files capability: the editor cannot open files")
-            remotefiles.uninstall()
+        if not apilink.has(protocol.CAP_FILES):
+            log.info("the service has no files capability: the editor cannot open files")
+        remotefiles.install(link)
 
     def _refresh_service_status(self) -> None:
         """The sandbox probe's verdict so far (the service's; a client never
@@ -2493,7 +2513,9 @@ class App(Adw.Application):
             status = self._service_link.call({"t": "service.status"})
         except RequestRefused:
             status = {}
-        sandboxstatus.set_probe_reason(status.get("sandbox"))
+        # A reason from a server that does not list `sandbox` is nobody's to
+        # read (D5): absent is "unknown", which hides every sandbox surface.
+        sandboxstatus.set_probe_reason(status.get("sandbox") if apilink.has(protocol.CAP_SANDBOX) else None)
         remotecli.set_found(status.get("cli"))
         # The service's home, kept on the link (PR-3.0 item 3): what the
         # service's paths are abbreviated with, never this device's.
@@ -2566,6 +2588,12 @@ class App(Adw.Application):
         remotegit.reset()
         self._install_file_transport()
         remotefiles.reset()  # the editors' watches, installed on the new service again
+        self._note_families()
+        # The surfaces already on screen follow this hello (a reconnect's
+        # service may be another build, a switch another machine's).
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.apply_families()
         try:
             self.store.subscribe()
         except RequestRefused as refusal:
@@ -2611,6 +2639,9 @@ class App(Adw.Application):
         if window is not None and entries:
             window.reopen_open_tabs(entries)
         self.persist_open_tabs()
+        owed, self._launch_owed = getattr(self, "_launch_owed", None), None
+        if owed is not None and not owed.closed_for_good:
+            self._show_welcome_work(owed)  # what a refused first subscribe held back
 
     # -- the device's open tabs (§3.21) -------------------------------------------
 
@@ -2719,7 +2750,14 @@ class App(Adw.Application):
         service would end every session for a restart that starts the same
         newer service again; that one asks for an upgrade of Collins."""
         service = mismatch.service if mismatch.service is not None else "?"
-        can_restart = isinstance(mismatch.service, int) and mismatch.service < mismatch.client
+        # Only a server that lists `internal` is one a restart starts again
+        # (D5): this client stops whatever holds the socket, and another
+        # program's server is not this client's to stop.
+        can_restart = (
+            isinstance(mismatch.service, int)
+            and mismatch.service < mismatch.client
+            and protocol.CAP_INTERNAL in mismatch.caps
+        )
         heading = _("Collins and its service speak different protocols")
         if can_restart:
             body = _(
@@ -3145,6 +3183,10 @@ class App(Adw.Application):
 
     def _new_window(self) -> MainWindow:
         window = MainWindow(application=self, state=self.state, store=self.store)
+        if self._connection is not None and self._connection.state != "connected":
+            # Not connected as it opens (a first subscribe that was refused,
+            # a window opened mid-reconnect): the banner says so at once.
+            self._on_connection_state(self._connection.state)
         self._present(window)
         return window
 
@@ -3192,6 +3234,13 @@ class App(Adw.Application):
         window = self._main_window()
         if window is None:
             window = self._new_window()
+            if self._connection is not None and self._connection.state != "connected":
+                # A first subscribe that was refused (spec D6): nothing is
+                # known yet, neither the open tabs nor whether the welcome
+                # was seen. Both wait for the reconnect (`_on_connected`).
+                self._launch_owed = window
+                window.present()
+                return
             # Fresh launch: the tabs this device had open on this service
             # come back, attached where the service still runs them, else
             # resumed (open_tabs, §3.21); with none recorded, the session
@@ -3211,8 +3260,11 @@ class App(Adw.Application):
             # on a launch that owes no welcome.
             # _after_welcome only builds the closure; nothing in it runs
             # until the dialog is answered (or at once, when none shows).
-            welcome.maybe_show(window, self.state, self.store, then=self._after_welcome(window))
+            self._show_welcome_work(window)
         window.present()
+
+    def _show_welcome_work(self, window: MainWindow) -> None:
+        welcome.maybe_show(window, self.state, self.store, then=self._after_welcome(window))
 
     def _after_welcome(self, window: MainWindow):
         """The welcome-work that waits on the welcome dialog: the GitHub
@@ -3229,8 +3281,10 @@ class App(Adw.Application):
         def then() -> None:
             ghwelcome.maybe_show(window, self.state)
             # The service's login repair (the ``login.repair`` job, on its
-            # machine's ~/.claude): heard back when it refreshed.
-            jobclient.start("login.repair", {"mode": "start"}, self._on_login_repair)
+            # machine's ~/.claude): heard back when it refreshed. Skipped on
+            # a service with no jobs (D5).
+            if apilink.has(protocol.CAP_JOBS):
+                jobclient.start("login.repair", {"mode": "start"}, self._on_login_repair)
             # The update check waits on the welcome too — not for a switch
             # on the dialog, but so a card never slides in over it — and
             # then asks again every hour, which updatecheck turns into one

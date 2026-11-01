@@ -268,6 +268,7 @@ class SandboxChip(Gtk.MenuButton):
         shell.set_halign(Gtk.Align.START)
         shell.set_tooltip_text(_("Open a shell inside this session's sandbox"))
         shell.connect("clicked", self._open_shell)
+        shell.set_visible(apilink.has(protocol.CAP_SHELLS))  # hidden on a service with no shells (D5)
         self._content.append(shell)
 
     def _grant_row(self, workspace: str, drawn: dict, defaults: list[str], hosted: bool) -> Gtk.Widget:

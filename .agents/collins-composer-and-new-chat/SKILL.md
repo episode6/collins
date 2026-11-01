@@ -153,6 +153,18 @@ grammar (`enter_action`: Enter sends unless `composer_enter_sends` is off,
 Shift+Enter is always a newline because it is the terminal's literal-newline
 chord, Ctrl+Enter the alternate send) is integer-keyval GTK-free code.
 
+**With no `composer` family** (server-side spec D5) there is no cut, and so no
+promise the box is empty. `ClientSession.send_composed` sends through `prompt
+{when_empty: true, focus: false}` (a bracketed paste: a composed prompt is free
+text) and `on_refused` toasts when the box holds something, the draft staying
+put. `switch_model` / `switch_effort` type the provider's command through
+`prompt {when_empty: true, focus: true}`, the road `switch` itself takes
+(`Session.post_prompt`: the text, then the Return alone a beat later, which is
+what makes the CLI read a command). `restore_draft` is False, so a closed draft
+stays in the stash; `mention` builds the reference here and goes through
+`write`; typing does not open the composer; `Preferences`' switch for it is
+gone.
+
 ## The new-chat screen (`newchat.py`, `newchatview.py`)
 
 Beside the worktree box sits a **Sandboxed** one on the same terms

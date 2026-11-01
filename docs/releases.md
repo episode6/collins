@@ -57,9 +57,20 @@ downloads of each version, see the
   program serving this API in place of `collins-service` has to answer. The
   same independent-work reading now covers such a server, written from the
   spec. The hello's `caps` lists every family, with nine new names, and its
-  new `implementation` field names the product. A newer window talking to an
-  older service before this change sees none of the new names; nothing reads
-  them yet.
+  new `implementation` field names the product.
+- **The window shows what its service serves.** It reads those names on every
+  connect, hides what a service doesn't list, and sends that family nothing: a
+  server with no pull requests has no PR chips, one with no panel shells has no
+  terminal panel, and one with nothing beyond the wire shows a connected, empty
+  sidebar. [Implementing a server](/api/#implementing-a-server) lists what goes
+  with each family, and *Preferences → Service* says which server it is. **A
+  service still running from before this version lists none of the names**, so
+  the window hides nearly everything until that service restarts: after this
+  upgrade, run `systemctl --user restart collins-service`.
+- **A server that doesn't answer no longer stops the window.** A refused first
+  subscribe opens the window under its Reconnecting banner instead of ending
+  the launch, and the tab's two-second tick no longer waits on the service, so a
+  slow answer can't freeze the window.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another

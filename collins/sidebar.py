@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -45,6 +45,7 @@ from . import (
     remoteprs,
     sandboxstatus,
 )
+from .api import protocol
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import display_path, format_size
@@ -287,6 +288,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
             new_btn.connect(
                 "clicked", lambda *_: self.activate_action("win.new-session-in-chats", None)
             )
+            new_btn.set_visible(apilink.has(protocol.CAP_JOBS))  # a chat's folder is a job's (D5)
             box.append(new_btn)
         elif cwd:
             new_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
@@ -766,7 +768,10 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._bg_btn = bg_btn
         # Providers that can't detach never offer backgrounding.
-        self._can_background = get_provider(item.session.provider).background_exit() is not None
+        self._can_background = (
+            get_provider(item.session.provider).background_exit() is not None
+            and apilink.has(protocol.CAP_BACKGROUND)  # hidden on a service with no /bg (D5)
+        )
 
         # Archived rows are only listed while "Show archived sessions" is on,
         # and toggling rebuilds the list, so the icon never goes stale.
@@ -1386,7 +1391,9 @@ class SessionSidebar(Gtk.Box):
         inner.append(self._view)
         # Claude subscription usage readout, tucked under the session list.
         self.usage_panel = UsagePanel(store.state)
-        self.usage_panel.set_visible(bool(store.state.get_setting("show_usage_panel")))
+        self.usage_panel.set_visible(
+            bool(store.state.get_setting("show_usage_panel")) and apilink.has(protocol.CAP_USAGE)
+        )
         inner.append(self.usage_panel)
         # Where the window's "session archived" snackbar floats: over the
         # panel's own bottom edge — usage panel included — rather than the
@@ -1563,8 +1570,8 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("Connect to…"), "win.connect-to")
         # *Restart service* (§3.21): the window's action existed since
         # PR-1.12c, with no menu item appending it until PR-3.1 (ruled under
-        # §5: the spec, the guide and the skills all place it here).
-        menu.append(_("Restart service"), "win.restart-service")
+        # §5: the spec, the guide and the skills all place it here). Only on
+        # a service that serves it (`_sync_restart_item`, below).
         menu.append(_("Keyboard Bindings"), "win.keyboard-bindings")
         menu.append(_("Preferences"), "win.preferences")
         # Only when nothing has put Collins in the app grid yet: a pip or pipx
@@ -1574,6 +1581,7 @@ class SessionSidebar(Gtk.Box):
         # changes when someone installs one, and the window that does drops
         # the item from every menu itself (see drop_install_desktop_item).
         self._menu = menu
+        self._sync_restart_item()
         if desktopentry.can_offer_install():
             menu.append(_("Install desktop icon"), "win.install-desktop")
         # Same shape, for the package channel: on a distro Collins has a
@@ -1603,7 +1611,8 @@ class SessionSidebar(Gtk.Box):
         # a repository cloned first (clonedialog.py).
         add_menu = Gio.Menu()
         add_menu.append(_("Open folder…"), "win.add-project")
-        add_menu.append(_("Clone repository…"), "win.clone-project")
+        self._add_menu = add_menu
+        self._sync_add_menu()
         self._add_project_btn = Gtk.MenuButton(
             icon_name="folder-new-symbolic", menu_model=add_menu
         )
@@ -1715,8 +1724,50 @@ class SessionSidebar(Gtk.Box):
 
     def refresh_usage_panel(self) -> None:
         """Re-read the 'show usage panel' setting. Hiding unmaps the panel,
-        which stops its poll timer on the next tick."""
-        self.usage_panel.set_visible(bool(self.store.state.get_setting("show_usage_panel")))
+        which stops its poll timer on the next tick. No panel at all on a
+        service with no `usage` (D5)."""
+        self.usage_panel.set_visible(
+            bool(self.store.state.get_setting("show_usage_panel")) and apilink.has(protocol.CAP_USAGE)
+        )
+
+    def apply_families(self) -> None:
+        """A hello listed the service's families: the panel and the two menu
+        items built from the last one's follow (`MainWindow.apply_families`).
+        Every other menu here is built as it opens, and asks then."""
+        self.refresh_usage_panel()
+        self._sync_add_menu()
+        self._sync_restart_item()
+        self._refresh_package_repo_item()
+
+    def _sync_add_menu(self) -> None:
+        """*Clone repository…* is a job (the list and the clone), so it is
+        there only on a service with `jobs` (D5)."""
+        present = None
+        menu = self._add_menu
+        for index in range(menu.get_n_items()):
+            action = menu.get_item_attribute_value(index, Gio.MENU_ATTRIBUTE_ACTION, None)
+            if action is not None and action.get_string() == "win.clone-project":
+                present = index
+        wanted = apilink.has(protocol.CAP_JOBS)
+        if wanted and present is None:
+            menu.append(_("Clone repository…"), "win.clone-project")
+        elif present is not None and not wanted:
+            menu.remove(present)
+
+    def _sync_restart_item(self) -> None:
+        """*Restart service* is `service.restart`, which only a service that
+        lists `internal` serves (D5). It sits right before Keyboard Bindings."""
+        present = self._menu_index("win.restart-service")
+        wanted = apilink.has(protocol.CAP_INTERNAL)
+        if present is not None and not wanted:
+            self._menu.remove(present)
+        elif present is None and wanted:
+            before = self._menu_index("win.keyboard-bindings")
+            item = Gio.MenuItem.new(_("Restart service"), "win.restart-service")
+            if before is None:
+                self._menu.append_item(item)
+            else:
+                self._menu.insert_item(before, item)
 
     def refresh_project_icon_size(self) -> None:
         """Re-read the 'project icon size' setting and resize existing
@@ -1796,8 +1847,11 @@ class SessionSidebar(Gtk.Box):
         if FAV_GROUP in items_by_group:
             headers.append((FAV_GROUP, _("Favorites"), None))
         # The virtual Chats project is always there — it's where "start a
-        # session without picking a folder" lives, sessions or not.
-        headers.append((CHATS_GROUP, _("Chats"), None))
+        # session without picking a folder" lives, sessions or not. Only on
+        # a service that can make a chat's folder (a job, D5); one that can't
+        # still lists the chats it has.
+        if apilink.has(protocol.CAP_JOBS) or CHATS_GROUP in items_by_group:
+            headers.append((CHATS_GROUP, _("Chats"), None))
         empty_by_key = {key: (label, cwd) for key, label, cwd in self.store.empty_groups}
         known_names = set(self.store.resolved_project_order)
         display_order = merge_project_order(
@@ -1964,7 +2018,7 @@ class SessionSidebar(Gtk.Box):
         those is not something to read between two frames, so it waits for the
         thread (see _sweep_prs).
         """
-        if self._pr_sweep:
+        if self._pr_sweep or not apilink.has(protocol.CAP_PRS):
             return
         targets = [
             (
@@ -2051,7 +2105,9 @@ class SessionSidebar(Gtk.Box):
         Collins. The item sits just before "About Collins", in the slot the
         desktop-icon item also precedes.
         """
-        channel = pkgrepos.offer()
+        # The commands run in a panel shell, so a service with none offers no
+        # item (D5).
+        channel = pkgrepos.offer() if apilink.has(protocol.CAP_SHELLS) else None
         present = self._menu_index("win.add-package-repo")
         if channel is None:
             if present is not None:
@@ -2748,15 +2804,22 @@ class SessionSidebar(Gtk.Box):
             _("Remove from favorites") if self.store.state.is_favorite(session_id) else _("Add to favorites")
         )
         edit_section.append_item(item(fav_label, "toggle-favorite"))
-        edit_section.append_item(item(_("Details…"), "session-details"))
-        edit_section.append_item(item(_("Replay…"), "replay-session"))
+        # A row a server sent with no transcript has no transcript actions
+        # (spec D6).
+        has_transcript = row.item.session.has_transcript
+        if has_transcript:
+            edit_section.append_item(item(_("Details…"), "session-details"))
+            edit_section.append_item(item(_("Replay…"), "replay-session"))
         edit_section.append_item(item(_("Copy session ID"), "copy-session-id"))
-        edit_section.append_item(item(_("Export as Markdown…"), "export-session"))
-        if local:
+        if has_transcript:
+            edit_section.append_item(item(_("Export as Markdown…"), "export-session"))
+        if local and has_transcript:
             edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
         # Recovery for a row whose background agent it lost track of (e.g. a
         # /bg handoff the app never got to pair): find the agent and link it.
-        edit_section.append_item(item(_("Repair session link"), "repair-session"))
+        # The service's job, about the service's background agents (D5).
+        if apilink.has(protocol.CAP_JOBS) and apilink.has(protocol.CAP_BACKGROUND):
+            edit_section.append_item(item(_("Repair session link"), "repair-session"))
 
         danger_section = Gio.Menu()
         # A row a /bg fork replaced is out of sight because the fork stands in
@@ -2769,8 +2832,9 @@ class SessionSidebar(Gtk.Box):
                 else _("Archive session")
             )
             danger_section.append_item(item(archive_label, "archive-session"))
-        danger_section.append_item(item(_("Move transcript to trash…"), "trash-session"))
-        danger_section.append_item(item(_("Delete permanently…"), "delete-session"))
+        if has_transcript:
+            danger_section.append_item(item(_("Move transcript to trash…"), "trash-session"))
+            danger_section.append_item(item(_("Delete permanently…"), "delete-session"))
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)
@@ -2781,9 +2845,10 @@ class SessionSidebar(Gtk.Box):
     def show_group_menu(self, row: GroupHeaderRow, x: float, y: float) -> None:
         if row.group_key == CHATS_GROUP:
             # The Chats group is permanent: nothing to archive or remove.
-            menu = Gio.Menu()
-            menu.append(_("New chat"), "win.new-session-in-chats")
-            self._popup_menu(menu, row, x, y)
+            if apilink.has(protocol.CAP_JOBS):  # and no new one with no jobs (D5)
+                menu = Gio.Menu()
+                menu.append(_("New chat"), "win.new-session-in-chats")
+                self._popup_menu(menu, row, x, y)
             return
 
         # Whether the project is a checkout is the service's answer
@@ -2867,7 +2932,7 @@ class SessionSidebar(Gtk.Box):
         # abbreviated commit hash on a detached HEAD, where the pull will
         # refuse; git's own words for that surface in the error dialog.
         repo_section = Gio.Menu()
-        if is_git:
+        if is_git and apilink.has(protocol.CAP_GIT):
             branch = current_branch(row.cwd)
             pull_item = Gio.MenuItem.new(
                 _("Git pull ({branch})").format(branch=branch) if branch else _("Git pull"),
@@ -2905,7 +2970,8 @@ class SessionSidebar(Gtk.Box):
 
         # Anything cosmetic about the project's row itself.
         looks_section = Gio.Menu()
-        if row.cwd:
+        # A job, on the service's login, saved through `icon.save` (D5).
+        if row.cwd and apilink.has(protocol.CAP_JOBS) and apilink.has(protocol.CAP_USAGE):
             icon_item = Gio.MenuItem.new(_("Generate Icon"), None)
             icon_item.set_action_and_target_value(
                 "win.generate-icon", GLib.Variant("s", row.cwd)

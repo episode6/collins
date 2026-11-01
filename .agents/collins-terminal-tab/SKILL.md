@@ -1067,7 +1067,9 @@ The `Session` is the service's (spec §3.19). The pieces:
   {mode, text, force}`, `close.nudge`, `close.end`, `resolver.arm` (the
   tab's map), `transcript.update/set/relocate`, `prs.restore`,
   `cwd.settle {cwd, root}` (reply the `FollowScope` name: the editor's
-  root is the client's), `shells.follow`, `finish.witness`,
+  root is the client's; sent with no wait on the tab's 2 s tick, one at a
+  time, its answer on the main loop, and not at all with no `internal`, where
+  the tab roots the editor at `agent_cwd` itself), `shells.follow`, `finish.witness`,
   `baseline.absorb`, `baseline.cmdlines`, `restart.worktreeless`,
   `sandbox.restart` (by box). A panel shell's reads are `pty.info` and
   `pty.capture`. The sandbox host and the live grants are the core's

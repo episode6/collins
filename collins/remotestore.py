@@ -381,13 +381,13 @@ class RemoteStore(GObject.Object):
         else:
             self._reproject(list(self._items))
 
-    def _session_from(self, session_id: str, fields: dict) -> Session | None:
+    def _session_from(self, session_id: str, fields: dict) -> Session:
+        # An `item` with no `path` is a row with no transcript (spec D6:
+        # `Session.has_transcript`; the row's transcript actions are hidden).
         path = fields.get("path")
-        if not path:
-            return None
         return Session(
             session_id=session_id,
-            jsonl_path=Path(path),
+            jsonl_path=Path(path) if path else Path(),
             cwd=fields.get("cwd"),
             preview=fields.get("preview", ""),
             mtime=float(fields.get("mtime", 0.0)),
@@ -606,6 +606,9 @@ class RemoteStore(GObject.Object):
         if self._paged:
             return
         try:
+            # On the main thread the call drains the primary up to its reply
+            # (api.client, DRAINED), so `known_sessions` holds the rows it
+            # sent when it returns.
             self._link.call({"t": "store.page-archived"})
         except RequestRefused as refusal:
             log.warning("store: the archived sessions could not be paged in: %s", refusal.msgid)

@@ -105,6 +105,24 @@ ones known today are recorded (spec D50; D54 ruled and PR-3.0 moved the
 first list's): the record is the comment in
 `tests/pathless_allowlist.py`, which names every form the walker misses.
 
+**The families walker** (`tests/test_client_families.py`, required). The
+window hides a family the service does not list and never sends its requests
+(server-side spec D5). The test walks every client module with `ast` for a
+dict literal whose `"t"` is a type of a family other than `core`, the two
+`core` forms a family owns (`spawn` with `kind: "shell"`, `close` with `mode:
+"background"`) and every `http_get` / `http_put`, and holds each to
+`apilink.has` of that family, earlier in the same function and in a shape
+`pathless.behind_an_ask` reads (the pathless walker's own: `if not
+apilink.has(...): return`, inside `if apilink.has(...):`, after it in an `and`).
+A new family request fails the suite until it asks; `ASKED_ELSEWHERE` is the
+list of those that cannot, each with its reason. It reads no surface: a
+button left showing is `check_server_families.py`'s to find. The file's second
+half calls each transport with the family gone and asserts nothing reached the
+link. `apilink.has` answers yes with no link and for a fake with no hello
+(`families` None), so a unit test of a mirror is unchanged; a test of the gate
+installs a link with `families` set (`no_families` in
+`tests/test_clientsession.py`).
+
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
 `~/.claude/projects` with two projects, monkeypatched into `sessions` and
 forcing `ClaudeProvider.available()` True), `app_state` (an `AppState`
@@ -293,6 +311,16 @@ a file `e2e_service.stub_calls()` reads. A constant to lower on the
 service is `debug.sandbox` with target `core` and name `debug_patch`
 (`check_composer_paste_back.py`'s piece limits); the tools' dispatcher is
 `debug_tools_list` / `debug_tools_dispatch` the same way.
+
+**A server that does not list a family.** `start_service(stubs={"caps_drop":
+[cap, ...]})` takes those caps out of the hello and answers their requests,
+family forms, blob kinds and uploads `unknown`, recording each as a `refused`
+stub call. `check_server_families.py` is the pattern: a process per family, a
+few at a time (a window builds from the hello it finds), its `SURFACES` table
+asserted gone there and shown in a run that drops nothing, so a "hidden" cannot
+pass vacuously. `stubs={"refuse_subscribe": 1}` is a first subscribe refused.
+`scripts/stub_server.py` is a whole Level 0 server, for looking at the window by
+hand; it prints what it refuses.
 
 **Two checks own the process boundary.** `check_service_survives_client.py`
 starts a session, SIGKILLs the app, starts a second app on the same service

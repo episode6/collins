@@ -17,7 +17,7 @@ from liveservice import LiveService
 from collins import uistate
 from collins.api import protocol
 from collins.api import server as api_server
-from collins.api.client import SocketLink
+from collins.api.client import ProtocolMismatch, SocketLink
 from collins.api.protocol import RequestRefused
 from collins.remotestate import RemoteState
 
@@ -49,6 +49,47 @@ def link(service):
     link.lost_reasons = lost
     yield link
     link.shutdown()
+
+
+def test_the_store_s_lookups_drain_the_primary_on_the_main_thread_alone(monkeypatch):
+    """Spec D6: `RemoteStore.get_session` reads `known_sessions` right after
+    the reply, and the `item` events land ahead of it on the primary. Off the
+    main thread the sync channel answers, as any call."""
+    import threading
+
+    link = SocketLink("")
+    link.connected = True
+    asked = []
+
+    def on_primary(message, _wait):
+        asked.append(("primary", message["t"]))
+        return {}
+
+    def on_sync(_channel, message, _wait):
+        asked.append(("sync", message["t"]))
+        return {}
+
+    monkeypatch.setattr(link, "_primary_blocking", on_primary)
+    monkeypatch.setattr(link, "_blocking", on_sync)
+    for kind in ("store.lookup", "store.page-archived", "subscribe"):
+        link._request({"t": kind})
+    link._request({"t": "service.status"})
+    assert asked == [
+        ("primary", "store.lookup"),
+        ("primary", "store.page-archived"),
+        ("primary", "subscribe"),
+        ("sync", "service.status"),
+    ]
+    asked.clear()
+    worker = threading.Thread(target=lambda: link._request({"t": "store.lookup"}))
+    worker.start()
+    worker.join()
+    assert asked == [("sync", "store.lookup")]
+
+
+def test_a_mismatch_carries_what_the_server_listed():
+    assert ProtocolMismatch("x", 0, 1).caps == frozenset()
+    assert ProtocolMismatch("x", 0, 1, ["internal"]).caps == frozenset({"internal"})
 
 
 def test_a_blocking_call_on_the_main_thread_is_answered(link):

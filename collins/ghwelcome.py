@@ -45,6 +45,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from . import apilink, ghsetup, practions, prmenu  # noqa: E402
+from .api import protocol  # noqa: E402
 from .api.protocol import RequestRefused  # noqa: E402
 from .copylabel import enable_copy_on_click, open_uri  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -158,9 +159,10 @@ def maybe_show(parent: Gtk.Widget, state: AppState) -> None:
     Costs nothing at all once dismissed — the setting is read before anything
     is spawned. Otherwise the check runs on a worker thread and the dialog is
     presented back on the main loop, so a `gh` that hangs delays a dialog and
-    never a window.
+    never a window. No notice on a service with no `prs`: nothing there would
+    use gh (D5).
     """
-    if state.get_setting(DISMISSED_SETTING):
+    if state.get_setting(DISMISSED_SETTING) or not apilink.has(protocol.CAP_PRS):
         return
     GLib.timeout_add(_DELAY_MS, lambda: _start(parent, state))
 

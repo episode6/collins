@@ -117,6 +117,24 @@ def test_showing_the_archive_pages_it_in(world):
     assert remote.get_item(ids["beta1"]).session.project_name == "beta"
 
 
+def test_an_item_with_no_path_is_a_row_with_no_transcript(world):
+    """Spec D6: a server with no transcript to name still gets its row; the
+    sidebar hides the row's transcript actions on `has_transcript`."""
+    _store, remote, _state, _ids, link = world
+    link.dispatch({"t": "item", "session": "no-path", "cwd": "/srv/a", "display_name": "A row", "mtime": 1.0})
+    session = remote.known_sessions["no-path"]
+    assert session.has_transcript is False
+    assert session.resume_at == "/srv/a"
+    groups = [{"kind": "proj", "name": "a", "label": "a", "count": 1}]
+    link.dispatch({"t": "rows", "rows": ["no-path"], "groups": groups})
+    assert _row_ids(remote.model) == ["no-path"]
+
+
+def test_every_scanned_session_has_a_transcript(world):
+    _store, remote, _state, _ids, _link = world
+    assert remote.known_sessions and all(s.has_transcript for s in remote.known_sessions.values())
+
+
 def test_a_lookup_fetches_one_out_of_sight_session(world):
     _store, remote, _state, ids, _link = world
     session = remote.get_session(ids["beta1"])

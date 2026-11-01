@@ -277,6 +277,10 @@ would open the wrong file on the wrong machine:
 *Open With…* on a picture or a plain document (pdf, txt, md, csv, json,
 log) still works: it hands your desktop app the window's cached copy.
 
+The window also hides what the service at the other end doesn't serve. A box
+running `collins-service` serves everything; [A service that serves
+less](./features#a-service-that-serves-less) lists what goes when one doesn't.
+
 ## Picking a folder on the box
 
 Every chooser that picks a folder the service will use — where a new

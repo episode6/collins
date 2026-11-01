@@ -820,7 +820,10 @@ class ApiServer:
                 message.id,
                 protocol.ERROR_PROTOCOL,
                 "This Collins speaks protocol {client} and the service speaks {service}",
-                {"client": int(message.get("protocol")), "service": protocol.PROTOCOL},
+                # The caps too, as the hello would: a client that cannot
+                # talk to this server still reads what it is (the mismatch
+                # dialog's *Restart Service* asks for `internal`, D5).
+                {"client": int(message.get("protocol")), "service": protocol.PROTOCOL, "caps": self._caps()},
             )
         if connection.client is not None:
             return protocol.refuse(message.id, protocol.ERROR_SEQUENCE, "hello was already said")
@@ -853,11 +856,7 @@ class ApiServer:
             self.core.client_connected(client)
         connection.client = client
         connection.channel = channel
-        # This service serves every family; `debug` only when it was started
-        # with the debug API on.
-        caps = sorted(protocol.CAPABILITIES - {protocol.CAP_DEBUG})
-        if self.debug:
-            caps.append(protocol.CAP_DEBUG)
+        caps = self._caps()
         state = getattr(self.core, "state", None)
         service_id = str(getattr(state, "service_id", "") or "") or "service"
         return protocol.reply(
@@ -871,6 +870,14 @@ class ApiServer:
             caps=caps,
             local_proof={"path": self.proof_file, "length": len(self.proof)},
         )
+
+    def _caps(self) -> list[str]:
+        """This service serves every family; `debug` only when it was started
+        with the debug API on."""
+        caps = sorted(protocol.CAPABILITIES - {protocol.CAP_DEBUG})
+        if self.debug:
+            caps.append(protocol.CAP_DEBUG)
+        return caps
 
     def local(self, client: SocketClient, message: protocol.Message) -> dict:
         proof = str(message.get("proof") or "")

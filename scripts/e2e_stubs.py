@@ -31,6 +31,15 @@ The data (every key optional)::
                 directory, whose rows land only once the check says so,
                 after a reconnecting window has re-attached its tabs
                 (check_service_restart.py, V5-S1)
+    caps_drop   a list of family caps: the service serves as a server that
+                does not list them would (server-side spec D5). They leave the
+                hello; their requests, a `spawn` or `close` of their form, their
+                blob kinds and an upload are answered `unknown` (404 for the
+                HTTP two) and recorded as ``refused`` with the type, so
+                `check_server_families.py` can hold the window to sending none
+    refuse_subscribe  how many of the first `subscribe`s to refuse `unknown`: a
+                server whose first subscribe fails, which is the Reconnecting
+                banner and no failed startup (spec D6)
 
 Every stubbed call is appended as a JSON line to ``<data>.calls.jsonl``
 (``{"stub": name, "args": [...]}``), which `e2e_service.stub_calls()`
@@ -72,6 +81,79 @@ def _record(stub: str, args: list) -> None:
         fh.write(json.dumps({"stub": stub, "args": args, "stack": stack}) + "\n")
 
 
+def _refuse_subscribe(count: int) -> None:
+    """Refuse the first *count* `subscribe`s, then serve them."""
+    from collins.api import protocol, server
+
+    left = {"count": count}
+    real_answer = server.Connection._answer
+
+    def answer(self, message):
+        if message.type == "subscribe" and left["count"] > 0 and self.client is not None:
+            left["count"] -= 1
+            _record("refused_subscribe", [])
+            return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": "subscribe"})
+        return real_answer(self, message)
+
+    server.Connection._answer = answer
+
+
+def _drop_caps(dropped: frozenset) -> None:
+    """Serve as a server that does not list *dropped* would: class-level, ahead
+    of the `ApiServer` the service builds right after the stubs load."""
+    from collins.api import protocol, server
+
+    forms = {("spawn", "kind", "shell"): protocol.CAP_SHELLS, ("close", "mode", "background"): protocol.CAP_BACKGROUND}
+    blob_kinds = {
+        "git": protocol.CAP_GIT,
+        "pr": protocol.CAP_PRS,
+        "file": protocol.CAP_TOOLS,
+        "remote": protocol.CAP_TOOLS,
+        "icon": protocol.CAP_USAGE,
+    }
+
+    def family_of(message) -> str:
+        for (name, field, value), family in forms.items():
+            if message.type == name and message.get(field) == value:
+                return family
+        return protocol.TYPES[message.type].family
+
+    real_caps = server.ApiServer._caps
+    server.ApiServer._caps = lambda self: [cap for cap in real_caps(self) if cap not in dropped]
+
+    real_answer = server.Connection._answer
+
+    def answer(self, message):
+        if family_of(message) in dropped and self.client is not None:
+            _record("refused", [message.type])
+            return protocol.refuse(
+                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
+            )
+        return real_answer(self, message)
+
+    server.Connection._answer = answer
+
+    real_blob = server.ApiServer._on_blob
+
+    def on_blob(self, _server, msg, path, query, *rest):
+        kind = dict(query or {}).get("kind", "")
+        if blob_kinds.get(kind) in dropped:
+            _record("refused", [f"blob:{kind}"])
+            msg.set_status(404, None)
+            return
+        real_blob(self, _server, msg, path, query, *rest)
+
+    server.ApiServer._on_blob = on_blob
+
+    if protocol.CAP_TOOLS in dropped:
+
+        def on_upload(self, _server, msg, path, query, *rest):
+            _record("refused", ["upload"])
+            msg.set_status(404, None)
+
+        server.ApiServer._on_upload = on_upload
+
+
 def apply() -> None:
     data = _data()
     if "models" in data:
@@ -106,6 +188,10 @@ def apply() -> None:
                 return [t for t in (prdetail.thread_from_record(r) for r in threads) if t is not None]
 
             prdetail.fetch_threads = fetch_threads
+    if data.get("caps_drop"):
+        _drop_caps(frozenset(data["caps_drop"]))
+    if data.get("refuse_subscribe"):
+        _refuse_subscribe(int(data["refuse_subscribe"]))
     if "gh_json" in data:
         from collins import prstatus
 

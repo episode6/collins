@@ -587,6 +587,8 @@ class ToolClient:
         loaded.
         """
         _window, tab = found
+        if not apilink.has(protocol.CAP_GIT):
+            return False, "This service has no git"  # no page to open (D5, ruling 17)
         cwd = tab.current_agent_cwd()
         root = gitinfo.repo_root(cwd)
         if root is None:

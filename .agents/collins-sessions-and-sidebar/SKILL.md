@@ -15,6 +15,14 @@ description: >-
 
 # Sessions, the store and the sidebar
 
+**A row with no transcript.** `RemoteStore._session_from` builds a `Session` for
+an `item` with no `path` (`Path()`, so `Session.has_transcript` is False; every
+scanned session has one): the row shows, and the row menu leaves out Details,
+Replay, Export, Reveal and the two trash items (server-side spec D6). A menu
+built as it opens asks `apilink.has` then; what the sidebar built at
+construction follows a hello in `apply_families` (the usage panel, *Clone
+repository…*, *Restart service*, the package repository item).
+
 ## Discovery (`sessions.py`, `providers.py`)
 
 Claude Code writes one JSONL per session at

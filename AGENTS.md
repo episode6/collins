@@ -221,8 +221,9 @@ is the client's `SocketLink` (an `apilink.Link`): a daemon thread with its
 own `GLib.MainContext` drives both sockets, `call` blocks the calling thread
 on the sync channel (**never call from the I/O thread**), `send` and every
 event ride the primary and land on the main loop through one ordered queue
-at `PRIORITY_DEFAULT`; `subscribe` is the one call on the primary, the main
-thread draining the queue until it returns so the mirrors are filled. A
+at `PRIORITY_DEFAULT`; `subscribe`, `store.lookup` and `store.page-archived`
+go on the primary from the main thread, which drains the queue until they
+return so the mirrors are filled (`DRAINED`). A
 `PtyClient` per tab or panel shell routes the output frames. The `local`
 capability is proven, not inferred: the client computes `proof_path(app_id)`
 itself (never the path a hello names), opens it `O_NOFOLLOW`, requires a
@@ -431,6 +432,28 @@ dialog and the visible project's directory ask `fs.stat`, and the app
 installs the git transport on every hello (a client never runs git
 itself).
 
+**The families.** `apilink.has(cap)` is the window's one reader of the last
+hello's `caps` (the link's `families`), and it is asked **before** a family's
+request or surface, as `is_local()` is for a local extra (server-side spec
+D5): a surface whose family the service does not list is hidden, not
+disabled, and none of that family's requests, blobs or uploads leaves the
+client. With no link at all it answers yes (the service's own process, a test,
+a check's bare widgets); the last hello stands while a link is down. Each
+transport answers what a refusal would with no round trip (`remotegit`,
+`remotefiles`, both installed on every hello; `remoteprs`, `jobclient`,
+`modelcatalog`, `blobcache.fetch` by the blob's kind, `remoteuploads`), so a
+caller keeps its one path. What a window built from a hello is re-read on the
+next (`MainWindow.apply_families`, no dock surgery); everything else asks as it
+shows. Without `composer` the composer sends through `prompt` into an empty
+box, and the menus type `/model` and `/effort` the same way; without `internal`
+the editor follows `agent_cwd` itself and a close has the window's budget.
+`tests/test_client_families.py` walks the client modules and holds every
+family request to its ask in its own function (`ASKED_ELSEWHERE` is the
+reviewed list of those that are not); `scripts/check_server_families.py` holds a
+running window on the `caps_drop` stub to no surface and no request, per family
+and for `core` alone, and `scripts/stub_server.py` is a Level 0 server to look
+at the window on.
+
 **The local extras.** `apilink.is_local()` is the one reader of the
 link's `local` proof (D11), and `App.local` is it. What hands a path of
 the service's to something on this device hangs on it: every "Open In…"
@@ -638,7 +661,7 @@ spec's `%changelog`.
 | Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `service/notifications` `remotenotify` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
 | Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `modelcatalog` `usage` `usagepanel` `tokenrefresh` `tokensettings` `service/tokenuse` `service/jobs` `jobclient` `welcome` `welcomegate` `clisetup` `remotecli` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |
 | Preferences dialog, keybindings, themes, translations | `prefs` `prefslayout` `prefssearch` `keybindings` `keymap` `keybindingsdialog` `themes` `i18n` `po/` | `collins-preferences-keybindings-i18n` |
-| Testing: unit suite rules, e2e checks, shims, headless probes | `tests/` `scripts/check_*.py` `scripts/run_e2e.py` | `collins-testing` |
+| Testing: unit suite rules, e2e checks, shims, headless probes, the families walker and the `caps_drop` stub | `tests/` `scripts/check_*.py` `scripts/run_e2e.py` `scripts/stub_server.py` | `collins-testing` |
 | Packaging and CI: wheel, deb, rpm, PPA, COPR, AUR, the CI image, versions | `pyproject.toml` `debian/` `packaging/` `.github/` `scripts/` | `collins-packaging-and-ci` |
 | GTK / libadwaita / VTE / CSS traps that are not feature-specific | — | `collins-gtk-sharp-edges` |
 

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-31. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ from . import (
     updatecheck,
     welcome,
 )
+from .api import protocol
 from .api.protocol import RequestRefused
 from .bgblock import (
     BLOCK_IN_FLIGHT,
@@ -130,6 +131,11 @@ HIDE_NOTICE_ID = "collins-hidden"
 # have spawned their shells, short enough that the marks are current by the
 # time anyone has read the panel.
 _LAUNCH_SWEEP_DELAY_MS = 2500
+
+# How long a graceful close waits on a server with no `internal` before the
+# window closes the tab with `kill` (MainWindow._graceful_close; the Collins
+# service keeps this budget itself, about as long).
+CLOSE_BUDGET_S = 6
 
 # The geometry a background session's terminal is spawned at when there is no
 # visible agent terminal to copy (see start_background_session). Never shown is
@@ -526,7 +532,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._alt_new_asked = 0  # which ask of the service the entry waits on
         # The sidebar's Chats project: a session in a throwaway directory
         # ("chat" here ≠ the native streaming chat entries below).
-        new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
+        if apilink.has(protocol.CAP_JOBS):  # the folder is made by a job (chats.trust)
+            new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
         for provider in available_providers():
             new_menu.append(
                 _("Continue last {name} session…").format(name=provider.name),
@@ -1105,6 +1112,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.close()
         finally:
             self._quit_requested = False
+
+    def apply_families(self) -> None:
+        """A hello listed the service's families (the app's `_on_connected`):
+        what this window built from the last one's follows. Everything else
+        asks `apilink.has` as it is shown or sent. Nothing is closed or
+        opened here (no dock surgery on a hello): a page whose family went
+        ends as its pty's or its next request's refusal says."""
+        self.sidebar.apply_families()
+        for index in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(index).get_child()
+            if isinstance(tab, TerminalTab):
+                tab.apply_families()
 
     def set_reconnecting(self, reconnecting: bool, name: str = "", detail: str = "") -> None:
         """Raise or lower the reconnect banner (`App._on_connection_state`).
@@ -2224,11 +2243,12 @@ class MainWindow(Adw.ApplicationWindow):
         # The tab is bound to the id the CLI actually runs, which for an
         # attached fork is the fork's — including its (still stubby) transcript.
         bound_id = attach_id or session.session_id
-        jsonl_path = (
-            str(Path(session.jsonl_path).parent / f"{attach_id}.jsonl")
-            if attach_id
-            else session.jsonl_path
-        )
+        if not session.has_transcript:
+            jsonl_path = None  # a server's row with no transcript to name (spec D6)
+        elif attach_id:
+            jsonl_path = str(Path(session.jsonl_path).parent / f"{attach_id}.jsonl")
+        else:
+            jsonl_path = session.jsonl_path
         tab = None
         if attach_pty is not None:
             tab = TerminalTab(
@@ -2410,7 +2430,10 @@ class MainWindow(Adw.ApplicationWindow):
         # The folder is the service's to make, and to pre-trust in the
         # CLI's config so the launch skips the folder-trust prompt: it is
         # an empty directory it made a moment before (the ``chats.trust``
-        # job, chats.trust_chat_dir). The session starts when it lands.
+        # job, chats.trust_chat_dir). The session starts when it lands. Its
+        # ways in are hidden on a service with no jobs (D5).
+        if not apilink.has(protocol.CAP_JOBS):
+            return
 
         def landed(event: jobclient.JobEvent) -> None:
             if not event.finished:
@@ -4262,6 +4285,12 @@ class MainWindow(Adw.ApplicationWindow):
         # budgets — are the session's, on the service; a budget running
         # out comes back as the tab's "close-budget" (_on_tab_close_budget).
         backgrounding = page in self._bg_closing
+        if not apilink.has(protocol.CAP_INTERNAL):
+            # The close poll and its budget are the Collins service's; a
+            # server without them may never say the agent left, so the
+            # window keeps a budget of its own and closes with `kill` (spec
+            # §3.4). The tab that left in time is no longer in the set.
+            GLib.timeout_add_seconds(CLOSE_BUDGET_S, self._close_budget_over, page)
         if not tab.session.begin_close(exit_text, backgrounding):
             if backgrounding:
                 # The service's gate refused the /bg (bgagents.blocker: a
@@ -4276,6 +4305,11 @@ class MainWindow(Adw.ApplicationWindow):
                 if graceful and tab.session.begin_close(graceful, False):
                     return
             self._close_confirmed(page)
+
+    def _close_budget_over(self, page: Adw.TabPage) -> bool:
+        if page in self._closing_pages:
+            self._close_confirmed(page)
+        return GLib.SOURCE_REMOVE
 
     def _on_tab_close_budget(self, _tab: TerminalTab, _phase: str, page: Adw.TabPage) -> None:
         """The service's close poll ran out of budget for this page: the CLI
@@ -4321,7 +4355,7 @@ class MainWindow(Adw.ApplicationWindow):
         job matches (the agent CLI and the transcripts are its machine's)
         and records the link; the answer is said here."""
         session_id = param.get_string()
-        if self.store.get_session(session_id) is None:
+        if self.store.get_session(session_id) is None or not apilink.has(protocol.CAP_JOBS):
             return
 
         def landed(event: jobclient.JobEvent) -> None:
@@ -4847,7 +4881,11 @@ class MainWindow(Adw.ApplicationWindow):
         session_id = tab.session_id if is_session else None
         return background_blocker(
             is_session=is_session,
-            supports_detach=is_session and tab.provider.background_exit() is not None,
+            supports_detach=(
+                is_session
+                and tab.provider.background_exit() is not None
+                and apilink.has(protocol.CAP_BACKGROUND)  # D5: no /bg, no menu item, no yellow line
+            ),
             is_fork=is_session and tab.fork,
             is_sandboxed=is_session and tab.sandboxed,
             session_id=session_id,
@@ -4953,9 +4991,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         Outside a git repository there is nothing to show, and the tab says
         so in the terminal (the F7 precedent): a shortcut that silently does
-        nothing is indistinguishable from one that was never installed."""
+        nothing is indistinguishable from one that was never installed.
+        A service with no `git` has no such page at all (D5)."""
         tab = self._current_terminal_tab()
-        if tab is None:
+        if tab is None or not apilink.has(protocol.CAP_GIT):
             return
         if not tab.toggle_git_page():
             tab.feed_message(_("This session isn't in a git repository"))
@@ -4969,7 +5008,7 @@ class MainWindow(Adw.ApplicationWindow):
         carrying a fetch of its own, and one press should never be able to
         throw away the diff you were half way through reading."""
         tab = self._current_terminal_tab()
-        if tab is None:
+        if tab is None or not apilink.has(protocol.CAP_PRS):
             return
         if not tab.open_latest_pr_page():
             tab.feed_message(_("No pull request is linked to this session yet"))
@@ -5952,8 +5991,12 @@ class MainWindow(Adw.ApplicationWindow):
         on through the restart and each open tab shows its own again;
         without one every foreground session ends with the service and
         each open tab resumes its own once it is back, as a quit and a
-        relaunch did before the service. The CLI's background daemon and
+        relaunch did before the service. Nothing on a service with no
+        `internal`, which serves no `service.restart` (D5: its menu item is
+        hidden too). The CLI's background daemon and
         its agents run on either way (D52)."""
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         app = self.get_application()
         link = getattr(app, "_service_link", None)
         try:

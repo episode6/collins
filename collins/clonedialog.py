@@ -35,6 +35,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from . import apilink, choosers, clonerepo, ghsetup, jobclient, remotefiles  # noqa: E402
+from .api import protocol  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -43,6 +44,9 @@ log = logging.getLogger(__name__)
 # The last list gh gave, shared by every dialog: a reopened dialog shows it
 # at once while a fresh fetch replaces it.
 _repo_cache: list[clonerepo.Repo] | None = None
+
+# The list's problem on a service with no `prs`: nobody to ask for one.
+NO_LIST = "no-list"
 
 
 
@@ -184,7 +188,9 @@ class CloneDialog(Adw.Dialog):
         `gh`, off the main loop): the destination note's "with gh / git"
         says what the service will run, so it is the service's answer, not
         this device's PATH (PR-3.0 item 9). The note says "git" until it
-        lands."""
+        lands, and for good on a service with no `prs`, which names no gh (D5)."""
+        if not apilink.has(protocol.CAP_PRS):
+            return
 
         def landed(kind: str, value) -> None:
             if self._closed or kind != "ok" or not isinstance(value, dict):
@@ -200,7 +206,11 @@ class CloneDialog(Adw.Dialog):
     def _start_fetch(self) -> None:
         """The service's ``clone.repos`` job: a page at a time as running
         events, then the whole list, or the problem (a ghsetup state, or
-        "failed")."""
+        "failed"). No list on a service with no `prs`: only an address clones
+        there (D5)."""
+        if not apilink.has(protocol.CAP_PRS):
+            self._land_repos(None, NO_LIST)
+            return
 
         def on_event(event: jobclient.JobEvent) -> None:
             if not event.finished:
@@ -235,7 +245,7 @@ class CloneDialog(Adw.Dialog):
         self._list_problem = problem
         if repos is not None:
             self._repos = repos
-        elif problem in (ghsetup.MISSING, ghsetup.LOGGED_OUT):
+        elif problem in (ghsetup.MISSING, ghsetup.LOGGED_OUT, NO_LIST):
             # gh can't speak for this account (any more): a cached list from
             # before would offer clones that are going to fail.
             self._repos = []
@@ -276,6 +286,8 @@ class CloneDialog(Adw.Dialog):
             )
         elif spinning:
             message = _("Loading your repositories…")
+        elif self._list_problem == NO_LIST:
+            message = _("Type a clone address")
         elif self._list_problem == ghsetup.MISSING:
             message = _(
                 "Install the GitHub CLI (gh) to list your repositories. "

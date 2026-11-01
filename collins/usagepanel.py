@@ -351,6 +351,8 @@ class UsagePanel(Gtk.Box):
         self.refetch()
 
     def _refresh(self, manual: bool = False) -> None:
+        if not apilink.has(protocol.CAP_USAGE):
+            return  # the panel is hidden on such a service (D5)
         # A click during an in-flight background fetch still claims its
         # result: the user asked, so a failure owes them the snackbar.
         self._manual_fetch = self._manual_fetch or manual
@@ -413,7 +415,8 @@ class UsagePanel(Gtk.Box):
             # fetch does on a fresh install with a dead token: tokenrefresh
             # refuses until the dialog that discloses the run is answered,
             # and the status text below names `claude` as the fix meanwhile.
-            jobclient.start("login.repair", {"mode": "repair"}, self._on_login_repair)
+            if apilink.has(protocol.CAP_JOBS):
+                jobclient.start("login.repair", {"mode": "repair"}, self._on_login_repair)
         if self._snapshot is not None:
             # Keep showing stale data; the tooltip carries its age and what
             # went wrong.

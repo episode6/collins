@@ -24,6 +24,7 @@ apart.
 from __future__ import annotations
 
 from . import mcptools
+from .api import protocol
 
 # The page's groups, top to bottom. "cli" is the untitled pair of rows above
 # everything (which claude Collins runs); the rest are titled groups.
@@ -43,6 +44,18 @@ GROUPS: tuple[str, ...] = (
     "caffeine",
     "editor",
 )
+
+# The family a whole group's rows belong to (the server-side spec's D5): a
+# service that does not list it has no such group, on either page. The rest are
+# always there, with the odd row of theirs asking for itself (prefs.py).
+GROUP_FAMILIES: dict[str, str] = {
+    "cli": protocol.CAP_INTERNAL,
+    "token_use": protocol.CAP_USAGE,
+    "mcp_tools": protocol.CAP_TOOLS,
+    "sandbox": protocol.CAP_SANDBOX,
+    "pull_requests": protocol.CAP_PRS,
+    "git": protocol.CAP_GIT,
+}
 
 # Which side of the state split each group's settings live on (the
 # service-and-client spec, §3.8; state.SERVICE_SETTINGS and DEVICE_SETTINGS

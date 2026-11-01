@@ -45,7 +45,16 @@ try:
 except (ValueError, ImportError):
     Spelling = None
 
-from . import animatedimage, composerkeys, dropimages, editorfiles, pictures, remoteuploads  # noqa: E402
+from . import (  # noqa: E402
+    animatedimage,
+    apilink,
+    composerkeys,
+    dropimages,
+    editorfiles,
+    pictures,
+    remoteuploads,
+)
+from .api import protocol  # noqa: E402
 from .editor import GtkSource  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import show_image  # noqa: E402
@@ -115,11 +124,13 @@ class ComposerView(Gtk.Box):
         effort_tooltip: str | None = None,
         upload_session: Callable[[], str | None] = lambda: None,
         image_session: Callable[[], str] = lambda: "",
+        toast: Callable[[str], None] | None = None,
     ) -> None:
         """*upload_session* names the session a drop or paste is uploaded
         for (None: no id yet, the service's pending directory, D37), and
         *image_session* the one a preview's blob is asked for (D38): the
-        host's, read at each drop (PR-2.7).
+        host's, read at each drop (PR-2.7). *toast* is where a drop a service
+        that takes no upload refuses is said (D5); *notify* when None.
 
         *chrome* is the close and dock/float pair at the row's left — the
         stand-in's controls, for a composer raised over a terminal it can
@@ -133,6 +144,7 @@ class ComposerView(Gtk.Box):
         self._chrome = bool(chrome)
         self._font_provider: Gtk.CssProvider | None = None
         self._file_reference = file_reference
+        self._toast = toast or notify
         self._notify = notify
         self._upload_session = upload_session
         self._image_session = image_session
@@ -431,6 +443,9 @@ class ComposerView(Gtk.Box):
             return self._mention_dropped([f.get_path() for f in local])
         if not local:
             return False
+        if not apilink.has(protocol.CAP_TOOLS):
+            self._toast(_("This service does not take dropped files"))
+            return False
 
         def uploaded(paths: list[str], errors: list[str]) -> None:
             if errors:
@@ -446,6 +461,9 @@ class ComposerView(Gtk.Box):
         service (dropimages says why it is a copy) and mention the copy once
         it is written. *prefix* names how it arrived in the file name;
         *failure* is what the host hears when the copy can't be made."""
+        if not apilink.has(protocol.CAP_TOOLS):
+            self._toast(_("This service does not take dropped files"))
+            return False
         try:
             data = bytes(texture.save_to_png_bytes().get_data())
         except GLib.Error:

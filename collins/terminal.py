@@ -1988,6 +1988,7 @@ class TerminalTab(Gtk.Box):
         )
         self._attachments_btn.add_css_class("attach-overlay")
         self._attachments_btn.add_css_class("attachments-handle")
+        self._attachments_btn.set_visible(apilink.has(protocol.CAP_TOOLS))  # hidden with no `tools` (D5)
         self._attachments_btn.connect("clicked", lambda *_: self.toggle_attachments())
         # Built lazily on first open, like the composer; only the slot it
         # will ride in exists up front.
@@ -4735,6 +4736,7 @@ class TerminalTab(Gtk.Box):
                 path, self.current_agent_cwd()
             ),
             notify=self.feed_message,
+            toast=lambda text: self.emit("toast", text),
             # Drops and pastes are uploaded for this tab's session, and the
             # previews' blobs asked for it (PR-2.7).
             upload_session=self.upload_session,
@@ -5813,8 +5815,9 @@ class TerminalTab(Gtk.Box):
         when the dock has none: the panel menu's and the footer chip's
         "Sandboxed shell", and what run_in_terminal from inside the box
         opens (with *focus* False: the agent typing is not the user
-        typing). None when this tab runs no box."""
-        if self.sandbox_plan_path is None:
+        typing). None when this tab runs no box, or the service has no
+        `shells` (D5)."""
+        if self.sandbox_plan_path is None or not apilink.has(protocol.CAP_SHELLS):
             return None
         shell = self._dock.open_shell_page(sandboxed=True)
         if shell is None:
