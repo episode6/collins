@@ -59,14 +59,16 @@ Comment: From GitHub Octicons (https://github.com/primer/octicons), used
  THIRD_PARTY_LICENSES.md.
 
 Files: collins/api/protocol.py
+       collins/sshremote.py
        docs/api/*
        scripts/gen_api_reference.py
 Copyright: 2026 episode6, Inc.
 License: Expat
 Comment: The service API: the message table every client of collins-service
- speaks, the published specification of it (docs/api/) and the script that
- renders the message reference from the table. MIT (Expat) so that another
- development environment can vendor the module or the spec to be a client;
+ speaks, the published specification of it (docs/api/), the script that
+ renders the message reference from the table and the module that connects
+ to a service over ssh. MIT (Expat) so that another development environment
+ can vendor the modules or the spec to be a client;
  docs/api/LICENSE and each file's SPDX tag say so. The service and the
  window that implement the protocol remain GPL-3.0-or-later.
 

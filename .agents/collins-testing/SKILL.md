@@ -169,10 +169,11 @@ running shell). `tests/test_api_server.py` runs a real `Soup.Server` on a
 scratch socket; `test_connection.py` drives the connection manager's state
 machine with fakes, its remote path included (a `FakeTransport` whose
 forward the test kills: the start's word, the lost road, a hello failing
-over a live forward, `switch`); `test_sshforward.py` the two ssh argv, exit
-255's report, the local socket unlinked first (a non-socket refused), a
-fake `Popen` whose stderr the test writes and whose exit is the
-transport's `lost`; `test_connections.py` the list in `ui-state.json`
+over a live forward, `switch`); `test_sshremote.py` the two ssh argv, each
+failure as a code, the local socket unlinked first (a non-socket refused), a
+fake `Popen` whose stderr the test writes, and that the module runs as one
+file copied out of the tree; `test_sshforward.py` Collins' word for each
+failure and a forward's exit as the transport's `lost`; `test_connections.py` the list in `ui-state.json`
 (rule 5's grammar, `find`, `last_connection`). The by-hand half of PR-3.1
 (the connect dialog's Add, Test and Connect against the ssh target of
 `~/specs/collins/assets/split-service/ssh-target/`, the forward killed, the

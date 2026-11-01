@@ -226,7 +226,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "updatecheck": 5,
         "buildinfo": 3,
         "connection": 7,
-        "sshforward": 12,  # the ssh forward: this device's ssh, its local socket and pid file (PR-3.1)
+        "sshremote": 12,  # the ssh forward: this device's ssh, its local socket and pid file (PR-3.1)
         "prefs": 1,
         "sidebar": 1,
         "openwith": 5,
@@ -307,7 +307,7 @@ def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
     assert modules == {
         "app", "blobcache", "remoteimages", "remoteuploads", "uistate", "window", "desktopentry",
         "updatecheck", "buildinfo", "connection", "prefs", "sidebar", "openwith",
-        "copylabel", "terminal", "attachpanel", "lightbox", "sshforward",
+        "copylabel", "terminal", "attachpanel", "lightbox", "sshremote",
     }
     # The four modules the launchers brought (PR-3.0 item 7) are there for
     # a launcher each and nothing else: a web or mail address, or a file

@@ -19,8 +19,9 @@ is the app id the remote service runs under when it is not the default.
 
 Everything read off the file is foreign content (CLAUDE.md rule 5):
 shapes are checked, sizes bounded, a row that does not fit is dropped,
-and nothing here is ever formatted into a shell line (`sshforward` builds
-an argv; a target that would read as an ssh option is refused here). The
+and nothing here is ever formatted into a shell line (`sshremote` builds
+an argv; a target that would read as an ssh option is refused by its
+`parse_target`, the one grammar of a target). The
 `--connect NAME` main option and the connect dialog resolve a connection
 by name through `find`; ``local`` always names `LOCAL`.
 """
@@ -31,6 +32,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field, replace
 
+from .sshremote import Target, parse_target
 from .uistate import UiState, mint_id
 
 KIND_LOCAL = "local"
@@ -44,60 +46,12 @@ LOCAL_NAME = "local"
 # Bounds on what the file may hold (rule 5).
 CONNECTIONS_MAX = 64
 NAME_MAX = 64
-TARGET_MAX = 253 + 1 + 64 + 1 + 5  # host + "@" + user + ":" + port
 APP_ID_MAX = 255
 
 # A connection id: uuid4().hex, as the other ids of ui-state.json.
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
-# A user name, a host name (or an IPv4 address; IPv6 would need brackets and
-# is not taken) and a port. No character that ssh, a shell or a path could
-# read as anything but itself: letters, digits, dot, dash, underscore. A
-# target starting with "-" would be read by ssh as an option; the grammar
-# cannot produce one.
-_USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")
-_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$")
-_PORT_RE = re.compile(r"^[0-9]{1,5}$")
 # An app id as GApplication accepts one, narrowed to what a path takes.
 _APP_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)+$")
-
-
-@dataclass(frozen=True)
-class Target:
-    """A parsed ssh destination: what `sshforward` hands ssh."""
-
-    host: str
-    user: str = ""
-    port: int | None = None
-
-    @property
-    def destination(self) -> str:
-        """``user@host`` (or ``host``), the destination argument; the port
-        goes separately as ``-p``."""
-        return f"{self.user}@{self.host}" if self.user else self.host
-
-
-def parse_target(text: object) -> Target | None:
-    """``[user@]host[:port]`` as a `Target`, or None when it is anything
-    else (too long, a stray character, a port out of range, an option)."""
-    if not isinstance(text, str) or not text or len(text) > TARGET_MAX:
-        return None
-    user = ""
-    rest = text
-    if "@" in rest:
-        user, _, rest = rest.partition("@")
-        if not _USER_RE.fullmatch(user):
-            return None
-    port: int | None = None
-    if ":" in rest:
-        rest, _, digits = rest.partition(":")
-        if not _PORT_RE.fullmatch(digits):
-            return None
-        port = int(digits)
-        if not 1 <= port <= 65535:
-            return None
-    if not _HOST_RE.fullmatch(rest) or rest.endswith(".") or ".." in rest:
-        return None
-    return Target(host=rest, user=user, port=port)
 
 
 def valid_name(name: object) -> bool:

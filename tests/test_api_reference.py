@@ -5,7 +5,7 @@ collins/api/protocol.py by scripts/gen_api_reference.py; a table edit that
 forgets to regenerate it fails here. The prose half, docs/api/index.md,
 names every error code and capability, and both pages stay free of the
 angle-bracket placeholders that break the VitePress build outside a code
-span. All four MIT-licensed files carry their SPDX tag, since the rest of
+span. All five MIT-licensed source files carry their SPDX tag, since the rest of
 the repository is GPL and a reader of any one of them must be able to tell.
 """
 
@@ -76,6 +76,7 @@ def test_mit_files_carry_their_spdx_tag():
         ("docs", "api", "messages.md"),
         ("scripts", "gen_api_reference.py"),
         ("collins", "api", "protocol.py"),
+        ("collins", "sshremote.py"),
     ):
         head = _read(*path)[:600]
         assert "SPDX-License-Identifier: MIT" in head, path
@@ -93,7 +94,7 @@ def test_no_other_source_file_claims_mit():
                     continue
                 path = os.path.join(root, name)
                 rel = os.path.relpath(path, ROOT)
-                if rel in ("collins/api/protocol.py", "scripts/gen_api_reference.py"):
+                if rel in ("collins/api/protocol.py", "collins/sshremote.py", "scripts/gen_api_reference.py"):
                     continue
                 with open(path, encoding="utf-8") as handle:
                     head = handle.read(600)

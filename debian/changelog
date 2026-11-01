@@ -2,7 +2,8 @@ collins (0.1.5) UNRELEASED; urgency=medium
 
   * The service's API is published under the MIT (Expat) license: the
     spec in docs/api/, the message reference generated from
-    collins/api/protocol.py, that module and the generator script
+    collins/api/protocol.py, that module, the generator script and
+    collins/sshremote.py, which connects to a service over ssh
     (debian/copyright has the stanza). The rest stays GPL-3.0-or-later.
   * New binary package collins-service: the session service, the pty
     keeper (collins-keeper) and both systemd user units, never enabled or
