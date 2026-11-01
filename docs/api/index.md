@@ -60,6 +60,9 @@ Beside the socket the service writes `local-proof`, 32 random bytes in a
 0600 file minted at each start. It is what a client reads to prove it
 shares the service's filesystem; see [The local proof](#the-local-proof).
 
+The socket is the API's only listener. A service on another machine is
+reached by forwarding it: see [Connecting over ssh](#connecting-over-ssh).
+
 ## Connections
 
 The socket speaks plain HTTP. A client opens a WebSocket at `/api/ws` and
@@ -233,8 +236,10 @@ with `O_NOFOLLOW`, requires a regular file of its own uid, mode 0600 and
 exactly 32 bytes, and sends the bytes as lowercase hex. The service
 compares them against what it wrote at start and marks the client `local`.
 A client that cannot read the file sends no proof and is treated as remote,
-which is the right answer for a client reaching the socket over an ssh
-forward from another machine. Nothing a remote client can do depends on
+which is the right answer for a client reaching the socket over an
+[ssh forward](#connecting-over-ssh) from another machine. Bytes that do not
+match are refused `refused`, and that client is remote too: it carries on
+without the extras. Nothing a remote client can do depends on
 the proof, except the service's confinement of a few reads to directories
 it knows: see `fs.stat`, `fs.paste` and `fs.names` in the reference.
 
@@ -327,6 +332,110 @@ same listener:
 Both read the `Collins-Client` header, the hello's `client_id`, to apply
 that client's `local` standing. It is a grouping key, not a credential:
 whoever reaches the socket is already the service's user.
+
+## Connecting over ssh
+
+The service opens no network port and has no login of its own. To reach one
+on another machine, forward its Unix socket with ssh, which supplies the
+authentication, the encryption and the host verification. The protocol does
+not change: the WebSockets and the plain HTTP above all run over the forward
+as they do over the socket itself. It takes two ssh commands.
+
+**1. Start the service and learn its path.** Run `--print-socket` on the
+remote machine, adding `--app-id ID` for a service that does not run under
+the default app id:
+
+```bash
+remote=$(ssh -o BatchMode=yes user@host \
+    '"$SHELL" -lc "collins-service --print-socket"' | tail -n 1)
+```
+
+Always ask for the path. The remote runtime directory is not yours to
+guess, and a long path is shortened to fit a `sockaddr_un`. The `$SHELL -lc`
+is there because the plain command `ssh host cmd` runs with a non-login
+`PATH`, which misses `~/.local/bin`, where a pipx install puts
+`collins-service`. Some profiles need more than this; the
+[remote guide](../guide/remote#what-ssh-does-for-you) describes the shell
+wrapper Collins uses. Put a time limit on this run (Collins gives it 10
+seconds), and read its exit status:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | The last non-empty line of stdout is the path. A login banner may come before it. |
+| 255 | ssh itself failed: no route, a refused key, an unknown host key. The last line of stderr says which. |
+| 127 | The remote shell did not find `collins-service`, or `$SHELL` names a shell that is not installed. |
+| 1 | `collins-service` could not start a service, or none answered in time. |
+
+**Check the path before using it.** ssh expands `${VAR}` and `%` tokens in
+both halves of `-L` on your side, so a machine that prints such a path
+chooses which of your environment variables reach it. Accept only an
+absolute path of letters, digits and `.` `_` `-` `/` `@` `+` `,` `=`, at
+most 108 bytes long.
+
+**2. Hold the forward.** Keep this child running for as long as the
+connection lasts:
+
+```bash
+mkdir -p -m 700 "$XDG_RUNTIME_DIR/my-client"
+local="$XDG_RUNTIME_DIR/my-client/host.sock"
+ssh -o BatchMode=yes -o ExitOnForwardFailure=yes \
+    -o StreamLocalBindUnlink=yes \
+    -o ControlMaster=no -o ControlPath=none \
+    -o RemoteCommand=none -o RequestTTY=no \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    -N -L "$local:$remote" user@host
+```
+
+Then connect to `$local` and say `hello` as usual. What the options are for:
+
+- `BatchMode=yes` stops ssh from prompting when nobody can answer. The key
+  must be in the agent or have no passphrase, and the host's key must
+  already be in `known_hosts`. Use it on the first command too.
+- `ExitOnForwardFailure=yes` makes ssh exit when it cannot set up the
+  forward, instead of staying up without one.
+- `StreamLocalBindUnlink=yes` removes a stale socket left at `$local`, which
+  would otherwise stop ssh from binding the path.
+- `ControlMaster=no` and `ControlPath=none` give the forward a connection of
+  its own. Under a shared control master the forward would live in the
+  master, so ending this child would end nothing.
+- `RemoteCommand=none` and `RequestTTY=no` keep the user's `~/.ssh/config`
+  from changing what the command is. A `RemoteCommand` there makes
+  `ssh host cmd` fail with exit 255, so set these on the first command too.
+- The `ServerAlive` pair is ssh's own liveness check, which gives up after
+  45 seconds.
+
+**Guard the local socket.** Whoever can open it acts as the service's user
+on the remote machine, with no further credential. Keep it in a 0700
+directory of your own. ssh creates it 0600 by default, so leave
+`StreamLocalBindMask` alone, and never forward to a TCP port, which any
+local user could open.
+
+**What changes for the client:**
+
+- The `local` proof cannot succeed, by design. The hello's `local_proof.path`
+  names a file on the remote machine, so never open it. A proof file you
+  find at your own computed path belongs to a service on your own machine,
+  and the remote service refuses its bytes. Stay
+  [remote](#the-local-proof) and carry on.
+- The hello's `host` and every path are the remote machine's. Move bytes
+  through the API (`GET /api/blob`, `PUT /api/upload`, the `fs.*` requests)
+  and don't look for those paths on your own disk.
+- A session's `spawn` runs on the remote machine, on its `claude` login.
+
+**Losing the connection.** The forward's exit is the signal to reconnect,
+and the WebSocket keepalives notice a dead link in about 20 seconds. Sessions
+keep running on the remote machine. To come back, run both commands again,
+since the service may have stopped and `--print-socket` starts it. A hello
+that fails while the forward is still up means the service has stopped, so
+end that forward and run both again then too. Say `hello` with the same
+`client_id`, then `subscribe` and `attach` again. Each attach redraws its
+terminal from the service's screen. Collins waits 1, 2, 5 and 10 seconds
+between attempts, then every 30.
+
+**Ending it.** Terminate the ssh child and remove the local socket. A child
+left behind by a client that crashed keeps running and holds its connection
+open, so record its pid and end it at your next start, checking first that
+the pid is still that forward.
 
 ## Writing a client
 
