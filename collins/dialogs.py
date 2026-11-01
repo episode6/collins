@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -1143,7 +1143,7 @@ def generate_icon_dialog(
 
     def on_save(*_a) -> None:
         svg = state["svg"]
-        if svg is None:
+        if svg is None or not apilink.has(protocol.CAP_USAGE):
             return
         try:
             apilink.call({"t": "icon.save", "cwd": cwd, "svg": svg.decode("utf-8", errors="replace")})

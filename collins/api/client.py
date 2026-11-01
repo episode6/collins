@@ -164,6 +164,7 @@ class SocketLink(apilink.Link):
         self.on_lost = on_lost
         self._on_output = on_output
         self.hello: dict = {}
+        self.families = frozenset()  # the last hello's `caps` (apilink.has)
         self.local = False
         self.connected = False
         self._lock = threading.Lock()
@@ -287,6 +288,7 @@ class SocketLink(apilink.Link):
         self._open(self._sync, deadline)
         self._hello(self._sync, deadline)
         self.hello = hello
+        self.families = frozenset(str(cap) for cap in hello.get("caps") or ())
         self.connected = True
         return hello
 
@@ -946,6 +948,15 @@ class PtyClient:
         elif kind == "detach" and isinstance(message.get("pty"), int):
             self.ptys.discard(message["pty"])
         return reply
+
+    def send(self, message: dict, on_reply=None, on_refused=None) -> None:
+        """`Link.send`: the same ask with no wait, its answer landing on
+        the main loop (a request the main thread makes on a timer)."""
+        if self.closed:
+            if on_refused is not None:
+                on_refused(RequestRefused(protocol.ERROR_GONE, "the connection is closed", {}))
+            return
+        self.link.send(message, on_reply, on_refused)
 
     def claim(self, pty: int) -> None:
         """Hear *pty*'s frames and events without a request (a reattach

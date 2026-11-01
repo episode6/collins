@@ -978,7 +978,13 @@ def _is_ask(node: ast.AST, asks: tuple[frozenset[str], frozenset[str]]) -> bool:
     """`apilink.is_local()`: the module's own function, **called**. Not
     the bare attribute (`if not apilink.is_local:` is always false: the
     bug that opens every gate), and not some other object's `is_local()`
-    (`remoteuploads.is_local`, `Gdk.Clipboard.is_local`, `self.is_local`)."""
+    (`remoteuploads.is_local`, `Gdk.Clipboard.is_local`, `self.is_local`).
+
+    *asks* may instead be a predicate over the node: `behind_an_ask` hands
+    `_behind_the_ask`'s shapes to another walker's ask
+    (`tests/test_client_families.py`'s `apilink.has(...)`)."""
+    if callable(asks):
+        return bool(asks(node))
     if not isinstance(node, ast.Call) or node.args or node.keywords:
         return False
     dotted = _dotted(node.func)
@@ -1071,6 +1077,13 @@ def _behind_the_ask(function: ast.AST, call: ast.AST, asks) -> bool:
         ):
             return True
     return False
+
+
+def behind_an_ask(function: ast.AST, call: ast.AST, is_ask) -> bool:
+    """`_behind_the_ask` for another ask than `apilink.is_local()`: whether
+    *call*, in *function*, runs only after the call *is_ask* recognises
+    answered yes, in the same shapes."""
+    return _behind_the_ask(function, call, is_ask)
 
 
 def function_asks_local(site: str, trees: dict[str, ast.Module] | None = None) -> bool:

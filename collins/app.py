@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -2674,6 +2674,8 @@ class App(Adw.Application):
         tabs resume) or ``idle`` (the service waits for no session to be
         busy; "Restarting when idle" stands in the banner's place until
         then, with Cancel)."""
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return  # no way here on such a service: Restart Service is hidden (D5)
         link = self._service_link
         if when == "now":
             self._flush_open_tabs()
@@ -2695,6 +2697,8 @@ class App(Adw.Application):
     def cancel_service_restart(self) -> None:
         """The banner's Cancel: the restart that waits for the sessions is
         called off."""
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         try:
             self._service_link.call({"t": "service.restart", "when": "cancel"})
         except RequestRefused as refusal:

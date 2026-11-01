@@ -63,6 +63,7 @@ from . import (
     remotefiles,
     remoteimages,
 )
+from .api import protocol
 from .api.protocol import RequestRefused
 from .lightbox import show_image
 from .providers import SessionOptions
@@ -263,7 +264,7 @@ def _drop_sibling_box(plan: str, box: str) -> None:
     releases the plan derived for it (it describes a box in full) and lets
     go of the box minted with it, which goes — with the grants recorded for
     it — when nothing else needs it (`sandbox.drop`)."""
-    if not box:
+    if not box or not apilink.has(protocol.CAP_SANDBOX):
         return
     message: dict = {"t": "sandbox.drop", "box": box}
     if plan:
@@ -272,6 +273,14 @@ def _drop_sibling_box(plan: str, box: str) -> None:
         apilink.call(message)
     except RequestRefused as refusal:
         log.info("sandbox.drop %s refused: %s", box, refusal.msgid)
+
+
+def _derive_sibling_plan(box: str, handle: str | None, cwd: str) -> dict:
+    """The parent's plan re-issued for a sibling (`sandbox.derive`). Raises
+    `RequestRefused`, with no round trip on a service with no `sandbox`."""
+    if not apilink.has(protocol.CAP_SANDBOX):
+        raise apilink.absent(protocol.CAP_SANDBOX)
+    return apilink.call({"t": "sandbox.derive", "box": box, "handle": handle, "cwd": cwd})
 
 
 class _BackgroundSpawn:
@@ -960,9 +969,7 @@ class ToolClient:
                     "the parent session's sandbox plan isn't available"
                 )
             try:
-                derived = apilink.call(
-                    {"t": "sandbox.derive", "box": tab.sandbox_box, "handle": tab.session.handle, "cwd": cwd}
-                )
+                derived = _derive_sibling_plan(tab.sandbox_box, tab.session.handle, cwd)
             except RequestRefused as refusal:
                 return False, mcptools.sibling_cwd_refusal(refusal.msgid or "the sandbox host refused")
             sibling_plan, sibling_box = derived.get("plan"), derived.get("box") or ""

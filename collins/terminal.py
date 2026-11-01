@@ -1313,6 +1313,11 @@ class PanelTerminal(Gtk.Box):
         where VTE's spawn error was. The service's spawn returns once the
         child has exec'd, so the pid is known here, as VTE's callback knew
         it."""
+        if not apilink.has(protocol.CAP_SHELLS):
+            # Every way to a shell page is hidden on such a service (D5).
+            self._pending_input.clear()
+            self.terminal.feed(_("This service has no terminal panel").encode())
+            return
         view, client = self._view, self._client
         cols, rows = view.grid()
         request: dict = {"t": "spawn", "kind": "shell", "cwd": cwd, "cols": cols, "rows": rows}
@@ -1382,6 +1387,8 @@ class PanelTerminal(Gtk.Box):
         feeds the widget instead."""
         if not self._has_pty():
             return False
+        if not apilink.has(protocol.CAP_SHELLS):
+            return False
         pty = self._view.pty
         step = protocol.TEXT_MAX
         try:
@@ -1428,7 +1435,7 @@ class PanelTerminal(Gtk.Box):
         view, client = self._view, self._client
         if client.closed:
             return
-        if view.pty is not None and not view.exited:
+        if view.pty is not None and not view.exited and apilink.has(protocol.CAP_SHELLS):
             try:
                 # Filed under no key first: a page closed for good takes its
                 # history with it (the tab's saves wrote what a tab closing
@@ -1479,7 +1486,7 @@ class PanelTerminal(Gtk.Box):
         a shell opened on the new-chat screen learns it at the spawn). A
         no-op with no pty."""
         view, client = self._view, self._client
-        if client.closed or view.pty is None or view.exited:
+        if client.closed or view.pty is None or view.exited or not apilink.has(protocol.CAP_SHELLS):
             return
         message: dict = {"t": "panel.key", "pty": view.pty, "history": key or None}
         if handle:
@@ -1587,7 +1594,7 @@ class PanelTerminal(Gtk.Box):
         is nudged to repaint its prompt (\\x0c = Ctrl+L). The service wipes
         its model (what the history and the terminal tools read) and this
         terminal is redrawn from it."""
-        if self._has_pty():
+        if self._has_pty() and apilink.has(protocol.CAP_SHELLS):
             pty = self._view.pty
             try:
                 self._client.request({"t": "clear", "pty": pty})
@@ -1812,6 +1819,7 @@ class TerminalTab(Gtk.Box):
         # the tab makes of it. The tab's names for all of it forward there.
         self.session = ClientSession(
             request=self._client.request,
+            send=self._client.send,
             provider=provider or get_provider("claude"),
             session_id=session_id,
             fork=fork,
@@ -1834,6 +1842,10 @@ class TerminalTab(Gtk.Box):
         self._cuts: dict[str, ComposerView] = {}
         # The client's cwd tick while mapped (see _on_cwd_polled).
         self._cwd_tick: int | None = None
+        # The tick's `cwd.settle` still out (one at a time), and the cwd the
+        # editor last followed with no service to judge it (`_maybe_follow_editor`).
+        self._settling_cwd = False
+        self._followed_cwd: str | None = None
         # The new-chat screen, while the tab is one (None after begin_session
         # or for a tab that never was), and the draft id its panel history is
         # filed under meanwhile (see _history_id). The prompt Send hands over
@@ -2149,8 +2161,10 @@ class TerminalTab(Gtk.Box):
         self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root)
         # A move the editor queued while its follow dialog was up is judged
-        # again by the service (`cwd.settle` with `judge`, PR-2.4).
-        self._editor.set_follow_judge(self.session.judge_cwd)
+        # again by the service (`cwd.settle` with `judge`, PR-2.4). With no
+        # `internal` there is nobody to judge it, and it is only offered.
+        if apilink.has(protocol.CAP_INTERNAL):
+            self._editor.set_follow_judge(self.session.judge_cwd)
         self._editor.image_session = self.image_session
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._image_asks = editorfiles.LatestAsk()  # the lightbox's opens, newest wins
@@ -3159,6 +3173,7 @@ class TerminalTab(Gtk.Box):
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
+        self._panel_toggle_btn = toggle_btn
         toggle_tip = keybindings.with_hint(_("Show/hide terminal panel"), "win.toggle-panel")
         if local:
             toggle_tip += "\n" + _("Right-click to open this folder in your terminal")
@@ -3187,6 +3202,7 @@ class TerminalTab(Gtk.Box):
             keybindings.with_hint(_("Show/hide git page"), "win.toggle-git")
         )
         self._git_toggle_btn.set_sensitive(False)
+        self._sync_family_surfaces()
 
         # model, effort, cwd, branch and PRs sit together on the left; the
         # wrapper box (not the cwd label) takes the slack so the buttons stay
@@ -3235,6 +3251,26 @@ class TerminalTab(Gtk.Box):
         # a tab switch refreshes at once.
         self.connect("map", lambda *_: self._start_cwd_tick())
         return footer
+
+    def _sync_family_surfaces(self) -> None:
+        """The footer's ways to a family's surface, as the last hello lists
+        the families (D5: hidden, not disabled): at build, and again on
+        every hello (`apply_families`). What is drawn from the session's own
+        data (the PR chips, the sandbox chip, the branch) has nothing to
+        draw without its family, so it hides by itself."""
+        self._panel_toggle_btn.set_visible(apilink.has(protocol.CAP_SHELLS))
+        self._git_toggle_btn.set_visible(apilink.has(protocol.CAP_GIT))
+        prs = apilink.has(protocol.CAP_PRS)
+        # The refresh button is `transcript.update {discover}`: the PR's own
+        # family and the service's.
+        self._pr_refresh_btn.set_visible(prs and apilink.has(protocol.CAP_INTERNAL))
+        self._pr_sep.set_visible(prs)
+
+    def apply_families(self) -> None:
+        """A hello listed the service's families (the app's `_on_connected`,
+        a reconnect's service possibly another build's)."""
+        self._sync_family_surfaces()
+        self._sync_attachments_handle()
 
     def _start_cwd_tick(self) -> None:
         self._on_cwd_polled(self.session.current_agent_cwd())
@@ -3289,10 +3325,33 @@ class TerminalTab(Gtk.Box):
         across polls, once (`Session.settle_cwd`, which says why). Where the
         agent went decides how far this goes: still inside the same project
         (a worktree, most often) and the editor simply follows; anywhere
-        else and it only offers. See `projectfiles.follow_scope`."""
+        else and it only offers. See `projectfiles.follow_scope`.
+
+        The answer is asked with no wait and lands on the main loop: this
+        runs on a 2 s tick, and a server that does not answer must not
+        freeze the window (spec §2.3). One ask at a time per tab; a tick
+        that finds one out is skipped. With no `internal` nothing is asked:
+        the editor roots at the agent's cwd directly, once per move (D5)."""
         root = str(self._editor.root)
-        scope = self.session.settle_cwd(cwd, root)
-        if scope is None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            if cwd and cwd != root and cwd != self._followed_cwd:
+                self._followed_cwd = cwd
+                self._editor.request_root(cwd)
+            return
+        if self._settling_cwd:
+            return
+        self._settling_cwd = True
+
+        def landed(scope) -> None:
+            self._settling_cwd = False
+            self._on_cwd_settled(cwd, scope)
+
+        self.session.settle_cwd(cwd, root, landed)
+
+    def _on_cwd_settled(self, cwd: str | None, scope) -> None:
+        """How a settled move of the agent's cwd is taken (`cwd.settle`'s
+        answer; None for no move)."""
+        if scope is None or self._editor is None:
             return
         if scope is editorfiles.FollowScope.AUTO:
             self._editor.request_root(cwd)
@@ -3955,7 +4014,7 @@ class TerminalTab(Gtk.Box):
         something new, and the tooltip — the only room on an 18px pill for a
         number — says how much. It hides entirely while the panel is docked —
         a panel already on screen needs no handle to raise it."""
-        self._attachments_btn.set_visible(self._attachments_page is None)
+        self._attachments_btn.set_visible(self._attachments_page is None and apilink.has(protocol.CAP_TOOLS))
         count = len(self._attachments_unseen)
         if count:
             self._attachments_btn.add_css_class("unseen")
@@ -4124,6 +4183,8 @@ class TerminalTab(Gtk.Box):
     def open_attachments(self) -> None:
         """Slide the gallery in over the terminal's right edge, filled with
         whatever this session has seen so far."""
+        if not apilink.has(protocol.CAP_TOOLS):
+            return  # the handle is hidden then (D5)
         if self._attachments_page is not None:
             # One panel per tab: docked, the handle fronts the page —
             # revealing a hidden strip if that is where it lives — rather
@@ -4330,6 +4391,8 @@ class TerminalTab(Gtk.Box):
         The work lands on the update thread, so the click itself only asks; the
         button goes insensitive until the answer arrives.
         """
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return  # hidden then (_sync_family_surfaces): nothing would answer
         self._pr_refresh_btn.set_sensitive(False)
         self._request_update(discover=True)
 
@@ -4524,7 +4587,11 @@ class TerminalTab(Gtk.Box):
 
     def _drop_texture(self, texture: Gdk.Texture) -> bool:
         """Raw image data: upload the PNG copy (PR-2.7), mention the copy
-        once the service has written it."""
+        once the service has written it. A service that takes no upload
+        refuses the drop with a toast (D5)."""
+        if not apilink.has(protocol.CAP_TOOLS):
+            self.emit("toast", _("This service does not take dropped files"))
+            return False
         try:
             data = bytes(texture.save_to_png_bytes().get_data())
         except GLib.Error:
@@ -4561,6 +4628,9 @@ class TerminalTab(Gtk.Box):
         if remoteuploads.is_local():
             return self._mention_dropped_paths([f.get_path() for f in local])
         if not local:
+            return False
+        if not apilink.has(protocol.CAP_TOOLS):
+            self.emit("toast", _("This service does not take dropped files"))
             return False
 
         def uploaded(paths: list[str], errors: list[str]) -> None:
@@ -4817,8 +4887,8 @@ class TerminalTab(Gtk.Box):
         composer: the keys after the first go to a focused composer, not
         here.
         """
-        if not self._composer_on_typing:
-            return False
+        if not self._composer_on_typing or not apilink.has(protocol.CAP_COMPOSER):
+            return False  # with no `composer` a key is the CLI's own (D5)
         code = Gdk.keyval_to_unicode(keyval)
         char = chr(code) if code else ""
         if not composerkeys.typing_opens_composer(char, int(state)):
@@ -4990,6 +5060,10 @@ class TerminalTab(Gtk.Box):
         Docked, send never closes: the page is a fixture, not a stand-in
         raised over the input box, so the buffer clears and the page stays
         for the next prompt.
+
+        With no `composer` the draft goes through `prompt`, into an empty
+        box only (`ClientSession.send_composed`, D5): a box that holds
+        something is said in a toast and the draft stays here.
         """
         docked = self._composer_page is not None
         if not text.strip():
@@ -5001,8 +5075,13 @@ class TerminalTab(Gtk.Box):
             self._composer.set_text("")
             if not docked:
                 self._composer_revealer.set_reveal_child(False)
+                if not apilink.has(protocol.CAP_COMPOSER):
+                    self.grab_terminal_focus()  # `send` would have said `focus.terminal`
 
-        self.session.send_composed(text, clear, composer_open=True)
+        self.session.send_composed(text, clear, composer_open=True, on_refused=self._toast_box_not_empty)
+
+    def _toast_box_not_empty(self) -> None:
+        self.emit("toast", _("The agent's input box isn't empty"))
 
     def _sync_composer_overlay_btn(self) -> None:
         """Show the floating composer button only when it has something to do:
@@ -5149,6 +5228,9 @@ class TerminalTab(Gtk.Box):
         if remoteuploads.is_local():
             self._mention_attached(gfile.get_path())
             return
+        if not apilink.has(protocol.CAP_TOOLS):
+            self.emit("toast", _("This service does not take dropped files"))
+            return
 
         # Not on the service's machine: the file goes up as a drop does
         # (`PUT /api/upload`, filed under the session, or pending before it
@@ -5192,12 +5274,12 @@ class TerminalTab(Gtk.Box):
         pick in either model menu (the footer label's, the composer's)
         means (`Session.switch_model`; whether the composer is up decides
         the road the command takes)."""
-        self.session.switch_model(model_id, self.composer_open())
+        self.session.switch_model(model_id, self.composer_open(), on_refused=self._toast_box_not_empty)
 
     def switch_effort(self, effort: str) -> None:
         """Post the provider's effort-switch command to the chat — what a
         pick in either effort menu means (`Session.switch_effort`)."""
-        self.session.switch_effort(effort, self.composer_open())
+        self.session.switch_effort(effort, self.composer_open(), on_refused=self._toast_box_not_empty)
 
     def _refocus_composer(self) -> bool:
         if self._composer is not None and self.composer_open():
@@ -5294,7 +5376,9 @@ class TerminalTab(Gtk.Box):
         strip.set_cwd_lookup(self.current_agent_cwd)
         # The tab menu's "New sandboxed shell", for as long as there is a
         # box to open one in.
-        strip.set_sandboxed_shell_offer(lambda: self.session.sandbox_plan_path is not None)
+        strip.set_sandboxed_shell_offer(
+            lambda: self.session.sandbox_plan_path is not None and apilink.has(protocol.CAP_SHELLS)
+        )
         # A page arriving or the last one leaving is what makes (or unmakes)
         # a new-chat screen a draft worth keeping; no-ops after the session
         # starts (see _note_new_chat_change).
@@ -5340,6 +5424,8 @@ class TerminalTab(Gtk.Box):
         or into the composer — the same bargain the attachments autodock
         makes.
         """
+        if not apilink.has(protocol.CAP_PRS):
+            return
         page = self._find_pr_page(pr.url)
         if page is None:
             page = self._make_pr_page(pr)
@@ -5641,7 +5727,10 @@ class TerminalTab(Gtk.Box):
         shell at the agent's current working directory. `default_mode`
         ("bottom" | "right") opens a new one at the app-wide last-used home
         edge; None keeps the tab's own. `focus=False` leaves keyboard focus
-        where it is (session restore)."""
+        where it is (session restore). Nothing on a service with no `shells`
+        (D5: the button is hidden, the chord does nothing)."""
+        if not apilink.has(protocol.CAP_SHELLS):
+            return
         # Freshly opened — no terminal bound to the shortcut at all — takes
         # the app-wide edge. One that exists keeps the edge it is on: an
         # existing terminal being brought back (or merely fronted in a row
@@ -5705,7 +5794,10 @@ class TerminalTab(Gtk.Box):
 
         *sandboxed* — what a sandboxed session gets — opens the shell that
         runs inside its box instead (open_sandboxed_shell, quietly), and
-        never the user's own Ctrl+J shell."""
+        never the user's own Ctrl+J shell. None on a service with no
+        `shells` (D5)."""
+        if not apilink.has(protocol.CAP_SHELLS):
+            return None
         if sandboxed:
             return self.open_sandboxed_shell(focus=False)
         if not self._dock.shell_pages():
@@ -5866,7 +5958,7 @@ class TerminalTab(Gtk.Box):
         layout = panellayout.validate(layout)
         if not layout:
             return
-        layout = panellayout.prune(layout, {"shell", "pr", "composer", "attachments", "git"})
+        layout = panellayout.prune(layout, self._restorable_kinds())
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)
@@ -5876,6 +5968,22 @@ class TerminalTab(Gtk.Box):
         tree = layout.get("tree")
         if tree:
             self._dock.restore_layout(tree, self._load_panel_history())
+
+    @staticmethod
+    def _restorable_kinds() -> set[str]:
+        """The page kinds a saved layout may bring back: this build's, less
+        those whose family this service does not list (D5: a saved tree's
+        shell page would otherwise spawn, and be refused, on every open)."""
+        kinds = {"composer"}
+        for kind, cap in (
+            ("shell", protocol.CAP_SHELLS),
+            ("pr", protocol.CAP_PRS),
+            ("attachments", protocol.CAP_TOOLS),
+            ("git", protocol.CAP_GIT),
+        ):
+            if apilink.has(cap):
+                kinds.add(kind)
+        return kinds
 
     def swap_panel(self) -> str:
         """Move the shells to the other home edge (bottom↔right) and return
@@ -6219,9 +6327,11 @@ class TerminalTab(Gtk.Box):
 
     def feed_message(self, text: str) -> None:
         line = f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n"
-        if self._view.pty is not None:
+        if self._view.pty is not None and apilink.has(protocol.CAP_SHELLS):
             # Rule 2 (§3.1): the line goes into the pty's output stream on
             # the service (`paint`), so the model and every client show it.
+            # (`paint` is `shells`; with no such family the line is this
+            # widget's alone, as a refused spawn's is.)
             try:
                 self._client.request({"t": "paint", "pty": self._view.pty, "text": line})
                 return

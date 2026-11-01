@@ -45,7 +45,8 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import dialogs, keybindings, paneldnd  # noqa: E402
+from . import apilink, dialogs, keybindings, paneldnd  # noqa: E402
+from .api import protocol  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
 
@@ -152,6 +153,7 @@ class PanelStrip(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
+        add_btn.set_visible(apilink.has(protocol.CAP_SHELLS))  # hidden on a service with no shells (D5)
         max_btn = Gtk.Button(icon_name="view-fullscreen-symbolic")
         max_btn.add_css_class("flat")
         max_btn.set_tooltip_text(_("Overlay this tab over the whole session"))

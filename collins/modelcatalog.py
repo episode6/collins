@@ -20,18 +20,23 @@ keep the reply as a mirror pushed by events).
 
 The rest of `claudemodels` is pure list work (`grouped_models`,
 `short_name`, `catalog_id`, `default_model`, `FALLBACK_MODELS`...) and is
-used from there directly. With no link (a unit test), every read answers
-what `claudemodels` would with no catalog at all. GTK-free.
+used from there directly. With no link (a unit test), or a service that
+serves no `usage` (D5, no round trip: the pickers fall back to
+`claudemodels.FALLBACK_MODELS`), every read answers what `claudemodels`
+would with no catalog at all. GTK-free.
 """
 
 from __future__ import annotations
 
 from . import apilink, claudemodels
+from .api import protocol
 from .api.protocol import RequestRefused
 from .claudemodels import ClaudeModel
 
 
 def _ask(fetch: bool = False, refresh: bool = False) -> dict:
+    if not apilink.has(protocol.CAP_USAGE):
+        return {"cached": False, "models": [], "fetched_at": 0.0, "failed": False}
     try:
         reply = apilink.call({"t": "models.get", "fetch": fetch, "refresh": refresh})
     except RequestRefused:
@@ -73,6 +78,8 @@ def model_efforts(model_id: str) -> tuple[str, ...] | None:
 
 
 def _defaults(cwd: str | None, model: str | None) -> dict:
+    if not apilink.has(protocol.CAP_USAGE):
+        return {}
     message: dict = {"t": "models.defaults"}
     if cwd and cwd.startswith("/"):
         message["cwd"] = cwd

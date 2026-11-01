@@ -46,6 +46,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import apilink, remoteimages
+from .api import protocol
 from .i18n import _
 
 log = logging.getLogger(__name__)
@@ -90,6 +91,26 @@ _TYPED_SUFFIXES = tuple(sorted(set(TYPE_SUFFIXES.values()))) + (".img",)
 
 def _q(value: str) -> str:
     return quote(value, safe="")
+
+
+# The family each kind of blob belongs to (`CONFORMANCE_FAMILIES`' notes).
+_BLOB_FAMILIES = {
+    "git": protocol.CAP_GIT,
+    "pr": protocol.CAP_PRS,
+    "file": protocol.CAP_TOOLS,
+    "remote": protocol.CAP_TOOLS,
+    "icon": protocol.CAP_USAGE,
+}
+
+
+def family_of(url: str) -> str:
+    """The family a blob *url* asks of (a cap): "" for a kind this client
+    has no family for, which no service lists."""
+    for pair in url.partition("?")[2].split("&"):
+        name, _eq, value = pair.partition("=")
+        if name == "kind":
+            return _BLOB_FAMILIES.get(value, "")
+    return ""
 
 
 def file_url(path: str, session: str = "") -> str:
@@ -245,7 +266,11 @@ def fetch(url: str, suffix: str | None = "", link: apilink.Link | None = None) -
     it from the answer's content type (`TYPE_SUFFIXES`, ``.img`` for one
     it doesn't know), for an image off the web whose URL says nothing.
     Raises `ValueError` with the reason (what `pictures.fetch` hands the
-    caller) when the service refuses or does not answer. Worker thread."""
+    caller) when the service refuses or does not answer, or serves no
+    family this kind of blob belongs to (`family_of`, D5: no GET goes
+    out). Worker thread."""
+    if not apilink.has(family_of(url)):
+        raise ValueError(_("This service does not offer that"))
     link = link or apilink.current()
     if link is None or not hasattr(link, "http_get"):
         raise ValueError(_("Not connected to the service"))

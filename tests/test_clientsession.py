@@ -24,6 +24,7 @@ class FakeClient:
         self.sent = []
         self.replies = {}
         self.refuse = set()
+        self.waiting = []
 
     def request(self, message):
         checked = protocol.validate(dict(message, id=1), protocol.CLIENT)
@@ -33,12 +34,27 @@ class FakeClient:
             raise RequestRefused(protocol.ERROR_REFUSED, "no", {})
         return dict(self.replies.get(message["t"], {}))
 
+    def send(self, message, on_reply=None, on_refused=None):
+        """`Link.send`: held until the test lands it, as a socket would."""
+        checked = protocol.validate(dict(message, id=1), protocol.CLIENT)
+        assert isinstance(checked, protocol.Message), checked
+        self.sent.append(message)
+        self.waiting.append((message, on_reply, on_refused))
+
+    def land(self):
+        message, on_reply, on_refused = self.waiting.pop(0)
+        if message["t"] in self.refuse:
+            on_refused(RequestRefused(protocol.ERROR_REFUSED, "no", {}))
+        else:
+            on_reply(dict(self.replies.get(message["t"], {})))
+
 
 @pytest.fixture
 def mirror():
     client = FakeClient()
     session = ClientSession(
         request=client.request,
+        send=client.send,
         provider=ClaudeProvider(),
         cwd="/home/u/project",
         options=SessionOptions(model="opus"),
@@ -291,13 +307,25 @@ def test_the_transcript_and_the_resolver_requests(mirror):
 
 def test_the_cwd_settles_as_a_follow_scope(mirror):
     session, client = mirror
+    scopes = []
     client.replies["cwd.settle"] = {"scope": "auto"}
-    scope = session.settle_cwd("/home/u/project/.claude/worktrees/x", "/home/u/project")
-    assert scope is editorfiles.FollowScope.AUTO
+    session.settle_cwd("/home/u/project/.claude/worktrees/x", "/home/u/project", scopes.append)
+    assert scopes == []  # the tick never waits on the service (spec §2.3): it lands later
+    client.land()
+    assert scopes == [editorfiles.FollowScope.AUTO]
     client.replies["cwd.settle"] = {"scope": "offer"}
-    assert session.settle_cwd("/elsewhere", "/home/u/project") is editorfiles.FollowScope.OFFER
+    session.settle_cwd("/elsewhere", "/home/u/project", scopes.append)
+    client.land()
+    assert scopes[-1] is editorfiles.FollowScope.OFFER
     client.replies["cwd.settle"] = {"scope": ""}
-    assert session.settle_cwd(None, "/home/u/project") is None
+    session.settle_cwd(None, "/home/u/project", scopes.append)
+    client.land()
+    assert scopes[-1] is None
+    client.refuse.add("cwd.settle")
+    scopes.clear()
+    session.settle_cwd("/x", "/home/u/project", scopes.append)
+    client.land()
+    assert scopes == [None]
     session.set_shells_follow_armed(False)
     assert client.sent[-1] == {"t": "shells.follow", "pty": 7, "armed": False}
     assert session.shells_follow_armed is False
@@ -333,7 +361,7 @@ def test_the_restart_goes_by_the_box(mirror):
 
 def test_nothing_is_asked_before_the_spawn_or_after_the_exit():
     client = FakeClient()
-    session = ClientSession(request=client.request, provider=ClaudeProvider())
+    session = ClientSession(request=client.request, send=client.send, provider=ClaudeProvider())
     session.inject_prompt("x")
     session.begin_cut()
     assert client.sent == []

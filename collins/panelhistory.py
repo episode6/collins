@@ -203,8 +203,11 @@ def history_requests(key: str, shells: list[dict], budget: int = HISTORY_REQUEST
     characters encodes larger than it measures, and a request past
     `MAX_FRAME` is one the link refuses to send (the review of PR 604,
     should-fix 1). GTK-free; `tests/test_panelhistory_requests.py` pins it."""
-    from .api.protocol import json_bytes
+    from . import apilink
+    from .api.protocol import CAP_SHELLS, json_bytes
 
+    if not apilink.has(CAP_SHELLS):
+        return []  # no shells to file (D5)
     whole = {"t": "panel.history", "key": key, "shells": shells}
     if json_bytes(whole) <= budget:
         return [whole]

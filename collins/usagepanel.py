@@ -25,6 +25,7 @@ import time
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from . import apilink, jobclient, usage
+from .api import protocol
 from .api.protocol import RequestRefused
 from .i18n import _
 from .state import AppState
@@ -362,11 +363,14 @@ class UsagePanel(Gtk.Box):
             # The fetch is the service's (`usage.get`: its machine's login,
             # PR-1.11), asked from this thread as the module was.
             try:
-                reply = apilink.call({"t": "usage.get"})
-                if "snapshot" in reply:
-                    result: object = usage.snapshot_from_record(reply["snapshot"])
+                if apilink.has(protocol.CAP_USAGE):
+                    reply = apilink.call({"t": "usage.get"})
+                    if "snapshot" in reply:
+                        result: object = usage.snapshot_from_record(reply["snapshot"])
+                    else:
+                        result = usage.UsageError(reply.get("kind") or "http", reply.get("error") or "")
                 else:
-                    result = usage.UsageError(reply.get("kind") or "http", reply.get("error") or "")
+                    result = usage.UsageError("network", "")  # a hello moved under the thread (D5)
             except usage.UsageError as err:
                 result = err
             except RequestRefused as refusal:

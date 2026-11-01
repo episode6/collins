@@ -60,6 +60,11 @@ class Jobs:
         link.on("job", self._on_job)
 
     def start(self, kind: str, args: dict, on_event: Callable[[JobEvent], None]) -> str | None:
+        if not apilink.has(protocol.CAP_JOBS):
+            # D5: refused here, as the service would, with no round trip. A
+            # surface that starts one is hidden; a launch's own job is skipped.
+            on_event(JobEvent("", kind, protocol.JOB_REFUSED, _("This service has no background jobs")))
+            return None
         try:
             reply = self._link.call({"t": "job.start", "kind": kind, "args": dict(args)})
         except RequestRefused as refusal:
@@ -88,7 +93,7 @@ class Jobs:
                 log.exception("jobs: a %s watcher failed", kind)
 
     def cancel(self, job_id: str | None) -> None:
-        if not job_id or job_id not in self._watchers:
+        if not job_id or job_id not in self._watchers or not apilink.has(protocol.CAP_JOBS):
             return
         try:
             self._link.call({"t": "job.cancel", "job": job_id})

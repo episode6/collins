@@ -81,6 +81,7 @@ from pathlib import Path
 from gi.repository import Gio, GObject
 
 from . import apilink, chats
+from .api import protocol
 from .api.protocol import RequestRefused
 from .models import SessionItem
 from .sessions import Session, worktree_project_root
@@ -693,6 +694,8 @@ class RemoteStore(GObject.Object):
         return reply.get("error") or None
 
     def record_forward(self, old_id: str, new_id: str) -> None:
+        if not apilink.has(protocol.CAP_BACKGROUND):
+            return
         self.state.request(
             {"t": "store.forward", "session": old_id, "to": new_id},
             mutate=lambda: self.state.forward_session(old_id, new_id),
