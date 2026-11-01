@@ -484,7 +484,7 @@ the kit's scenarios judge the result, not the method.
   changes what row 1 means; a region or origin change also homes the
   cursor). They are asserted after the cells are in place, and the final
   cursor position is placed after them.
-- **The alternate screen saves the cursor it finds.** `CSI ? 1049 h` saves
+- **Switching to the alternate screen records where the cursor stands.** `CSI ? 1049 h` saves
   the cursor's position as it stands at the switch, and that saved position
   is the one `CSI ? 1049 l` restores (it replaces what an earlier `ESC 7`
   saved, as `ESC 8` then shows). So the main screen has to be complete
@@ -497,8 +497,9 @@ the kit's scenarios judge the result, not the method.
   hidden cursor is not such a case: `CSI ? 25 l` stays in force through
   text, SGR, cursor moves and mode changes, so it may be asserted at any
   point.
-- **The kitty keyboard flags are a stack.** `CSI > <flags> u` pushes and
-  `CSI = <flags> u` sets the base, so the same two sequences in the other
+- **The kitty keyboard flags are a stack.** `CSI > <flags> u` pushes an
+  entry and `CSI = <flags> u` sets the flags in force (the top entry while
+  the stack has one, else the base), so the same two sequences in the other
   order leave a different stack (`>5u` then `=3u` reads back as `>3u`,
   the reverse as `=3u`, `>5u`). A repaint asserts the base first and the
   pushed entries in stack order; the other modes may be asserted in any
@@ -522,9 +523,9 @@ scrollback, the alternate screen having none); what DECRQSS and the cursor
 reports answer from (the current pen: bold, faint, italic, underline and
 its style, blink, inverse, hidden, strikethrough, overline, foreground,
 background, underline colour; the cursor and its pending wrap; a saved
-cursor); and what decides where the next write lands (the origin, autowrap
-and insert settings; the tab stops; the designated character sets and the
-shift; **a scroll region that is the same on either screen**, measured on
+cursor); and what decides where the next write lands and what it draws (the
+origin, autowrap and insert settings; the tab stops; the designated
+character sets and the shift; **a scroll region that is the same on either screen**, measured on
 VTE: set on one screen, it is found set on the other). VTE's reading of the
 operations that move rows between screen and history is recorded in the
 scenarios (`CSI 2 J` pushes the screen's used rows into history, `CSI 3 J`
