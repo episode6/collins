@@ -441,6 +441,15 @@ while True:
         bytes_ = GLib.Bytes.new(b"\xff\xff\xff\xff")
         return Gdk.MemoryTexture.new(1, 1, Gdk.MemoryFormat.R8G8B8A8, bytes_, 4)
 
+    caffeine_asked: list = []
+    real_caffeine = App.set_caffeine_enabled
+
+    def set_caffeine_enabled(self, enabled, duration=None):
+        caffeine_asked.append(enabled)
+        real_caffeine(self, enabled, duration)
+
+    App.set_caffeine_enabled = set_caffeine_enabled
+
     os.environ.pop("COLLINS_KEEPER", None)
     if family == "refused-subscribe":
         e2e_service.start_service(stubs={"refuse_subscribe": 1})
@@ -469,7 +478,9 @@ while True:
                 check("the banner comes down", wait_until(lambda: not win.reconnect_banner.get_revealed()))
                 # The launch it held back, whole (the review of PR 646).
                 check("the launch's last session comes back", wait_until(lambda: win._page_for(SID) is not None))
-                check("…and Caffeine on launch", app.caffeine_enabled)
+                # Asked, not granted: with no session manager (CI's container)
+                # `inhibit` answers 0, and Caffeine rightly reads as off.
+                check("…and it asks for Caffeine on launch", caffeine_asked == [True], caffeine_asked)
             drive(win)
         except Exception:
             import traceback
