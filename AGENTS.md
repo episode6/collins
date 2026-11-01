@@ -453,7 +453,8 @@ caller keeps its one path. Every `has` read as a widget is built is in a named
 down, no dock surgery; a test walks for it); everything else asks as it shows.
 And a family-less hello never shrinks a record the window persists: a layout
 pruned for a missing family is a view, whose record stands
-(`TerminalTab._layout_record`). Without `composer` the composer sends through `prompt` into an empty
+(`TerminalTab._layout_record`) and comes back whole on a hello that lists the
+family while the dock is still that view with no page in it. Without `composer` the composer sends through `prompt` into an empty
 box, and the menus type `/model` and `/effort` the same way; without `internal`
 the editor follows `agent_cwd` itself and a close has the window's budget.
 `tests/test_client_families.py` walks the client modules and holds every

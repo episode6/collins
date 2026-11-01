@@ -326,9 +326,10 @@ pass vacuously. `stubs={"refuse_subscribe": 1}` is a first subscribe refused,
 and `"legacy_hello": True` beside a `caps_drop` is a pre-family Collins service
 (no `implementation` in the hello, `service.restart` still served). The stub
 otherwise keeps `implementation`, so a service with every family dropped is not
-read as one. That run also walks the upgrade's road, a next hello that lists
-every family and then one that does not, since whatever a window builds from one
-hello must follow the next.
+read as one. That run also walks the road on a faked hello, one that lists every
+family and then one that does not, since whatever a window builds from one hello
+must follow the next. The `upgrade` run takes it for real: `stop_service` and
+`start_service` under the window, the panels back with no reopen.
 `scripts/stub_server.py` is a whole Level 0 server, for looking at the window by
 hand; it prints what it refuses.
 

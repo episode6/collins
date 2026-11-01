@@ -20,7 +20,9 @@ A run drops nothing and holds every `SURFACES` predicate to true, so that a
 the service refuse the first `subscribe`, which must be the Reconnecting banner
 and not a failed startup (spec D6). A `legacy` run is the hello of a Collins
 service from before families, with the banner and the restart that are the way
-out of it (spec D18).
+out of it (spec D18), and `upgrade` takes that road for real: that service
+restarted full under the window, and the panels it could not show back with no
+reopen. `files-back` does the same for the editor's saved files.
 
 Each family's run is its own process (a window builds from the hello it finds),
 run a few at a time, so the check stays inside CI's per-check budget:
@@ -49,7 +51,7 @@ def driver() -> int:
     from collins.api import protocol
 
     runs = [cap for cap in protocol.CONFORMANCE_FAMILIES if cap != protocol.CAP_DEBUG]
-    runs += ["all", "none", "refused-subscribe", "legacy"]
+    runs += ["all", "none", "refused-subscribe", "legacy", "upgrade", "files-back"]
 
     def one(family: str) -> tuple[str, int, str]:
         try:
@@ -160,7 +162,9 @@ while True:
                 '{"device": {"settings": {"restore_last_session": true}},'
                 ' "services": {"%s": {"last_active_session": "%s"}}}' % (SERVICE_ID, SID)
             )
-    elif family in ("legacy", "files"):
+    elif family in ("legacy", "upgrade", "files", "files-back"):
+        with open(f"{PROJECT}/kept.txt", "w", encoding="utf-8") as fh:
+            fh.write("a file the editor had open")
         # Records a family's absence must not shrink (ruling 20): a dock with a
         # shell page, and an editor with a file open.
         import json
@@ -215,7 +219,14 @@ while True:
 
     every = [cap for cap in protocol.CONFORMANCE_FAMILIES if cap != protocol.CAP_DEBUG]
     since_families = [cap for cap in every if cap not in (protocol.CAP_GIT, protocol.CAP_FILES)]
-    dropped = {"all": every, "none": [], "refused-subscribe": [], "legacy": since_families}.get(family, [family])
+    dropped = {
+        "all": every,
+        "none": [],
+        "refused-subscribe": [],
+        "legacy": since_families,
+        "upgrade": since_families,
+        "files-back": [protocol.CAP_FILES],
+    }.get(family, [family])
     results = {"passed": 0, "failed": 0}
 
     def check(label: str, ok: object, detail: object = "") -> None:
@@ -524,10 +535,10 @@ while True:
     os.environ.pop("COLLINS_KEEPER", None)
     if family == "refused-subscribe":
         e2e_service.start_service(stubs={"refuse_subscribe": 1})
-    elif family == "legacy":
-        e2e_service.start_service(stubs={"caps_drop": dropped, "legacy_hello": True})
+    elif family in ("legacy", "upgrade"):
+        service = e2e_service.start_service(stubs={"caps_drop": dropped, "legacy_hello": True})
     else:
-        e2e_service.start_service(stubs={"caps_drop": dropped})
+        service = e2e_service.start_service(stubs={"caps_drop": dropped})
     app = App()
     outcome = {"code": 1}
 
@@ -573,7 +584,7 @@ while True:
         )
         banner = win.reconnect_banner
         road = [0, 0]  # the legacy run's stretch of the stub's record under a hello it faked
-        if family == "legacy":
+        if family in ("legacy", "upgrade"):
             check("it is read as a pre-family service", apilink.predates_families())
             check("the banner is up", wait_until(banner.get_revealed), banner.get_title())
             check("…and says so", "predates this window" in (banner.get_title() or ""), banner.get_title())
@@ -612,6 +623,38 @@ while True:
                     check(f"{cap}: no {label}", not shows(context))
                 elif label not in gone:
                     check(f"{cap}: {label} shows", shows(context))
+
+        if family == "upgrade":
+            # The normal upgrade: nobody touched the dock, and the restart
+            # leaves this tab attached (ruling 20; the review of PR 646).
+            check("the saved panels are a view: no shell page", not tab._dock.shell_pages())
+            check("…whose record stands", tab._layout_record is not None)
+            refused = [call["args"][0] for call in e2e_service.stub_calls() if call["stub"] == "refused"]
+            check("the old service was asked nothing it does not list", not refused, refused)
+            tab.grab_terminal_focus()
+            wait_until(lambda: win.get_focus() is not None)
+            focused = win.get_focus()
+            e2e_service.stop_service(service)
+            e2e_service.start_service(stubs={})
+            check("the next hello lists the families", wait_until(lambda: apilink.has(protocol.CAP_SHELLS), 30.0))
+            check("the banner comes down", wait_until(lambda: not banner.get_revealed(), 10.0), banner.get_title())
+            check("the panels come back with no reopen", wait_until(lambda: bool(tab._dock.shell_pages()), 15.0))
+            check("…the record with them", tab._layout_record is None, tab._layout_record)
+            shell = next(iter(tab._dock.shell_pages()), None)
+            check("…with a real shell", shell is not None and wait_until(shell._has_pty, 10.0))
+            check("the agent's tab is still attached", wait_until(lambda: tab.takes_prompt(), 15.0))
+            check("the keyboard stayed where it was", win.get_focus() is focused, win.get_focus())
+        elif family == "files-back":
+            check("the saved editor state is a view", tab._editor_record is not None, tab._editor_record)
+            e2e_service.stop_service(service)
+            e2e_service.start_service(stubs={})
+            check("the next hello lists files", wait_until(lambda: apilink.has(protocol.CAP_FILES), 30.0))
+            check(
+                "the saved file comes back with no reopen",
+                wait_until(lambda: f"{PROJECT}/kept.txt" in tab._editor.open_paths(), 15.0),
+                tab._editor.open_paths(),
+            )
+            check("…the record with it", tab._editor_record is None, tab._editor_record)
 
         if family == "legacy":
             win._on_banner_button(banner)
@@ -653,13 +696,19 @@ while True:
             check("the next hello that lists a family takes the banner down", not banner.get_revealed())
             for label, shows in built_down.items():
                 check(f"…and {label} comes back", shows())
+            e2e_service.settle(450)  # past the beat a record's return would wait
+            check(
+                "a dock the person changed keeps its record",
+                tab._layout_record is not None and not tab._dock.shell_pages(),
+                tab._layout_record,
+            )
             link.hello, link.families = hello, families
             win.apply_families()
             for label, shows in built_down.items():
                 check(f"another hello without it: no {label}", not shows())
             e2e_service.settle(400)
             road[:] = [road_began, len(e2e_service.stub_calls())]
-        else:
+        elif family not in ("upgrade", "files-back"):
             for cap in dropped:
                 instead(cap, win, tab, toasts)
 
@@ -673,12 +722,12 @@ while True:
         calls = calls[: road[0]] + calls[road[1] :]
         refused = sorted({call["args"][0] for call in calls if call["stub"] == "refused"})
         check("the service was asked nothing of what it does not list", not refused, refused)
-        if family in ("legacy", "files"):
+        if family in ("legacy", "upgrade", "files", "files-back"):
             import json
 
             with open(f"{E2E}/config/collins/ui-state.json", encoding="utf-8") as fh:
                 saved = json.load(fh).get("services", {}).get(SERVICE_ID, {})
-            if family == "legacy":
+            if family in ("legacy", "upgrade"):
                 entry = saved.get("panel_layout", {}).get(SID) or {}
                 check("the saved layout kept its shell", "shell" in json.dumps(entry.get("tree")), entry)
             else:

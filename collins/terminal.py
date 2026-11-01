@@ -1851,9 +1851,14 @@ class TerminalTab(Gtk.Box):
         # The saved records this tab shows less of than they hold, because a
         # family was missing as it opened (spec D5, ruling 20: a family-less
         # hello never shrinks a record). What this tab captures is then the
-        # record as it was given, for the tab's life, never its view of it.
+        # record as it was given, never its view of it, until a hello lists
+        # the family and the view is still as it opened: then it is restored
+        # whole and dropped (`_sync_saved_records`). `_layout_seed` is what
+        # the dock captured as that view.
         self._layout_record: dict | None = None
+        self._layout_seed: dict | None = None
         self._editor_record: dict | None = None
+        self._records_source: int | None = None
         # The new-chat screen, while the tab is one (None after begin_session
         # or for a tab that never was), and the draft id its panel history is
         # filed under meanwhile (see _history_id). The prompt Send hands over
@@ -3286,6 +3291,7 @@ class TerminalTab(Gtk.Box):
         self._sync_attachments_handle()
         self._sync_follow_judge()
         self._dock.apply_families()
+        self._sync_saved_records()
 
     def _start_cwd_tick(self) -> None:
         self._on_cwd_polled(self.session.current_agent_cwd())
@@ -5961,7 +5967,8 @@ class TerminalTab(Gtk.Box):
         panel was never used in this tab, so a session's saved layout
         survives tabs that never touched it. Forks never persist
         (mirroring panel history). A dock built from a layout pruned for a
-        missing family is a view: its record stands (`_layout_record`)."""
+        missing family is a view: its record stands (`_layout_record`), until
+        it can come back whole (`_sync_saved_records`)."""
         if self.fork:
             return None
         if self._layout_record is not None:
@@ -5985,6 +5992,7 @@ class TerminalTab(Gtk.Box):
         # What a family's absence pruned is still the session's: it comes back
         # with the family, and a view of it is never written over it.
         self._layout_record = known if layout != known else None
+        self._layout_seed = None
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)
@@ -5994,6 +6002,54 @@ class TerminalTab(Gtk.Box):
         tree = layout.get("tree")
         if tree:
             self._dock.restore_layout(tree, self._load_panel_history())
+        if self._layout_record is not None:
+            self._layout_seed = self._dock.capture_layout()
+
+    def _layout_can_return(self) -> bool:
+        """Whether the saved layout this tab shows a view of can come back
+        whole: the hello lists every family it names, and the view is as it
+        opened with no page in it. A dock the person changed keeps the record;
+        so does a view that holds a page, which `restore_layout` would have
+        to tear down first."""
+        record = self._layout_record
+        return (
+            record is not None
+            and panellayout.prune(record, self._restorable_kinds()) == record
+            and self._dock.is_fresh
+            and self._dock.capture_layout() == self._layout_seed
+        )
+
+    def _editor_can_return(self) -> bool:
+        """The same for the editor: `files` is back, and nothing is open in
+        the pane but what its record names."""
+        record = self._editor_record
+        if record is None or not apilink.has(protocol.CAP_FILES):
+            return False
+        files = record.get("files")
+        return set(self._editor.open_paths()) <= set(files if isinstance(files, list) else ())
+
+    def _sync_saved_records(self) -> None:
+        """A hello listed a family a record was waiting for: what it could not
+        show comes back with no reopen (the D18 banner's restart leaves this
+        tab attached). A beat later, as any unbidden dock surgery is."""
+        if self._records_source is None and (self._layout_can_return() or self._editor_can_return()):
+            self._records_source = GLib.timeout_add(_PR_PAGE_SETTLE_MS, self._restore_saved_records)
+
+    def _restore_saved_records(self) -> bool:
+        """Asked again, a beat on. Reparenting the terminal loses the keyboard
+        to the first focusable thing, so it goes back where it was."""
+        self._records_source = None
+        root = self.get_root()
+        if root is None:
+            return GLib.SOURCE_REMOVE  # the tab went meanwhile
+        focused = root.get_focus()
+        if self._layout_can_return():
+            self.restore_panel_layout(self._layout_record)
+        if self._editor_can_return():
+            self.restore_editor_state(self._editor_record)
+        if focused is not None and focused.get_root() is root:
+            focused.grab_focus()
+        return GLib.SOURCE_REMOVE
 
     @staticmethod
     def _restorable_kinds() -> set[str]:

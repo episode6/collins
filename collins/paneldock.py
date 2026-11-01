@@ -350,6 +350,12 @@ class PanelDock(Adw.Bin):
             and strip.selected_page_widget() is shell
         )
 
+    @property
+    def is_fresh(self) -> bool:
+        """Whether no strip stands beside the terminal: what `restore_layout`
+        rebuilds into, and refuses anything else."""
+        return len(self._tree) <= 1
+
     def apply_families(self) -> None:
         """A hello listed the service's families: what each strip built from
         the last one's follows. Nothing is opened or closed."""

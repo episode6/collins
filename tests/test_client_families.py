@@ -337,6 +337,10 @@ def _classes() -> list[tuple[str, ast.ClassDef, dict[str, ast.FunctionDef]]]:
 
 
 def _is_constructor(name: str) -> bool:
+    """What this walker takes for a constructor: `__init__` and `_build*`. It
+    does not see a helper named otherwise that runs at construction (`_make_*`,
+    `_setup_*`), nor an ask a constructor or a `_sync_*` makes through a helper
+    of its own; a hand reads those, as the families walker's known limit."""
     return name == "__init__" or name.startswith("_build")
 
 
