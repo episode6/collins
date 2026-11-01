@@ -143,7 +143,8 @@ MATCHED_MSGIDS = (
     ),
     (
         "FOLDER_GONE_MSGID",
-        "`fs.list` or `fs.walk` refused `gone` because the folder is not there. The tree drops its rows.",
+        "`fs.list`, `fs.walk`, `fs.names` or `fs.dirs` refused `gone` because the folder is not there. "
+        "A file tree drops its rows.",
     ),
 )
 
@@ -367,6 +368,10 @@ def _conformance_entry(heading: str, entry: p.Conformance, types: list[str]) -> 
         lines.extend([f"**State keys:** {_members(list(entry.state_keys))}", ""])
     if entry.status_fields:
         lines.extend([f"**`service.status` fields:** {_members(list(entry.status_fields))}", ""])
+    if entry.session_fields:
+        lines.extend([f"**`session` fields:** {_members(list(entry.session_fields))}", ""])
+    if entry.item_fields:
+        lines.extend([f"**`item` fields:** {_members(list(entry.item_fields))}", ""])
     if entry.notes:
         lines.append("**Also:**")
         lines.append("")
@@ -386,10 +391,10 @@ def conformance_section() -> list[str]:
         "family is optional at any level: a server serves one by listing its name in `caps`, and "
         "answers a type it doesn't serve `unknown`. Each message type below names its family and level.",
         "",
-        "Every state key and `service.status` field belongs to one level or family. One that belongs to a "
-        "family is emitted, read and written only by a server that lists the family. A client reads a key "
-        "it never received as empty and a field it never received as unknown. Of `service.status`, only "
-        "`version` and `protocol` are required.",
+        "Every state key, and every field of `service.status`, `session` and `item`, belongs to one level "
+        "or family. One that belongs to a family is emitted, read and written only by a server that lists "
+        "the family. A client reads a key it never received as empty and a field it never received as "
+        "unknown. Of `service.status`, only `version` and `protocol` are required.",
         "",
     ]
     core = [entry for entry in p.TYPES.values() if entry.family == p.FAMILY_CORE]

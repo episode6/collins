@@ -97,7 +97,7 @@ This document and the module it is generated from are licensed
 
 What a server must serve to be a server of this API; the rules are in [Implementing a server](./index#implementing-a-server). The levels build on each other. A family is optional at any level: a server serves one by listing its name in `caps`, and answers a type it doesn't serve `unknown`. Each message type below names its family and level.
 
-Every state key and `service.status` field belongs to one level or family. One that belongs to a family is emitted, read and written only by a server that lists the family. A client reads a key it never received as empty and a field it never received as unknown. Of `service.status`, only `version` and `protocol` are required.
+Every state key, and every field of `service.status`, `session` and `item`, belongs to one level or family. One that belongs to a family is emitted, read and written only by a server that lists the family. A client reads a key it never received as empty and a field it never received as unknown. Of `service.status`, only `version` and `protocol` are required.
 
 ### Level 0: The wire
 
@@ -121,16 +121,21 @@ Enough to run a Claude Code session in a terminal, with its list row, whether it
 
 **State keys:** `settings`, `service_id`
 
+**`session` fields:** `pty`, `handle`, `session`, `cwd`, `agent_cwd`, `pid`, `takes_prompt`, `agent_running`, `running_command`, `busy`, `finished`, `model`, `effort`, `permission_mode`, `transcript_path`, `landed`, `reset`
+
+**`item` fields:** `session`, `path`, `cwd`, `resume_cwd`, `display_name`, `subtitle`, `preview`, `mtime`, `created`, `size`, `status`, `busy`, `unread`, `running`, `removed`, `project`, `cli_title`, `provider`, `state`, `syncing`
+
 **Also:**
 
-- `spawn`: `kind: "agent"` with `cwd`, `session`, `prompt`, `model`, `effort`, `permission_mode`, `cols`, `rows`. Any other field may be refused `refused` with a `msgid` saying why.
+- `spawn`: `kind: "agent"` with `cwd`, `session`, `prompt`, `model`, `effort`, `permission_mode`, `cols`, `rows`, `provider`, which every server accepts. An unknown `provider` reads as Claude.
+- `spawn`: a field whose value asks for nothing (an empty `add_dirs`, a false `worktree` with a `worktree_name` beside it, a false `sandbox`) is accepted and ignored.
+- `spawn`: a server refuses `refused`, with a `msgid` saying why, only a value that asks for a feature it lacks: `sandbox: true`, `sandbox_box` or `sandbox_plan` without `sandbox`; `history` or `ordinal` without `shells`; `worktree: true`, a non-empty `add_dirs`, `fork`, `continue_recent` or another optional field when it can't honour them.
 - `close`: the modes `exit` and `kill`.
 - `store.flags`: `status` and `unread`.
 - `state.set`: as an event, the `settings` key, with the server's defaults; a setting left out reads as the client's default. As a request, a server may refuse every write `refused`.
 - `state.get`: answers every key the server emits `state.set` for, and refuses any other `gone`.
 - `resolver.arm`: answer `ok`. A server with no resolver ignores it.
-- `session`: the fields `pty`, `handle`, `session`, `cwd`, `agent_cwd`, `pid`, `takes_prompt`, `agent_running`, `running_command`, `busy`, `finished`, `model`, `effort`, `permission_mode`, `transcript_path`, `landed`, `reset`.
-- `item`: the fields `session`, `path`, `cwd`, `resume_cwd`, `display_name`, `subtitle`, `preview`, `mtime`, `created`, `size`, `status`, `busy`, `unread`, `running`, `removed`.
+- `item`: `project`, `cli_title`, `provider`, `state` and `syncing` are optional, and a missing one reads as absent.
 - The input frames, `resize`, `focus`, `theme` and `ack` are honoured.
 - `service.status`: a Level 1 server should send `cli` and `home`. A client reads a missing `cli` as unknown, and without `home` it can't abbreviate paths or start a path picker at home.
 
@@ -141,6 +146,8 @@ A list a person can organise: names, favorites, archives, projects, trash, the t
 **Message types:** `put-away`, `forgotten`, `store.lookup`, `store.page-archived`, `store.refresh`, `store.show-archived`, `store.rename`, `store.regenerate-name`, `store.favorite`, `store.archive`, `store.archive-project`, `store.trash`, `store.delete`, `store.add-project`, `store.keep-projects`, `store.forget-project`, `store.move-project`, `store.forget`, `store.transcript-tail`, `store.transcript-export`, `trust.check`, `trust.grant`, `notify`, `notify.post`, `notify.remove`, `notify.clear`, `notify.green`, `notify.rekey`, `notify.test`, `seen`
 
 **State keys:** `names`, `generated_names`, `cli_titles`, `emojis`, `favorites`, `archived`, `archived_at`, `archived_projects`, `project_order`, `virtual_projects`, `project_worktree`, `session_drafts`, `new_chat_drafts`, `expanded_groups`, `notifications`
+
+**`item` fields:** `favorite`
 
 ### Family `git`: Git
 
@@ -159,6 +166,8 @@ The editor's files, the file tree, quick open and the path picker.
 
 **Message types:** `fs.trash`, `fs.read`, `fs.write`, `fs.watch`, `fs.unwatch`, `file-changed`, `dir-changed`, `fs.stat`, `fs.list`, `fs.walk`, `fs.rename`, `fs.paste`, `fs.mkdir`, `fs.names`, `fs.dirs`, `fs.newdir`
 
+**`session` fields:** `touched_files`
+
 ### Family `prs`: Pull requests
 
 What a session's pull requests are and every action on one.
@@ -168,6 +177,8 @@ What a session's pull requests are and every action on one.
 **State keys:** `session_prs`
 
 **`service.status` fields:** `gh`
+
+**`session` fields:** `prs`
 
 **Also:**
 
@@ -183,9 +194,13 @@ Sessions in a filesystem sandbox, and the grants that widen one.
 
 **`service.status` fields:** `sandbox`, `live`
 
+**`session` fields:** `sandboxed`, `sandbox_box`, `sandbox_plan_path`, `defaults_owed`, `can_restart`
+
 **Also:**
 
 - `spawn`: the fields `sandbox`, `sandbox_box`, `sandbox_plan`.
+- `pty`: the fields `sandboxed` and `box`.
+- `pty.info`: the field `plan`.
 
 ### Family `tools`: Session tools
 
@@ -195,6 +210,8 @@ The tools a running agent calls that need a screen, the marks on a diff, and fil
 
 **State keys:** `session_attachments`, `diff_notes`, `pending_diffs`
 
+**`session` fields:** `attachments`
+
 **Also:**
 
 - `GET /api/blob?kind=file` and `kind=remote`.
@@ -202,7 +219,7 @@ The tools a running agent calls that need a screen, the marks on a diff, and fil
 
 ### Family `jobs`: Long-running operations
 
-A clone, a worktree's trash or restore, a login repair, an icon's generation.
+Work that outlasts a request, such as a clone, a worktree's trash or restore, a login repair or an icon's generation. `JOB_KINDS` lists them all.
 
 **Message types:** `job.start`, `job.cancel`, `job`
 
@@ -224,10 +241,11 @@ Handing a session to the CLI's background agents and following it there.
 
 **State keys:** `session_forwards`, `pending_detaches`
 
+**`item` fields:** `background`, `backgrounding`, `can_background`, `forward`
+
 **Also:**
 
 - `close`: the mode `background`.
-- `item`: the fields `background`, `backgrounding`, `can_background`.
 
 ### Family `shells`: Panel shells
 
@@ -245,9 +263,7 @@ Lifting the text out of the CLI's input box and putting it back, switching the m
 
 **Message types:** `switch`, `send`, `mention`, `cut`, `cut.cancel`, `draft.restore`, `composer`
 
-**Also:**
-
-- `session`: the fields `entered`, `foreign_paste`, `prompt_block`.
+**`session` fields:** `entered`, `foreign_paste`, `prompt_block`
 
 ### Family `internal`: The Collins service's own
 
@@ -259,9 +275,7 @@ What the Collins service does for its own window's timing and its own test suite
 
 **`service.status` fields:** `keeper`, `keeper_mismatch`, `keeper_unread`, `keeper_held`, `unkept`
 
-**Also:**
-
-- `session`: every field not listed under Level 1, `composer` or another family.
+**`session` fields:** `fork`, `forked`, `provider`, `options`, `continue_recent`, `resolver_cwd`, `initial_command`, `worktree_launch`, `new_chat_prompt`, `shells_follow_armed`, `closing`, `unstarted`, `lookup_empty`, `ledger_armed`
 
 ### Family `debug`: The debug probe
 
@@ -277,7 +291,7 @@ A client reads almost nothing from a refusal but its code. These three `msgid`s 
 | --- | --- | --- |
 | `ALREADY_RUNNING_MSGID` | `This session is already running in the Collins service` | `spawn` refused `refused` because the session already runs; `args.pty` names its pty, and the client attaches to that instead. |
 | `PTY_GONE_MSGID` | `no such pty` | A request refused `gone` because no such pty exists; `args.pty` names it. The client takes the pty as ended. |
-| `FOLDER_GONE_MSGID` | `The folder is not there` | `fs.list` or `fs.walk` refused `gone` because the folder is not there. The tree drops its rows. |
+| `FOLDER_GONE_MSGID` | `The folder is not there` | `fs.list`, `fs.walk`, `fs.names` or `fs.dirs` refused `gone` because the folder is not there. A file tree drops its rows. |
 
 ## Message types
 
@@ -813,7 +827,7 @@ Family: `composer` · Level 3
 
 ### `clear`
 
-Erase the agent's box; wipe a shell's screen and scrollback.
+Wipe a shell's screen and scrollback. On an agent pty Collins' service erases the input box; no client sends that and it is not promised.
 
 Family: `shells` · Level 3
 

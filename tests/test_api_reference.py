@@ -83,8 +83,8 @@ def test_the_prose_has_a_section_for_a_server_and_reads_the_license_for_one():
     section = text.split("## Implementing a server\n", 1)[1].split("\n## ", 1)[0]
     for name in (*p.CONFORMANCE_FAMILIES.keys() - {p.CAP_DEBUG}, "core", "unknown", "implementation"):
         assert f"`{name}`" in section, name
-    interoperability = text.split("## Interoperability\n", 1)[1].split("\n## ", 1)[0]
-    assert "implements the\n*service's* side of this API" in interoperability
+    interoperability = " ".join(text.split("## Interoperability\n", 1)[1].split("\n## ", 1)[0].split())
+    assert "implements the *service's* side of this API" in interoperability
     assert "a derivative of Collins" in interoperability
 
 

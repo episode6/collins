@@ -142,14 +142,12 @@ def test_a_family_is_a_cap_and_a_level_goes_with_its_family():
 
 
 def test_what_a_level_or_family_covers_inside_a_message_exists():
-    session = p.TYPES["session"].event.fields
-    item = p.TYPES["item"].event.fields
     spawn = p.TYPES["spawn"].request.fields
-    assert set(p.SESSION_CORE_FIELDS) | set(p.SESSION_COMPOSER_FIELDS) <= set(session)
-    assert not set(p.SESSION_CORE_FIELDS) & set(p.SESSION_COMPOSER_FIELDS)
-    assert set(p.ITEM_CORE_FIELDS) | set(p.ITEM_BACKGROUND_FIELDS) <= set(item)
-    assert not set(p.ITEM_CORE_FIELDS) & set(p.ITEM_BACKGROUND_FIELDS)
     assert set(p.SPAWN_CORE_FIELDS) | set(p.SPAWN_SANDBOX_FIELDS) <= set(spawn)
+    assert not set(p.SPAWN_CORE_FIELDS) & set(p.SPAWN_SANDBOX_FIELDS)
+    assert "provider" in p.SPAWN_CORE_FIELDS
+    assert {"sandboxed", "box"} <= set(p.TYPES["pty"].event.fields)
+    assert "plan" in p.TYPES["pty.info"].request.reply
 
 
 # Where every state key and `service.status` field belongs (§3.1), written out
@@ -175,6 +173,32 @@ STATUS_FIELD_HOMES = {
     "prs": {"gh"},
     "internal": {"keeper", "keeper_mismatch", "keeper_unread", "keeper_held", "unkept"},
 }
+SESSION_FIELD_HOMES = {
+    1: {
+        "pty", "handle", "session", "cwd", "agent_cwd", "pid", "takes_prompt", "agent_running",
+        "running_command", "busy", "finished", "model", "effort", "permission_mode", "transcript_path",
+        "landed", "reset",
+    },
+    "sandbox": {"sandboxed", "sandbox_box", "sandbox_plan_path", "defaults_owed", "can_restart"},
+    "prs": {"prs"},
+    "tools": {"attachments"},
+    "files": {"touched_files"},
+    "composer": {"entered", "foreign_paste", "prompt_block"},
+    "internal": {
+        "fork", "forked", "provider", "options", "continue_recent", "resolver_cwd", "initial_command",
+        "worktree_launch", "new_chat_prompt", "shells_follow_armed", "closing", "unstarted", "lookup_empty",
+        "ledger_armed",
+    },
+}
+ITEM_FIELD_HOMES = {
+    1: {
+        "session", "path", "cwd", "resume_cwd", "display_name", "subtitle", "preview", "mtime", "created",
+        "size", "status", "busy", "unread", "running", "removed", "project", "cli_title", "provider", "state",
+        "syncing",
+    },
+    2: {"favorite"},
+    "background": {"background", "backgrounding", "can_background", "forward"},
+}
 
 
 def _conformance_entries():
@@ -198,16 +222,25 @@ def test_every_status_field_has_the_one_home_the_spec_gives_it():
     assert {name for name, spec in reply.items() if spec.required} == {"version", "protocol"}
 
 
-def test_a_session_keeps_its_core_field_list():
-    assert set(p.SESSION_CORE_FIELDS) == {
-        "pty", "handle", "session", "cwd", "agent_cwd", "pid", "takes_prompt", "agent_running",
-        "running_command", "busy", "finished", "model", "effort", "permission_mode", "transcript_path",
-        "landed", "reset",
-    }
-    assert set(p.ITEM_CORE_FIELDS) == {
-        "session", "path", "cwd", "resume_cwd", "display_name", "subtitle", "preview", "mtime", "created",
-        "size", "status", "busy", "unread", "running", "removed",
-    }
+def test_every_session_field_has_the_one_home_the_spec_gives_it():
+    entries = _conformance_entries()
+    homes = {home: set(entry.session_fields) for home, entry in entries if entry.session_fields}
+    assert homes == SESSION_FIELD_HOMES
+    listed = [name for entry in dict(_conformance_entries()).values() for name in entry.session_fields]
+    assert sorted(listed) == sorted(p.TYPES["session"].event.fields)
+
+
+def test_every_item_field_has_the_one_home_the_spec_gives_it():
+    homes = {home: set(entry.item_fields) for home, entry in _conformance_entries() if entry.item_fields}
+    assert homes == ITEM_FIELD_HOMES
+    listed = [name for entry in dict(_conformance_entries()).values() for name in entry.item_fields]
+    assert sorted(listed) == sorted(p.TYPES["item"].event.fields)
+
+
+def test_what_a_clear_promises_is_the_shells():
+    assert p.TYPES["clear"].family == p.CAP_SHELLS
+    assert p.TYPES["clear"].summary.startswith("Wipe a shell's screen and scrollback.")
+    assert "not promised" in p.TYPES["clear"].summary
 
 
 def test_the_clients_list_and_the_servers_agree():

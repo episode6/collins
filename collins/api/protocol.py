@@ -1453,7 +1453,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "clear",
-        "Erase the agent's box; wipe a shell's screen and scrollback.",
+        "Wipe a shell's screen and scrollback. On an agent pty Collins' service erases the input box; no "
+        "client sends that and it is not promised.",
         family=CAP_SHELLS, level=3,
         request=_request({"pty": _req(_PTY)}),
     ),
@@ -3235,42 +3236,6 @@ OPTIONAL_TYPES: Mapping[str, str] = {
 # the table, and these are the server's. Each type's `family` and `level` name
 # whole messages; what a level or a family covers inside a message (a field, a
 # mode, a state key, a blob kind) is here, and the reference prints it.
-SESSION_CORE_FIELDS: tuple[str, ...] = (
-    "pty",
-    "handle",
-    "session",
-    "cwd",
-    "agent_cwd",
-    "pid",
-    "takes_prompt",
-    "agent_running",
-    "running_command",
-    "busy",
-    "finished",
-    "model",
-    "effort",
-    "permission_mode",
-    "transcript_path",
-    "landed",
-    "reset",
-)
-ITEM_CORE_FIELDS: tuple[str, ...] = (
-    "session",
-    "path",
-    "cwd",
-    "resume_cwd",
-    "display_name",
-    "subtitle",
-    "preview",
-    "mtime",
-    "created",
-    "size",
-    "status",
-    "busy",
-    "unread",
-    "running",
-    "removed",
-)
 SPAWN_CORE_FIELDS: tuple[str, ...] = (
     "kind",
     "cwd",
@@ -3281,9 +3246,8 @@ SPAWN_CORE_FIELDS: tuple[str, ...] = (
     "permission_mode",
     "cols",
     "rows",
+    "provider",
 )
-SESSION_COMPOSER_FIELDS: tuple[str, ...] = ("entered", "foreign_paste", "prompt_block")
-ITEM_BACKGROUND_FIELDS: tuple[str, ...] = ("background", "backgrounding", "can_background")
 SPAWN_SANDBOX_FIELDS: tuple[str, ...] = ("sandbox", "sandbox_box", "sandbox_plan")
 
 
@@ -3295,14 +3259,16 @@ def _codes(names: tuple[str, ...]) -> str:
 class Conformance:
     """One level or family: its name, what serving it gives a client, what
     it covers beyond the message types that name it, and the state keys and
-    `service.status` fields that are its own. Every key and field is one
-    level's or one family's."""
+    the fields of `service.status`, `session` and `item` that are its own.
+    Every key and field is one level's or one family's."""
 
     title: str
     summary: str
     notes: tuple[str, ...] = ()
     state_keys: tuple[str, ...] = ()
     status_fields: tuple[str, ...] = ()
+    session_fields: tuple[str, ...] = ()
+    item_fields: tuple[str, ...] = ()
 
 
 CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
@@ -3322,21 +3288,68 @@ CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
         "Enough to run a Claude Code session in a terminal, with its list row, whether it is busy or "
         "unread, its model and effort, a prompt typed into it, and closing it.",
         (
-            f"`spawn`: `kind: \"agent\"` with {_codes(SPAWN_CORE_FIELDS[1:])}. Any other field may be "
-            "refused `refused` with a `msgid` saying why.",
+            f"`spawn`: `kind: \"agent\"` with {_codes(SPAWN_CORE_FIELDS[1:])}, which every server accepts. "
+            "An unknown `provider` reads as Claude.",
+            "`spawn`: a field whose value asks for nothing (an empty `add_dirs`, a false `worktree` with a "
+            "`worktree_name` beside it, a false `sandbox`) is accepted and ignored.",
+            "`spawn`: a server refuses `refused`, with a `msgid` saying why, only a value that asks for a "
+            "feature it lacks: `sandbox: true`, `sandbox_box` or `sandbox_plan` without `sandbox`; `history` "
+            "or `ordinal` without `shells`; `worktree: true`, a non-empty `add_dirs`, `fork`, "
+            "`continue_recent` or another optional field when it can't honour them.",
             "`close`: the modes `exit` and `kill`.",
             "`store.flags`: `status` and `unread`.",
             "`state.set`: as an event, the `settings` key, with the server's defaults; a setting left out "
             "reads as the client's default. As a request, a server may refuse every write `refused`.",
             "`state.get`: answers every key the server emits `state.set` for, and refuses any other `gone`.",
             "`resolver.arm`: answer `ok`. A server with no resolver ignores it.",
-            f"`session`: the fields {_codes(SESSION_CORE_FIELDS)}.",
-            f"`item`: the fields {_codes(ITEM_CORE_FIELDS)}.",
+            "`item`: `project`, `cli_title`, `provider`, `state` and `syncing` are optional, and a missing "
+            "one reads as absent.",
             "The input frames, `resize`, `focus`, `theme` and `ack` are honoured.",
             "`service.status`: a Level 1 server should send `cli` and `home`. A client reads a missing `cli` "
             "as unknown, and without `home` it can't abbreviate paths or start a path picker at home.",
         ),
         state_keys=("settings", "service_id"),
+        session_fields=(
+            "pty",
+            "handle",
+            "session",
+            "cwd",
+            "agent_cwd",
+            "pid",
+            "takes_prompt",
+            "agent_running",
+            "running_command",
+            "busy",
+            "finished",
+            "model",
+            "effort",
+            "permission_mode",
+            "transcript_path",
+            "landed",
+            "reset",
+        ),
+        item_fields=(
+            "session",
+            "path",
+            "cwd",
+            "resume_cwd",
+            "display_name",
+            "subtitle",
+            "preview",
+            "mtime",
+            "created",
+            "size",
+            "status",
+            "busy",
+            "unread",
+            "running",
+            "removed",
+            "project",
+            "cli_title",
+            "provider",
+            "state",
+            "syncing",
+        ),
     ),
     2: Conformance(
         "The store",
@@ -3360,6 +3373,7 @@ CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
             "expanded_groups",
             "notifications",
         ),
+        item_fields=("favorite",),
     ),
 }
 
@@ -3372,6 +3386,7 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
     CAP_FILES: Conformance(
         "Files",
         "The editor's files, the file tree, quick open and the path picker.",
+        session_fields=("touched_files",),
     ),
     CAP_PRS: Conformance(
         "Pull requests",
@@ -3379,11 +3394,16 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
         ("`GET /api/blob?kind=pr`.",),
         state_keys=("session_prs",),
         status_fields=("gh",),
+        session_fields=("prs",),
     ),
     CAP_SANDBOX: Conformance(
         "Sandboxed sessions",
         "Sessions in a filesystem sandbox, and the grants that widen one.",
-        (f"`spawn`: the fields {_codes(SPAWN_SANDBOX_FIELDS)}.",),
+        (
+            f"`spawn`: the fields {_codes(SPAWN_SANDBOX_FIELDS)}.",
+            "`pty`: the fields `sandboxed` and `box`.",
+            "`pty.info`: the field `plan`.",
+        ),
         state_keys=(
             "project_sandbox",
             "sandboxed_sessions",
@@ -3392,6 +3412,7 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
             "sandbox_tools",
         ),
         status_fields=("sandbox", "live"),
+        session_fields=("sandboxed", "sandbox_box", "sandbox_plan_path", "defaults_owed", "can_restart"),
     ),
     CAP_TOOLS: Conformance(
         "Session tools",
@@ -3399,10 +3420,12 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
         "between a client and a session.",
         ("`GET /api/blob?kind=file` and `kind=remote`.", "`PUT /api/upload`."),
         state_keys=("session_attachments", "diff_notes", "pending_diffs"),
+        session_fields=("attachments",),
     ),
     CAP_JOBS: Conformance(
         "Long-running operations",
-        "A clone, a worktree's trash or restore, a login repair, an icon's generation.",
+        "Work that outlasts a request, such as a clone, a worktree's trash or restore, a login repair or an "
+        "icon's generation. `JOB_KINDS` lists them all.",
     ),
     CAP_USAGE: Conformance(
         "Token use",
@@ -3412,11 +3435,9 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
     CAP_BACKGROUND: Conformance(
         "Background agents",
         "Handing a session to the CLI's background agents and following it there.",
-        (
-            "`close`: the mode `background`.",
-            f"`item`: the fields {_codes(ITEM_BACKGROUND_FIELDS)}.",
-        ),
+        ("`close`: the mode `background`.",),
         state_keys=("session_forwards", "pending_detaches"),
+        item_fields=("background", "backgrounding", "can_background", "forward"),
     ),
     CAP_SHELLS: Conformance(
         "Panel shells",
@@ -3427,15 +3448,30 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
         "The composer",
         "Lifting the text out of the CLI's input box and putting it back, switching the model or effort, "
         "and mentioning a file.",
-        (f"`session`: the fields {_codes(SESSION_COMPOSER_FIELDS)}.",),
+        session_fields=("entered", "foreign_paste", "prompt_block"),
     ),
     CAP_INTERNAL: Conformance(
         "The Collins service's own",
         "What the Collins service does for its own window's timing and its own test suite. Another "
         "server need not serve it.",
-        ("`session`: every field not listed under Level 1, `composer` or another family.",),
         state_keys=("process_baselines", "resume_on_start", "ptys", "pty_next_id", "inflight_copies"),
         status_fields=("keeper", "keeper_mismatch", "keeper_unread", "keeper_held", "unkept"),
+        session_fields=(
+            "fork",
+            "forked",
+            "provider",
+            "options",
+            "continue_recent",
+            "resolver_cwd",
+            "initial_command",
+            "worktree_launch",
+            "new_chat_prompt",
+            "shells_follow_armed",
+            "closing",
+            "unstarted",
+            "lookup_empty",
+            "ledger_armed",
+        ),
     ),
     CAP_DEBUG: Conformance(
         "The debug probe",

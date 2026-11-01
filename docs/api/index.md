@@ -324,8 +324,9 @@ The sequence the Collins window follows, which any client can:
    generation), token use (`usage.get`, `models.get`), the session tools a
    running agent calls that need a screen (`tool` events and `tool-reply`),
    the sandbox (`sandbox.*`), git (`git.*`, with `git.run` taking one of the
-   [git builders](./messages#git-builders)), files (`fs.*`) and the
-   service itself (`service.status`, `service.restart`).
+   [git builders](./messages#git-builders)) and files (`fs.*`). The
+   service's own requests sit beside them: `service.status`, which every
+   server answers, and `service.restart`.
 
 An event a client does not understand is dropped. A request the service
 refuses leaves nothing changed.
@@ -619,18 +620,22 @@ Levels 0 to 2 are the `core` family and build on each other, and Levels 1 and 2
 together are the *sessions* profile to aim for first. Everything else is a
 family behind a `caps` name, optional at any level: `git`, `files`, `prs`,
 `sandbox`, `tools`, `jobs`, `usage`, `background`, `shells`, `composer` and
-`internal`. A family may also cover part of a core message, such as `spawn`'s
+`internal`, and `debug`, Collins' own test probe, which no other server serves.
+A family may also cover part of a core message, such as `spawn`'s
 `kind: "shell"` or `close`'s `background` mode; Conformance lists those parts.
+A `spawn` field whose value asks for nothing is accepted and ignored by every
+server, and only a value that asks for a feature the server lacks is refused.
 
 **What you say you serve.** List the families you serve in your hello's `caps`
 and your product's name in `implementation`. A family you do not list is one
 you do not serve. Leave `local` out and omit `local_proof` if you offer no proof.
 
 **State.** A Level 1 server answers `state.get` for every key it emits
-`state.set` for, and refuses any other `gone`. A state key or `service.status`
-field that belongs to a family, such as `session_forwards` to `background`, is
-emitted, read and written only by a server that lists the family. A client reads
-a key it never received as empty and a field it never received as unknown.
+`state.set` for, and refuses any other `gone`. A state key, or a field of
+`service.status`, `session` or `item`, that belongs to a family, such as
+`session_forwards` to `background`, is emitted, read and written only by a
+server that lists the family. A client reads a key it never received as empty
+and a field it never received as unknown.
 [Conformance](./messages#conformance) says where each one belongs.
 
 **Answer every request.** A server must answer every request it receives, and
