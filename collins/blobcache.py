@@ -99,7 +99,7 @@ _BLOB_FAMILIES = {
     "pr": protocol.CAP_PRS,
     "file": protocol.CAP_TOOLS,
     "remote": protocol.CAP_TOOLS,
-    "icon": protocol.CAP_USAGE,
+    "icon": protocol.CAP_FILES,  # a file at the project's root, which costs no token (ruling 21)
 }
 
 

@@ -135,6 +135,64 @@ def test_every_scanned_session_has_a_transcript(world):
     assert remote.known_sessions and all(s.has_transcript for s in remote.known_sessions.values())
 
 
+class _HeldEvents:
+    """A link whose reply is in hand while the events it implies have yet to
+    land, as over a socket: the reply comes on the sync channel, the events
+    later on the primary."""
+
+    def __init__(self, link, replies):
+        self.link, self.replies = link, replies
+
+    def call(self, message, timeout=None):
+        return self.replies[message["t"]]
+
+    def __getattr__(self, name):
+        return getattr(self.link, name)
+
+
+def test_a_lookup_holds_the_session_when_the_call_returns(world):
+    """Spec D6, ruling 25: what a tab starts in, off the reply, with no drain."""
+    _store, remote, _state, _ids, link = world
+    record = {
+        "session": "held",
+        "path": "/p/held.jsonl",
+        "cwd": "/srv/a",
+        "resume_cwd": "/srv/b",
+        "mtime": 1.0,
+    }
+    remote._link = _HeldEvents(link, {"store.lookup": {"found": True, "sessions": [record]}})
+    session = remote.get_session("held")
+    assert session is not None and session.cwd == "/srv/a" and session.resume_at == "/srv/b"
+    assert str(session.jsonl_path) == "/p/held.jsonl" and session.provider == "claude"
+    link.dispatch({"t": "item", **record})  # the event landing later merges the same fields
+    assert remote.get_session("held").cwd == "/srv/a"
+
+
+def test_paging_holds_the_archive_when_the_call_returns(world):
+    _store, remote, _state, _ids, link = world
+    records = [
+        {"session": f"s{n}", "path": f"/p/s{n}.jsonl", "cwd": "/srv/a", "mtime": 1.0} for n in range(3)
+    ]
+    remote._paged = False
+    remote._link = _HeldEvents(link, {"store.page-archived": {"items": 3, "sessions": records}})
+    assert {"s0", "s1", "s2"} <= set(remote.sessions)
+
+
+def test_a_record_that_does_not_fit_an_item_is_dropped(world):
+    """Rule 5: the reply is foreign content, as an event is."""
+    _store, remote, _state, _ids, link = world
+    records = [{"session": 7}, "not a record", {"session": "fits", "cwd": "/srv/a", "mtime": 1.0}]
+    remote._link = _HeldEvents(link, {"store.lookup": {"found": True, "sessions": records}})
+    remote.get_session("fits")
+    assert "fits" in remote.known_sessions and 7 not in remote.known_sessions
+
+
+def test_a_server_that_names_no_records_is_a_miss_not_a_failure(world):
+    _store, remote, _state, _ids, link = world
+    remote._link = _HeldEvents(link, {"store.lookup": {"found": True}})
+    assert remote.get_session("not-yet") is None
+
+
 def test_a_lookup_fetches_one_out_of_sight_session(world):
     _store, remote, _state, ids, _link = world
     session = remote.get_session(ids["beta1"])

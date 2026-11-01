@@ -226,8 +226,11 @@ the glue, as the tab's.
 footer's toggle and the strip's add button are hidden, `show_panel` and
 `open_panel_shell` do nothing, and a saved layout's shell, PR, attachments or git
 page does not come back when its family is gone (`TerminalTab._restorable_kinds`,
-through `panellayout.prune`). A hello that loses a family closes nothing: no dock
-surgery on a hello.
+through `panellayout.prune`). That pruned dock is a view and is never written
+back: `capture_panel_layout` answers the record it was given (`_layout_record`,
+for the tab's life) and `save_panel_history` leaves the history alone, so a
+family-less hello costs no saved page (ruling 20). A hello that loses a family
+closes nothing: no dock surgery on a hello.
 
 ## Adding a page kind
 

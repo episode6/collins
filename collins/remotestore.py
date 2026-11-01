@@ -76,6 +76,7 @@ GTK-free: GLib, GObject and Gio only.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 from gi.repository import Gio, GObject
@@ -258,6 +259,25 @@ class RemoteStore(GObject.Object):
             if session is not None and item.session is not session:
                 item.session = session
             self._set_props(item, changed, announce=True)
+
+    def _take_records(self, records: object) -> None:
+        """The `item` records a lookup's reply carries (spec D6, ruling 25),
+        so that `known_sessions` holds them when the call returns: the reply
+        comes on the sync channel and the events land later on the primary,
+        which merges the same fields again. Foreign content (rule 5): each is
+        validated as the `item` event it stands for, and what does not fit is
+        dropped. On the main thread only, where events land; a worker reads
+        the mirror once they have."""
+        if not isinstance(records, list) or threading.current_thread() is not threading.main_thread():
+            return
+        for record in records:
+            checked = None
+            if isinstance(record, dict):
+                checked = protocol.validate({**record, "t": "item"}, protocol.SERVICE)
+            if isinstance(checked, protocol.Message):
+                self._on_item(dict(checked.fields))
+            else:
+                log.warning("store: a lookup's record that does not fit an item was dropped")
 
     def _on_rows(self, event: dict) -> None:
         rows = list(event.get("rows") or [])
@@ -508,12 +528,13 @@ class RemoteStore(GObject.Object):
         if session is not None or not session_id or session_id in self._missing:
             return session
         try:
-            found = bool(self._link.call({"t": "store.lookup", "session": session_id}).get("found"))
+            reply = self._link.call({"t": "store.lookup", "session": session_id})
         except RequestRefused:
-            found = False
-        if not found:
+            reply = {}
+        if not reply.get("found"):
             self._missing.add(session_id)
             return None
+        self._take_records(reply.get("sessions"))
         return self.known_sessions.get(session_id)
 
     @property
@@ -606,13 +627,11 @@ class RemoteStore(GObject.Object):
         if self._paged:
             return
         try:
-            # On the main thread the call drains the primary up to its reply
-            # (api.client, DRAINED), so `known_sessions` holds the rows it
-            # sent when it returns.
-            self._link.call({"t": "store.page-archived"})
+            reply = self._link.call({"t": "store.page-archived"})
         except RequestRefused as refusal:
             log.warning("store: the archived sessions could not be paged in: %s", refusal.msgid)
             return
+        self._take_records(reply.get("sessions"))
         self._paged = True
 
     # -- mutations (each a request; see the module docstring) -------------------------

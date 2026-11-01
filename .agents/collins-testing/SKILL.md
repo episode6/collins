@@ -121,7 +121,11 @@ half calls each transport with the family gone and asserts nothing reached the
 link. `apilink.has` answers yes with no link and for a fake with no hello
 (`families` None), so a unit test of a mirror is unchanged; a test of the gate
 installs a link with `families` set (`no_families` in
-`tests/test_clientsession.py`).
+`tests/test_clientsession.py`). The same file holds what is read as a widget is
+built (ruling 20): no `apilink.has` directly in a constructor's body, unless that
+widget is rebuilt on a hello or built as it opens (`BUILT_AGAIN`, each with its
+reason), and every `_sync_*` that asks is reached from its class's
+`apply_families`.
 
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
 `~/.claude/projects` with two projects, monkeypatched into `sessions` and

@@ -1106,6 +1106,10 @@ class PrChipRow(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+# The page kinds a saved dock layout can name that this build rebuilds.
+_PAGE_KINDS = frozenset({"shell", "pr", "composer", "attachments", "git"})
+
+
 class PanelTerminal(Gtk.Box):
     """The tab's secondary terminal: a plain shell with no agent auto-launched.
 
@@ -1846,6 +1850,12 @@ class TerminalTab(Gtk.Box):
         # editor last followed with no service to judge it (`_maybe_follow_editor`).
         self._settling_cwd = False
         self._followed_cwd: str | None = None
+        # The saved records this tab shows less of than they hold, because a
+        # family was missing as it opened (spec D5, ruling 20: a family-less
+        # hello never shrinks a record). What this tab captures is then the
+        # record as it was given, for the tab's life, never its view of it.
+        self._layout_record: dict | None = None
+        self._editor_record: dict | None = None
         # The new-chat screen, while the tab is one (None after begin_session
         # or for a tab that never was), and the draft id its panel history is
         # filed under meanwhile (see _history_id). The prompt Send hands over
@@ -1988,7 +1998,6 @@ class TerminalTab(Gtk.Box):
         )
         self._attachments_btn.add_css_class("attach-overlay")
         self._attachments_btn.add_css_class("attachments-handle")
-        self._attachments_btn.set_visible(apilink.has(protocol.CAP_TOOLS))  # hidden with no `tools` (D5)
         self._attachments_btn.connect("clicked", lambda *_: self.toggle_attachments())
         # Built lazily on first open, like the composer; only the slot it
         # will ride in exists up front.
@@ -2006,6 +2015,7 @@ class TerminalTab(Gtk.Box):
         # to be seen and is not news (see attachrecords.unseen).
         self._attachments_unseen: set[str] = set()
         self._attachments_since = time.time()
+        self._sync_attachments_handle()
         # And the pictures that have been up in the lightbox this run, which
         # the handle never lights for: whoever it would be alerting watched
         # them arrive full-screen (see _behold_attachment).
@@ -5902,6 +5912,8 @@ class TerminalTab(Gtk.Box):
         history_id = self._history_id()
         if self.fork or not history_id or not self._dock.ever_spawned:
             return
+        if self._layout_record is not None:
+            return  # the mapping is the keep-set, and this dock's is a view's
         shells = []
         for shell in self._dock.shell_pages():
             source = shell.history_source()
@@ -5950,9 +5962,12 @@ class TerminalTab(Gtk.Box):
         strips and their pages — for per-session persistence. None when the
         panel was never used in this tab, so a session's saved layout
         survives tabs that never touched it. Forks never persist
-        (mirroring panel history)."""
+        (mirroring panel history). A dock built from a layout pruned for a
+        missing family is a view: its record stands (`_layout_record`)."""
         if self.fork:
             return None
+        if self._layout_record is not None:
+            return self._layout_record
         return self._dock.capture_layout()
 
     def restore_panel_layout(self, layout: dict) -> None:
@@ -5967,7 +5982,11 @@ class TerminalTab(Gtk.Box):
         layout = panellayout.validate(layout)
         if not layout:
             return
-        layout = panellayout.prune(layout, self._restorable_kinds())
+        known = panellayout.prune(layout, _PAGE_KINDS)
+        layout = panellayout.prune(known, self._restorable_kinds())
+        # What a family's absence pruned is still the session's: it comes back
+        # with the family, and a view of it is never written over it.
+        self._layout_record = known if layout != known else None
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)
@@ -5980,9 +5999,10 @@ class TerminalTab(Gtk.Box):
 
     @staticmethod
     def _restorable_kinds() -> set[str]:
-        """The page kinds a saved layout may bring back: this build's, less
-        those whose family this service does not list (D5: a saved tree's
-        shell page would otherwise spawn, and be refused, on every open)."""
+        """The page kinds a saved layout may bring back now: this build's
+        (`_PAGE_KINDS`), less those whose family this service does not list
+        (D5: a saved tree's shell page would otherwise spawn, and be refused,
+        on every open)."""
         kinds = {"composer"}
         for kind, cap in (
             ("shell", protocol.CAP_SHELLS),
@@ -6163,9 +6183,12 @@ class TerminalTab(Gtk.Box):
         """Snapshot the editor's open/width/files for per-session persistence,
         mirroring capture_panel_layout. None when the editor was never used in
         this tab, so a session's saved state survives tabs that never touched
-        it. Forks never persist."""
+        it. Forks never persist. Files a service with no `files` could not
+        open are still the session's: the record stands (`_editor_record`)."""
         if self.fork:
             return None
+        if self._editor_record is not None:
+            return self._editor_record
         if not self.editor_visible and not self._editor_detached and not self._editor.open_paths():
             return None
         self._outer_sizer.remember()
@@ -6190,6 +6213,7 @@ class TerminalTab(Gtk.Box):
         """Re-apply a session's saved editor snapshot, mirroring
         restore_panel_layout. Width lands in this tab's own memory — restoring
         a session must not disturb the app-wide default for new tabs."""
+        self._editor_record = None if apilink.has(protocol.CAP_FILES) else state
         self._outer_sizer.set_remembered("editor", state.get("width"))
         files = state.get("files")
         if isinstance(files, list) and files:

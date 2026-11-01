@@ -1572,12 +1572,12 @@ is hidden rather than greyed out:
 | Without | Gone from the window |
 | --- | --- |
 | `git` | The footer's branch, the git page and its toggle, *Git pull* and *Checkout* |
-| `files` | The file tree, quick open, and the worktree box and *Git pull*, since whether a folder is a checkout is a question about its files. The editor stays, and its banner says the service has no files. A window on another machine has no folder picker either |
+| `files` | The file tree, quick open, project icons, and the worktree box and *Git pull*, since whether a folder is a checkout is a question about its files. The editor stays, and its banner says the service has no files. A window on another machine can't browse the service's folders, so where it would pick one it asks you to type the path |
 | `prs` | Pull request chips, pages and menus, the gh notice |
 | `sandbox` | The *Sandboxed* checkbox and pin, the footer chip, the Preferences group |
 | `tools` | The attachments panel, the session tool switches; a drop or an upload says no in a toast |
 | `jobs` | *Clone repository…*, *Generate Icon*, new scratch chats, *Repair session link* |
-| `usage` | The usage panel, the *Token use* group; the model menus use a built-in list |
+| `usage` | The usage panel, the *Token use* group, *Generate Icon*; the model menus use a built-in list |
 | `background` | *Background Session* and the row's background button |
 | `shells` | The terminal panel, its toggle and Ctrl+J |
 | `composer` | Typing into the composer: keys go to the agent, Send and the model and effort menus type into an empty box only, and a closed draft is kept rather than put back |

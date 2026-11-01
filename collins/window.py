@@ -520,41 +520,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_toggle.set_tooltip_text(_("Toggle sidebar (F9)"))
         content_header.pack_start(self.sidebar_toggle)
 
-        new_menu = Gio.Menu()
-        for provider in available_providers():
-            new_menu.append(
-                _("New {name} session…").format(name=provider.name),
-                f"win.new-session-provider::{provider.id}",
-            )
-        # A one-off launch in the visible project with the *opposite* of its
-        # effective worktree choice. Label and target depend on which tab is
-        # visible, so the item is rebuilt every time the dropdown opens (see
-        # _refresh_alt_new_session_item); this records where it goes.
-        self._new_menu = new_menu
-        self._alt_new_pos = new_menu.get_n_items()
-        self._alt_new_present = False
+        self._new_menu = new_menu = Gio.Menu()
         self._alt_new_asked = 0  # which ask of the service the entry waits on
-        for provider in available_providers():
-            new_menu.append(
-                _("Continue last {name} session…").format(name=provider.name),
-                f"win.continue-session::{provider.id}",
-            )
-        self._sync_new_chat_item()
-        # Native streaming chat runs the agent in this process, on this
-        # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
-        # client that is not on the service's machine, and slated for
-        # removal. Its variants are this device's CLI's.
-        chat_providers = available_providers() if apilink.is_local() else []
-        for provider in chat_providers:
-            for variant in provider.chat_variants():  # native streaming chat
-                if variant.label:
-                    text = _("New {name} native chat ({mode}) (experimental)").format(
-                        name=provider.name, mode=_(variant.label)
-                    )
-                else:
-                    text = _("New {name} native chat (experimental)…").format(name=provider.name)
-                new_menu.append(text, f"win.new-chat-provider::{provider.id}:{variant.key}")
-        new_menu.append(_("New window"), "app.new-window")
+        self._sync_new_menu()
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")
         new_btn.set_tooltip_text(_("New session (Ctrl+Shift+T)"))
         new_btn.set_menu_model(new_menu)
@@ -1114,27 +1082,48 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._quit_requested = False
 
-    def _sync_new_chat_item(self) -> None:
-        """The New menu's scratch chat (the sidebar's Chats project: a session
-        in a throwaway directory, "chat" here ≠ the native streaming chat
-        entries below it), there only on a service with `jobs`: the folder is
-        made by a job (chats.trust). It sits right before the Continue items."""
+    def _sync_new_menu(self) -> None:
+        """Fill the New menu for the service as the last hello lists it: at
+        build, and again on every hello (`apply_families`)."""
         menu = self._new_menu
-        actions = [
-            action.get_string() if action is not None else ""
-            for action in (
-                menu.get_item_attribute_value(index, Gio.MENU_ATTRIBUTE_ACTION, None)
-                for index in range(menu.get_n_items())
+        menu.remove_all()
+        providers = available_providers()
+        for provider in providers:
+            menu.append(
+                _("New {name} session…").format(name=provider.name),
+                f"win.new-session-provider::{provider.id}",
             )
-        ]
-        wanted = apilink.has(protocol.CAP_JOBS)
-        if "win.new-session-in-chats" in actions:
-            if not wanted:
-                menu.remove(actions.index("win.new-session-in-chats"))
-        elif wanted:
-            continues = "win.continue-session" in actions
-            before = actions.index("win.continue-session") if continues else len(actions)
-            menu.insert(before, _("New chat (scratch folder)"), "win.new-session-in-chats")
+        # A one-off launch in the visible project with the *opposite* of its
+        # effective worktree choice. Label and target depend on which tab is
+        # visible, so the item is rebuilt every time the dropdown opens (see
+        # _refresh_alt_new_session_item); this records where it goes.
+        self._alt_new_pos = menu.get_n_items()
+        self._alt_new_present = False
+        # The sidebar's Chats project: a session in a throwaway directory
+        # ("chat" here ≠ the native streaming chat entries below), whose
+        # folder is made by a job (chats.trust).
+        if apilink.has(protocol.CAP_JOBS):
+            menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
+        for provider in providers:
+            menu.append(
+                _("Continue last {name} session…").format(name=provider.name),
+                f"win.continue-session::{provider.id}",
+            )
+        # Native streaming chat runs the agent in this process, on this
+        # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
+        # client that is not on the service's machine, and slated for
+        # removal. Its variants are this device's CLI's.
+        chat_providers = providers if apilink.is_local() else []
+        for provider in chat_providers:
+            for variant in provider.chat_variants():  # native streaming chat
+                if variant.label:
+                    text = _("New {name} native chat ({mode}) (experimental)").format(
+                        name=provider.name, mode=_(variant.label)
+                    )
+                else:
+                    text = _("New {name} native chat (experimental)…").format(name=provider.name)
+                menu.append(text, f"win.new-chat-provider::{provider.id}:{variant.key}")
+        menu.append(_("New window"), "app.new-window")
 
     def apply_families(self) -> None:
         """A hello listed the service's families (the app's `_on_connected`):
@@ -1144,7 +1133,7 @@ class MainWindow(Adw.ApplicationWindow):
         a hello): a page whose family went ends as its pty's or its next
         request's refusal says."""
         self.sync_legacy_banner()
-        self._sync_new_chat_item()
+        self._sync_new_menu()
         self.sidebar.apply_families()
         for index in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(index).get_child()
@@ -1159,16 +1148,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_service_banner()
 
     def _legacy_banner_title(self) -> str:
-        """The banner's words; for a service the button is not the only way
-        to reach (a remote's, or another app id's), the command too."""
-        title = _("This service predates this window. Restart it to use every feature.")
         app = self.get_application()
         label = app.connection_label() if hasattr(app, "connection_label") else ""
-        if label or (app is not None and app.get_application_id() != APP_ID):
-            title += " " + _("Or run {command} where it runs.").format(
-                command="systemctl --user restart collins-service.service"
-            )
-        return title
+        default_id = app is not None and app.get_application_id() == APP_ID
+        return quitrules.legacy_banner_words(remote=bool(label), default_id=default_id)
 
     def set_reconnecting(self, reconnecting: bool, name: str = "", detail: str = "") -> None:
         """Raise or lower the reconnect banner (`App._on_connection_state`).

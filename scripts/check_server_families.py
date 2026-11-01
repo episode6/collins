@@ -160,6 +160,33 @@ while True:
                 '{"device": {"settings": {"restore_last_session": true}},'
                 ' "services": {"%s": {"last_active_session": "%s"}}}' % (SERVICE_ID, SID)
             )
+    elif family in ("legacy", "files"):
+        # Records a family's absence must not shrink (ruling 20): a dock with a
+        # shell page, and an editor with a file open.
+        import json
+
+        layout = {
+            "mode": "bottom",
+            "sizes": {"bottom": 278},
+            "tree": {
+                "split": "v",
+                "size": 278,
+                "managed": True,
+                "a": {"terminal": True},
+                "b": {
+                    "strip": {
+                        "open": True,
+                        "home": True,
+                        "selected": 0,
+                        "pages": [{"kind": "shell", "hist": 0}],
+                    }
+                },
+            },
+        }
+        editor = {"open": False, "width": 400, "files": [f"{PROJECT}/kept.txt"], "active": 0, "cursors": {}}
+        block = {"panel_layout": {SID: layout}, "editor_states": {SID: editor}}
+        with open(f"{E2E}/config/collins/ui-state.json", "w", encoding="utf-8") as fh:
+            json.dump({"services": {SERVICE_ID: block}}, fh)
 
     sys.path.insert(0, REPO)
     import gi
@@ -168,9 +195,10 @@ while True:
     gi.require_version("Adw", "1")
     gi.require_version("Vte", "3.91")
     import e2e_service
-    from gi.repository import Gio, GLib
+    from gi.repository import Gio, GLib, Gtk
 
-    from collins import apilink, blobcache, claudemodels, gitinfo, i18n, modelcatalog, remoteicons, sandboxstatus
+    from collins import apilink, blobcache, checkouts, claudemodels, gitinfo, i18n, modelcatalog
+    from collins import remoteicons, sandboxstatus
     from collins import prefs as prefs_mod
     from collins import remotefiles, trust
     from collins.api import protocol
@@ -345,6 +373,46 @@ while True:
                 tab._editor._banner.get_title(),
             )
             check("a stat is refused here", remotefiles.present(target) is False)
+            check("a project has the generic icon", remoteicons.icon_bytes(PROJECT) is None)
+            answers: list = []
+            checkouts.ask_answer(PROJECT, answers.append)
+            check("a folder is no checkout, so a launch is plain", answers == [False], answers)
+            # A window that is not on the service's machine (D60's way to say
+            # so) has no picker to browse with: a session still needs a folder
+            # to start in, so the asks stay and take a typed path (ruling 26).
+            e2e_service.drop_local(apilink.current())
+            win.apply_families()
+            new_menu, add_menu = actions(win._new_menu), actions(win.sidebar._add_menu)
+            check("not local: New session stays", "win.new-session-provider" in new_menu, new_menu)
+            check("not local: Continue last session stays", "win.continue-session" in new_menu, new_menu)
+            check("not local: Open folder stays", "win.add-project" in add_menu, add_menu)
+            win.lookup_action("new-session-provider").activate(GLib.Variant("s", "claude"))
+            dialog = win.get_visible_dialog()
+            entry = dialog.get_extra_child() if dialog is not None else None
+            check("New session asks for a typed path", isinstance(entry, Gtk.Entry), dialog)
+            check("…prefilled with the service's home", entry is not None and entry.get_text().startswith("/"))
+            if entry is not None:
+                entry.set_text("not/absolute")
+                check("…which can't go while it names no folder", not dialog.get_response_enabled("open"))
+                entry.set_text(PROJECT)
+                before = win.tab_view.get_n_pages()
+                dialog.emit("response", "open")
+                dialog.force_close()
+                check(
+                    "the typed folder opens a session's screen",
+                    wait_until(lambda: win.tab_view.get_n_pages() > before),
+                )
+                pages = [win.tab_view.get_nth_page(i) for i in range(win.tab_view.get_n_pages())]
+                page = next(one for one in pages if getattr(one.get_child(), "is_new_chat", False))
+                typed_tab = page.get_child()
+                check("…in that folder", typed_tab._cwd == PROJECT, typed_tab._cwd)
+                typed_tab._new_chat.emit("send-requested", "a typed folder's prompt", False, False, "", "")
+                check("Send reaches spawn, in that folder", wait_until(lambda: shim_said("a typed folder's prompt"), 20.0))
+                check("…where the service says it landed", typed_tab.session.cwd == PROJECT, typed_tab.session.cwd)
+                win._graceful_close(page)
+                check("…and that tab closes", wait_until(lambda: win.tab_view.get_page(typed_tab) is None, 15.0))
+            apilink.current().local = True
+            win.apply_families()
         elif cap == protocol.CAP_PRS:
             tab.open_pr_page(PullRequest(number=1, url="https://github.com/o/r/pull/1"))
             win.lookup_action("open-pr-page").activate(None)
@@ -373,7 +441,6 @@ while True:
             check("the catalog is empty, not an error", modelcatalog.cache_failed() is False)
             check("the pickers have the static list", bool(claudemodels.FALLBACK_MODELS))
             check("the CLI's defaults answer nothing", modelcatalog.cli_default_model(PROJECT) is None)
-            check("a project has the generic icon", remoteicons.icon_bytes(PROJECT) is None)
         elif cap == protocol.CAP_BACKGROUND:
             page = win.tab_view.get_page(tab)
             check("the window's gate refuses a /bg", bool(win._background_blocker(page)))
@@ -507,8 +574,8 @@ while True:
             check("the banner is up", wait_until(banner.get_revealed), banner.get_title())
             check("…and says so", "predates this window" in (banner.get_title() or ""), banner.get_title())
             check(
-                "…naming the command for another app id",
-                "systemctl --user restart collins-service.service" in (banner.get_title() or ""),
+                "…naming no command for another app id, whose service no unit runs",
+                "systemctl" not in (banner.get_title() or ""),
                 banner.get_title(),
             )
             check("…with its button", banner.get_button_label() == "Restart service", banner.get_button_label())
@@ -524,6 +591,9 @@ while True:
         tab.connect("toast", lambda _tab, text: toasts.append(text))
         check("a tab opens", wait_until(lambda: tab.pty_id is not None), tab.pty_id)
         check("the agent comes up at its box", wait_until(lambda: tab.takes_prompt(), 20.0))
+        # Read off the process table on a poll, so it can come a beat after the
+        # box does; the composer's open asks for it.
+        check("…and it reads as running", wait_until(tab._agent_is_running, 8.0))
         # A cwd tick has passed for the runs it is about: `cwd.settle` and
         # `git.info` go out on the tab's map and on each 2 s tick.
         e2e_service.settle(2300 if family in ("git", "internal", "all", "none") else 300)
@@ -599,6 +669,17 @@ while True:
         calls = calls[: road[0]] + calls[road[1] :]
         refused = sorted({call["args"][0] for call in calls if call["stub"] == "refused"})
         check("the service was asked nothing of what it does not list", not refused, refused)
+        if family in ("legacy", "files"):
+            import json
+
+            with open(f"{E2E}/config/collins/ui-state.json", encoding="utf-8") as fh:
+                saved = json.load(fh).get("services", {}).get(SERVICE_ID, {})
+            if family == "legacy":
+                entry = saved.get("panel_layout", {}).get(SID) or {}
+                check("the saved layout kept its shell", "shell" in json.dumps(entry.get("tree")), entry)
+            else:
+                entry = saved.get("editor_states", {}).get(SID) or {}
+                check("the saved editor state kept its file", entry.get("files") == [f"{PROJECT}/kept.txt"], entry)
 
     GLib.timeout_add(250, go)
     GLib.timeout_add_seconds(RUN_DEADLINE_S - 10, lambda: (print("timed out"), e2e_service._stop_all(), os._exit(3)))

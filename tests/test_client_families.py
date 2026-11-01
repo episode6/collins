@@ -281,6 +281,118 @@ def test_the_shapes_of_an_ask(body: str, behind: bool) -> None:
     assert pathless.behind_an_ask(function, literal, asks_for(protocol.CAP_PRS)) is behind
 
 
+# ---- what is read as a widget is built (ruling 20) --------------------------------
+#
+# A hello can arrive after the widget: every `apilink.has` evaluated at
+# construction has to be evaluated again by `apply_families`. So it lives in a
+# named `_sync_*` the constructor and `apply_families` both call.
+
+# The constructors whose asks need no `_sync_*`, each with why.
+BUILT_AGAIN = {
+    "sidebar:GroupHeaderRow.__init__": "rebuilt by SessionSidebar.apply_families",
+    "sidebar:SessionRow.__init__": "rebuilt by SessionSidebar.apply_families",
+    "prefs:PreferencesDialog.__init__": "built as it opens",
+    "prefs:PreferencesDialog._build_general_group": "built as it opens",
+    "prefs:PreferencesDialog._build_sessions_group": "built as it opens",
+    "prefs:PreferencesDialog._build_composer_group": "built as it opens",
+    "welcome:WelcomeDialog.__init__": "built as it opens",
+}
+
+_ASKS = frozenset({"apilink.has", "apilink.predates_families", "apilink.serves_restart"})
+
+
+def _own_nodes(function: ast.AST):
+    """What *function* runs itself: not a nested function's or a lambda's body,
+    which run later and ask then."""
+    stack = list(ast.iter_child_nodes(function))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def _asks_in(function: ast.AST) -> bool:
+    return any(isinstance(node, ast.Call) and _dotted(node.func) in _ASKS for node in _own_nodes(function))
+
+
+def _self_calls(function: ast.AST) -> set[str]:
+    called = set()
+    for node in _own_nodes(function):
+        if isinstance(node, ast.Call):
+            name = _dotted(node.func) or ""
+            if name.startswith("self.") and name.count(".") == 1:
+                called.add(name[len("self.") :])
+    return called
+
+
+def _classes() -> list[tuple[str, ast.ClassDef, dict[str, ast.FunctionDef]]]:
+    found = []
+    for module, tree in client_modules().items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                methods = {m.name: m for m in node.body if isinstance(m, ast.FunctionDef)}
+                found.append((module, node, methods))
+    return found
+
+
+def _is_constructor(name: str) -> bool:
+    return name == "__init__" or name.startswith("_build")
+
+
+def test_no_constructor_asks_in_its_own_body() -> None:
+    bad = [
+        f"{module}:{cls.name}.{name}"
+        for module, cls, methods in _classes()
+        for name, method in methods.items()
+        if _is_constructor(name) and _asks_in(method) and f"{module}:{cls.name}.{name}" not in BUILT_AGAIN
+    ]
+    assert not bad, (
+        "these read `apilink.has` as a widget is built, and a hello can arrive after it (ruling 20). "
+        "Move it to a `_sync_*` the class's `apply_families` calls too, or say why in BUILT_AGAIN:\n  "
+        + "\n  ".join(sorted(bad))
+    )
+
+
+def test_every_exception_to_the_constructors_still_asks() -> None:
+    asking = {
+        f"{module}:{cls.name}.{name}"
+        for module, cls, methods in _classes()
+        for name, method in methods.items()
+        if _is_constructor(name) and _asks_in(method)
+    }
+    assert not set(BUILT_AGAIN) - asking, sorted(set(BUILT_AGAIN) - asking)
+
+
+def test_every_sync_that_asks_is_reached_from_apply_families() -> None:
+    bad = []
+    for module, cls, methods in _classes():
+        syncs = {n for n, m in methods.items() if n.startswith("_sync_") and _asks_in(m)}
+        if not syncs:
+            continue
+        reached: set[str] = set()
+        todo = ["apply_families"] if "apply_families" in methods else []
+        while todo:
+            name = todo.pop()
+            if name in reached or name not in methods:
+                continue
+            reached.add(name)
+            todo.extend(_self_calls(methods[name]))
+        bad.extend(f"{module}:{cls.name}.{name}" for name in syncs - reached)
+    assert not bad, f"not called from their class's apply_families: {sorted(bad)}"
+
+
+def test_a_widget_built_from_one_hello_follows_the_next_down_the_tree() -> None:
+    """`MainWindow.apply_families` reaches each class that keeps a `_sync_*`."""
+    classes = {cls.name: methods for _module, cls, methods in _classes()}
+    source = ast.dump(classes["MainWindow"]["apply_families"])
+    assert "sidebar" in source and "apply_families" in source
+    tab_method = classes["TerminalTab"]["apply_families"]
+    tab = {node.attr for node in ast.walk(tab_method) if isinstance(node, ast.Attribute)}
+    assert {"_sync_family_surfaces", "_sync_attachments_handle", "_sync_follow_judge", "_dock"} <= tab
+    assert "_sync_add_btn" in _self_calls(classes["PanelStrip"]["apply_families"])
+
+
 # ---- the transports, with the family gone ----------------------------------------
 
 
@@ -469,6 +581,28 @@ def test_a_job_is_refused_with_no_round_trip(bare_link) -> None:
     assert jobclient.jobs_for(bare_link).start("login.repair", {}, events.append) is None
     assert [event.state for event in events] == [protocol.JOB_REFUSED]
     jobclient.jobs_for(bare_link).cancel("nope")
+    assert bare_link.asked == []
+
+
+def test_a_project_s_icon_is_the_files_family(bare_link) -> None:
+    """Ruling 21: a file at the project's root, which costs no token."""
+    from collins import blobcache, remoteicons
+
+    assert blobcache.family_of(blobcache.icon_url("/x")) == protocol.CAP_FILES
+    assert remoteicons.icon_bytes("/x") is None
+    bare_link.families = frozenset({protocol.CAP_USAGE})
+    assert remoteicons.icon_bytes("/x") is None  # `usage` alone does not serve it
+    assert bare_link.asked == []
+
+
+def test_with_no_files_a_folder_is_no_checkout(bare_link) -> None:
+    """Ruling 20: no box was shown and nothing promised, so the launch is plain;
+    None would refuse a Send with a worktree wish for ever."""
+    from collins import checkouts
+
+    answers: list = []
+    checkouts.ask_answer("/x", answers.append)
+    assert answers == [False]
     assert bare_link.asked == []
 
 

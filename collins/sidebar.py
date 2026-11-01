@@ -1393,9 +1393,7 @@ class SessionSidebar(Gtk.Box):
         # What the rows read as they were built (apply_families).
         self._families_built = getattr(apilink.current(), "families", None)
         self.usage_panel = UsagePanel(store.state)
-        self.usage_panel.set_visible(
-            bool(store.state.get_setting("show_usage_panel")) and apilink.has(protocol.CAP_USAGE)
-        )
+        self._sync_usage_panel()
         inner.append(self.usage_panel)
         # Where the window's "session archived" snackbar floats: over the
         # panel's own bottom edge — usage panel included — rather than the
@@ -1611,14 +1609,12 @@ class SessionSidebar(Gtk.Box):
         # Packed at the end first, so the additive action sits furthest right,
         # past the refresh button. Two ways in: a folder already on disk, or
         # a repository cloned first (clonedialog.py).
-        add_menu = Gio.Menu()
-        add_menu.append(_("Open folder…"), "win.add-project")
-        self._add_menu = add_menu
-        self._sync_add_menu()
+        self._add_menu = Gio.Menu()
         self._add_project_btn = Gtk.MenuButton(
-            icon_name="folder-new-symbolic", menu_model=add_menu
+            icon_name="folder-new-symbolic", menu_model=self._add_menu
         )
         self._add_project_btn.set_tooltip_text(_("Add project"))
+        self._sync_add_menu()
         header.pack_end(self._add_project_btn)
 
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
@@ -1726,8 +1722,11 @@ class SessionSidebar(Gtk.Box):
 
     def refresh_usage_panel(self) -> None:
         """Re-read the 'show usage panel' setting. Hiding unmaps the panel,
-        which stops its poll timer on the next tick. No panel at all on a
-        service with no `usage` (D5)."""
+        which stops its poll timer on the next tick."""
+        self._sync_usage_panel()
+
+    def _sync_usage_panel(self) -> None:
+        """No panel at all on a service with no `usage` (D5)."""
         self.usage_panel.set_visible(
             bool(self.store.state.get_setting("show_usage_panel")) and apilink.has(protocol.CAP_USAGE)
         )
@@ -1739,7 +1738,7 @@ class SessionSidebar(Gtk.Box):
         Chats header are read as the rows are built, and a refresh rebuilds
         them only when the order changed, which a restart under the same rows
         does not. Every other menu here is built as it opens, and asks then."""
-        self.refresh_usage_panel()
+        self._sync_usage_panel()
         self._sync_add_menu()
         self._sync_restart_item()
         self._refresh_package_repo_item()
@@ -1749,19 +1748,13 @@ class SessionSidebar(Gtk.Box):
             self._rebuild_rows()
 
     def _sync_add_menu(self) -> None:
-        """*Clone repository…* is a job (the list and the clone), so it is
-        there only on a service with `jobs` (D5)."""
-        present = None
+        """The ways to add a project, as the last hello lists the service
+        (D5): *Clone repository…* is a job (the list and the clone)."""
         menu = self._add_menu
-        for index in range(menu.get_n_items()):
-            action = menu.get_item_attribute_value(index, Gio.MENU_ATTRIBUTE_ACTION, None)
-            if action is not None and action.get_string() == "win.clone-project":
-                present = index
-        wanted = apilink.has(protocol.CAP_JOBS)
-        if wanted and present is None:
+        menu.remove_all()
+        menu.append(_("Open folder…"), "win.add-project")
+        if apilink.has(protocol.CAP_JOBS):
             menu.append(_("Clone repository…"), "win.clone-project")
-        elif present is not None and not wanted:
-            menu.remove(present)
 
     def _sync_restart_item(self) -> None:
         """*Restart service* is `service.restart`, which only a service that

@@ -118,6 +118,13 @@ question "does this header stand for a folder with nothing in it";
 
 ## The store and the state over the API (`remotestore.py`, `remotestate.py`)
 
+**`store.lookup` and `store.page-archived` answer with the `item` records**
+(`sessions`; server-side spec ruling 25), which `RemoteStore._take_records`
+validates and applies before the call returns, so `get_session` and `sessions`
+hold them with no drain: the reply comes on the sync channel, the `item` events
+land later on the primary and merge the same fields. A call can come from inside a
+landing, so nothing here may run other landings.
+
 **A row with no transcript.** `RemoteStore._session_from` builds a `Session` for
 an `item` with no `path` (`Path()`, so `Session.has_transcript` is False; every
 scanned session has one): the row shows, and the row menu leaves out Details,

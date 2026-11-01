@@ -28,9 +28,9 @@ service sent them. The one request `call` sends on the primary is
 `subscribe`: its snapshot arrives as events ahead of its reply on the same
 connection, and the main thread drains the queue while it waits, so the
 mirrors are filled when `subscribe` returns
-(the connection manager asks for it at startup and on every reconnect). The
-store's `store.lookup` and `store.page-archived` do the same from the main
-thread, for the same reason (`DRAINED`); no other main-thread call drains.
+(the connection manager asks for it at startup and on every reconnect, and
+nowhere else does a main-thread call drain: a call can come from inside a
+landing, and a drain there would run other landings inside it).
 
 **Flow control** (§3.2): every live output frame fed is counted per pty,
 and an `ack {pty, offset}` goes back every `ACK_BYTES` or `ACK_MS` after
@@ -100,13 +100,6 @@ class ProtocolMismatch(ConnectionLost):
         self.service = service
         self.client = client
         self.caps = None if caps is None else frozenset(str(cap) for cap in caps)
-
-
-# What a main-thread `call` sends on the primary and drains the landing queue
-# for: the events a reply depends on arrive ahead of it on that connection, so
-# the mirrors are filled when the call returns (spec D6 for the store's two:
-# `RemoteStore.get_session` reads `known_sessions` right after).
-DRAINED = frozenset({"subscribe", "store.lookup", "store.page-archived"})
 
 
 def _named_caps(details: dict) -> list | tuple | None:
@@ -553,7 +546,7 @@ class SocketLink(apilink.Link):
         if not self.connected:
             raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
         wait = CALL_TIMEOUT_S if timeout is None else max(0.1, float(timeout))
-        if message.get("t") in DRAINED and threading.current_thread() is threading.main_thread():
+        if message.get("t") == "subscribe" and threading.current_thread() is threading.main_thread():
             return self._primary_blocking(message, wait)
         return self._blocking(self._sync, message, wait)
 

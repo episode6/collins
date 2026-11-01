@@ -62,6 +62,21 @@ def well_formed(text: str) -> bool:
     return text.startswith("/") or text == "~" or text.startswith("~/")
 
 
+def typed_folder(text: str, home: str | None) -> str | None:
+    """A path typed where no picker can list (a service with no `files`, D5,
+    ruling 26) as the folder to hand the service: absolute, or led by `~`
+    with a home to expand it, normalised and never resolved. None for what
+    can't name one here. Whether it is a folder is the service's to judge."""
+    text = text.strip()
+    if text == "~" or text.startswith("~/"):
+        if not home:
+            return None
+        text = home + text[1:]
+    if not text.startswith("/") or any(ord(ch) < 0x20 or ch == "\x7f" for ch in text):
+        return None
+    return posixpath.normpath(text)
+
+
 def split(text: str) -> tuple[str, str] | None:
     """The folder the entry's *text* is in and the name typed so far:
     ``/a/b/c`` is ``("/a/b", "c")``, ``/a/b/`` names the folder itself

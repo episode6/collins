@@ -671,12 +671,12 @@ connected, empty sidebar with no dialog. Without a family:
 | Family | What the window does without it |
 | --- | --- |
 | `git` | No branch, git toggle, git page or git menu items. |
-| `files` | The editor opens nothing, and its banner says the service has no files. The file tree and quick open stay empty. A client that is not local has no folder picker, and whether a folder is a checkout can't be asked, so the worktree box and *Git pull* go too. |
+| `files` | The editor opens nothing, and its banner says the service has no files. The file tree and quick open stay empty, and projects show the generic icon. A client that is not local gets one box to type a folder's path in, not the picker, and you judge the path it hands you. Whether a folder is a checkout can't be asked, so the worktree box and *Git pull* go too and a launch is plain. |
 | `prs` | No pull request chips, pages or menus, and no gh notice. |
 | `sandbox` | No Sandboxed checkbox, pin, chip or Preferences group. |
 | `tools` | No attachments gallery or session-tool settings. A drop is refused with a toast. |
 | `jobs` | No clone, generated icon, new scratch chat or link repair, and no login repair at launch. |
-| `usage` | No usage panel. The model menus fall back to a built-in list, and projects show the generic icon. |
+| `usage` | No usage panel and no icon generation. The model menus fall back to a built-in list. |
 | `background` | No background item or button: closing a tab exits the agent. |
 | `shells` | No terminal panel, and Ctrl+J does nothing. |
 | `composer` | Typing goes to the agent. The composer sends through `prompt`, into an empty box only, as the model and effort menus do with `/model` and `/effort`. A closed draft is kept and never typed back. |

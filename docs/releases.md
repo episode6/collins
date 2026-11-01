@@ -62,7 +62,9 @@ downloads of each version, see the
   connect, hides what a service doesn't list, and sends that family nothing: a
   server with no pull requests has no PR chips, one with no panel shells has no
   terminal panel, and one with nothing beyond the wire shows a connected, empty
-  sidebar. [Implementing a server](/api/#implementing-a-server) lists what goes
+  sidebar. What a service can't show stays saved: a panel layout or an editor
+  state it could not restore is there again on a service that can.
+  [Implementing a server](/api/#implementing-a-server) lists what goes
   with each family, and *Preferences → Service* says which server it is. **A
   service still running from before this version lists none of the names**, and
   a package upgrade restarts nothing, so the first window after upgrading hides

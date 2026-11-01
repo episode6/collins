@@ -17,6 +17,26 @@ from collins import pathpickermodel as model
 from collins.api.protocol import RequestRefused
 from collins.pathpickermodel import Folder
 
+
+@pytest.mark.parametrize(
+    ("typed", "home", "folder"),
+    [
+        ("/srv/a", "/home/u", "/srv/a"),
+        ("  /srv/a/  ", None, "/srv/a"),  # as typed, tidied
+        ("/srv/a/../b", None, "/srv/b"),  # normalised, never resolved
+        ("~", "/home/u", "/home/u"),
+        ("~/work", "/home/u", "/home/u/work"),
+        ("~/work", None, None),  # nothing here can expand it
+        ("~other/work", "/home/u", None),
+        ("relative/path", "/home/u", None),
+        ("", "/home/u", None),
+        ("/srv/a\nb", None, None),
+    ],
+)
+def test_a_typed_folder(typed, home, folder):
+    """Where no picker can list (a service with no `files`, ruling 26)."""
+    assert model.typed_folder(typed, home) == folder
+
 HOME = "/home/svc"
 
 

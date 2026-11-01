@@ -32,6 +32,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
 from . import apilink, pathpicker  # noqa: E402
+from .api import protocol  # noqa: E402
 
 
 def choose_folder(
@@ -43,7 +44,11 @@ def choose_folder(
     """Pick a folder of the service's machine, starting at *initial* (one
     of its folders, or None); *on_done(path)* with the pick. *parent* is a
     widget in the window the chooser belongs to (the window itself, a
-    dialog, a popover's button)."""
+    dialog, a popover's button). A `local` client has the desktop's chooser
+    and any other the path picker, which needs `files`; with neither, one
+    box for a path on the service's machine, which sends no `fs.*` (spec D5,
+    ruling 26: a session still needs a folder to start in), and the service
+    judges what it is handed (D39)."""
     if apilink.is_local():
         dialog = Gtk.FileDialog(title=title, modal=True)
         # A `local` client's folders are this device's: only then is the
@@ -64,4 +69,7 @@ def choose_folder(
 
         dialog.select_folder(window, None, picked)
         return
-    pathpicker.pick_folder(parent, initial, on_done, title=title)
+    if apilink.has(protocol.CAP_FILES):
+        pathpicker.pick_folder(parent, initial, on_done, title=title)
+        return
+    pathpicker.type_folder(parent, initial, on_done, title=title)

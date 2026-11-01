@@ -288,8 +288,9 @@ session starts, *Add project*, *Continue last session*, a new chat, the
 clone destination (in the dialog and in Preferences), a directory allowed
 into a sandboxed session — opens Collins' own **path picker** when the
 service is elsewhere, since your desktop's chooser can only show your own
-disk. It lists the box's folders, the whole filesystem as a native dialog
-would:
+disk. (A server that serves no `files` can't list its folders, so it asks you
+to type the path instead, and the server judges what you typed.) It lists the
+box's folders, the whole filesystem as a native dialog would:
 
 - **The path entry** takes a path on the box; `~` is the box's home.
   Typing filters the folder's subfolders (after a 300 ms pause), and

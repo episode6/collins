@@ -448,6 +448,51 @@ class PathPicker(Adw.Dialog):
         self._cancel_debounce()
 
 
+def type_folder(
+    parent: Gtk.Widget | None,
+    initial: str | None,
+    on_done: Callable[[str], None],
+    title: str | None = None,
+) -> Adw.AlertDialog:
+    """One box for a path on the service's machine, where no picker can list
+    its folders (`choosers.choose_folder`: a client that is not `local`, on a
+    service with no `files`). It sends nothing: *on_done(path)* hands the
+    typed path on, and the service judges it (`spawn` falls back and says where
+    it landed, `store.add-project` refuses, D39). Starts at *initial*, else
+    the service's home when it said (`service.status`)."""
+    home = apilink.service_home()
+    dialog = Adw.AlertDialog(
+        heading=title or _("Choose a folder"),
+        body=_("This service can't list its folders. Type the path of one on its machine."),
+    )
+    entry = Gtk.Entry(text=initial or home or "", placeholder_text="/path/to/folder")
+    entry.set_activates_default(True)
+    dialog.set_extra_child(entry)
+    dialog.set_focus(entry)
+    dialog.add_response("cancel", _("Cancel"))
+    dialog.add_response("open", _("Open"))
+    dialog.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("open")
+    dialog.set_close_response("cancel")
+
+    def typed() -> str | None:
+        return model.typed_folder(entry.get_text(), home)
+
+    def changed(*_args) -> None:
+        dialog.set_response_enabled("open", typed() is not None)
+
+    def responded(_dialog, response: str) -> None:
+        path = typed()
+        if response == "open" and path is not None:
+            on_done(path)
+
+    entry.connect("changed", changed)
+    dialog.connect("response", responded)
+    changed()
+    dialog.present(parent)
+    return dialog
+
+
 def pick_folder(
     parent: Gtk.Widget | None,
     initial: str | None,

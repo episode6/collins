@@ -165,6 +165,14 @@ stays in the stash; `mention` builds the reference here and goes through
 `write`; typing does not open the composer; `Preferences`' switch for it is
 gone.
 
+**With no `files` family** (ruling 20) `checkouts.ask_answer` answers False: no
+box is shown, nothing was promised, and the launch is plain, where None would
+refuse every Send with a worktree wish. A client that is not `local` has no picker
+either, so `choosers.choose_folder` opens one box for a path on the service's
+machine (`pathpicker.type_folder`, prefilled with `service.status`'s `home`, ruling
+26): it sends no `fs.*`, every site stays where it is, and the service judges the
+path (`spawn` falls back and says where it landed, `store.add-project` refuses).
+
 ## The new-chat screen (`newchat.py`, `newchatview.py`)
 
 Beside the worktree box sits a **Sandboxed** one on the same terms

@@ -221,9 +221,11 @@ is the client's `SocketLink` (an `apilink.Link`): a daemon thread with its
 own `GLib.MainContext` drives both sockets, `call` blocks the calling thread
 on the sync channel (**never call from the I/O thread**), `send` and every
 event ride the primary and land on the main loop through one ordered queue
-at `PRIORITY_DEFAULT`; `subscribe`, `store.lookup` and `store.page-archived`
-go on the primary from the main thread, which drains the queue until they
-return so the mirrors are filled (`DRAINED`). A
+at `PRIORITY_DEFAULT`; `subscribe` is the one call on the primary, the main
+thread draining the queue until it returns so the mirrors are filled (and
+`store.lookup` and `store.page-archived` answer with the `item` records, which
+the mirror takes off the reply, so neither drains: a drain inside a landing
+would run other landings inside it). A
 `PtyClient` per tab or panel shell routes the output frames. The `local`
 capability is proven, not inferred: the client computes `proof_path(app_id)`
 itself (never the path a hello names), opens it `O_NOFOLLOW`, requires a
@@ -446,9 +448,12 @@ banner offers *Restart service* (`apilink.serves_restart`). Each
 transport answers what a refusal would with no round trip (`remotegit`,
 `remotefiles`, both installed on every hello; `remoteprs`, `jobclient`,
 `modelcatalog`, `blobcache.fetch` by the blob's kind, `remoteuploads`), so a
-caller keeps its one path. What a window built from a hello is re-read on the
-next (`MainWindow.apply_families`, no dock surgery); everything else asks as it
-shows. Without `composer` the composer sends through `prompt` into an empty
+caller keeps its one path. Every `has` read as a widget is built is in a named
+`_sync_*` that its class's `apply_families` calls too (`MainWindow.apply_families`
+down, no dock surgery; a test walks for it); everything else asks as it shows.
+And a family-less hello never shrinks a record the window persists: a layout
+pruned for a missing family is a view, whose record stands
+(`TerminalTab._layout_record`). Without `composer` the composer sends through `prompt` into an empty
 box, and the menus type `/model` and `/effort` the same way; without `internal`
 the editor follows `agent_cwd` itself and a close has the window's budget.
 `tests/test_client_families.py` walks the client modules and holds every
@@ -498,7 +503,9 @@ client (its starting folder behind the ask, one `LOCAL_EXTRAS` site) and
 `pathpicker.PathPicker` otherwise, which browses the service's whole
 filesystem over the picker's own unconfined `fs.dirs` / `fs.newdir`
 (D60; the editor's `fs.list` / `fs.mkdir` stay confined and the picker
-never sends them; the model is the GTK-free `pathpickermodel`). *Attach
+never sends them; the model is the GTK-free `pathpickermodel`), or, on a
+service with no `files`, one box for a typed path (`pathpicker.type_folder`,
+ruling 26: no `fs.*`, and the service judges what it is handed). *Attach
 file* stays this device's chooser and, not local, uploads the pick as a
 drop does (D56). A check makes the service treat its GTK client as not
 local with `debug.local` (`e2e_service.drop_local`, D60).

@@ -124,7 +124,7 @@ def _drop_caps(dropped: frozenset, legacy: bool = False) -> None:
         "pr": protocol.CAP_PRS,
         "file": protocol.CAP_TOOLS,
         "remote": protocol.CAP_TOOLS,
-        "icon": protocol.CAP_USAGE,
+        "icon": protocol.CAP_FILES,
     }
 
     def family_of(message) -> str:

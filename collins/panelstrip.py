@@ -154,7 +154,7 @@ class PanelStrip(Gtk.Box):
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
         self._add_btn = add_btn
-        self.apply_families()
+        self._sync_add_btn()
         max_btn = Gtk.Button(icon_name="view-fullscreen-symbolic")
         max_btn.add_css_class("flat")
         max_btn.set_tooltip_text(_("Overlay this tab over the whole session"))
@@ -273,8 +273,12 @@ class PanelStrip(Gtk.Box):
         shell.open_shell(self._cwd())
 
     def apply_families(self) -> None:
+        """A hello listed the service's families (`PanelDock.apply_families`)."""
+        self._sync_add_btn()
+
+    def _sync_add_btn(self) -> None:
         """The strip's *New terminal tab*, hidden on a service with no shells
-        (D5), as the last hello said: at build, and again on every hello."""
+        (D5), as the last hello said."""
         self._add_btn.set_visible(apilink.has(protocol.CAP_SHELLS))
 
     def set_sandboxed_shell_offer(self, offer) -> None:

@@ -51,10 +51,11 @@ def link(service):
     link.shutdown()
 
 
-def test_the_store_s_lookups_drain_the_primary_on_the_main_thread_alone(monkeypatch):
-    """Spec D6: `RemoteStore.get_session` reads `known_sessions` right after
-    the reply, and the `item` events land ahead of it on the primary. Off the
-    main thread the sync channel answers, as any call."""
+def test_only_the_subscribe_drains_and_only_on_the_main_thread(monkeypatch):
+    """A call can come from inside a landing, and a drain there would run other
+    landings inside it: the store's lookups answer with their records instead
+    (spec D6, ruling 25). Off the main thread even a subscribe takes the sync
+    channel."""
     import threading
 
     link = SocketLink("")
@@ -71,20 +72,19 @@ def test_the_store_s_lookups_drain_the_primary_on_the_main_thread_alone(monkeypa
 
     monkeypatch.setattr(link, "_primary_blocking", on_primary)
     monkeypatch.setattr(link, "_blocking", on_sync)
-    for kind in ("store.lookup", "store.page-archived", "subscribe"):
+    for kind in ("store.lookup", "store.page-archived", "subscribe", "service.status"):
         link._request({"t": kind})
-    link._request({"t": "service.status"})
     assert asked == [
-        ("primary", "store.lookup"),
-        ("primary", "store.page-archived"),
+        ("sync", "store.lookup"),
+        ("sync", "store.page-archived"),
         ("primary", "subscribe"),
         ("sync", "service.status"),
     ]
     asked.clear()
-    worker = threading.Thread(target=lambda: link._request({"t": "store.lookup"}))
+    worker = threading.Thread(target=lambda: link._request({"t": "subscribe"}))
     worker.start()
     worker.join()
-    assert asked == [("sync", "store.lookup")]
+    assert asked == [("sync", "subscribe")]
 
 
 def test_a_mismatch_carries_what_the_server_listed():
