@@ -17,23 +17,44 @@ collects what VTE commits, and compares it with what
 - a client's colours (dark and light, a cursor colour) mirrored into the
   responder's state;
 - the cursor report in origin mode and at a pending wrap;
-- a round of queries closed by DA1, answered in the order asked (F11).
+- a round of queries closed by DA1, answered in the order asked (F11);
+- every row of the published terminal contract's three tables
+  (`docs/api/terminal.md`, the server-side API spec's PR-S3; `--table PATH`
+  names another copy), read through `scripts/termcontract.py`: an answered
+  row gets exactly one reply from VTE matching the row's pattern and the
+  same reply from the responder with the query stripped, each query
+  placeholder tried with a few sample values and every OSC query with both
+  terminators; a silent row gets nothing from either; a pass-through row
+  is forwarded untouched and unanswered by the responder; and every query
+  of this script's own table is a row of the page (two exceptions below,
+  stated in the page's prose). So the page cannot drift from VTE or from
+  the responder: the decision of PR-S3 was to parse the page rather than
+  generate it from a data file, since its notation is a few tokens.
 
 A query VTE answers is collected up to a sentinel: ``CSI 5 n`` is fed last
 and its ``CSI 0 n`` is the last answer committed (F3), so no timing is
 involved. Nothing Collins-shaped runs: no App, no session, no state.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
-        python3 scripts/check_termstream_answers.py
+        python3 scripts/check_termstream_answers.py [--table docs/api/terminal.md]
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
+import itertools
 import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+
+import termcontract  # noqa: E402
+
+TABLE_PATH = os.path.join(ROOT, "docs", "api", "terminal.md")
+if "--table" in sys.argv:
+    TABLE_PATH = sys.argv[sys.argv.index("--table") + 1]
 
 import gi  # noqa: E402
 
@@ -288,6 +309,87 @@ expected = vte_answers(RIS + ROUND)
 got = StreamFilter(state_for_vte()).feed(RIS + ROUND).replies
 check("a round closed by DA1, in order", got == expected, f"{got!r} != VTE {expected!r}")
 check("…and DA1's answer is the round's last", got[-1:] == [b"\x1b[?61;1;21;22;28c"], repr(got))
+
+# -- the published terminal contract's tables, row by row
+# A query placeholder is tried with each of these; the reply's copy of it
+# must be the same value. The rest of a reply's placeholders match their
+# class (termcontract.CLASSES).
+QUERY_SAMPLES = {
+    "n": ("2004", "2026", "1016", "9999", "25", "4", "20", "2"),
+    "i": ("0", "1", "244", "255"),
+}
+# Queries of TABLE the page states in prose rather than as a row.
+NOT_A_ROW = {
+    "OSC 4 two",  # several `<i> ; ?` pairs in one query: "one reply each", in the OSC 4 row's notes
+    "XTGETTCAP TN upper",  # the hex's case echoed: in the XTGETTCAP row's notes
+}
+
+
+def with_bel(parts):
+    """*parts* with a final ST replaced by BEL, for an OSC query's other
+    terminator; None when the spelling does not end in ST."""
+    if not parts or not isinstance(parts[-1], bytes) or not parts[-1].endswith(ST):
+        return None
+    return [*parts[:-1], parts[-1][: -len(ST)] + BEL]
+
+
+def assignments(parts):
+    names = sorted(set(termcontract.placeholders(parts)))
+    for name in names:
+        if name not in QUERY_SAMPLES:
+            raise termcontract.NotationError(f"no samples for a query's <{name}>")
+    for values in itertools.product(*(QUERY_SAMPLES[name] for name in names)):
+        yield dict(zip(names, values, strict=True))
+
+
+def spelled(data: bytes) -> str:
+    return repr(data)
+
+
+with open(TABLE_PATH, encoding="utf-8") as handle:
+    page_tables = termcontract.tables(handle.read())
+page_queries: set[bytes] = set()
+term = fresh_terminal()
+for row in page_tables[termcontract.ANSWERED]:
+    for values in assignments(row.query):
+        variants = [(row.query, row.reply)]
+        if row.query[0].startswith(termcontract.NAMED["OSC"]) and with_bel(row.query):
+            variants.append((with_bel(row.query), with_bel(row.reply)))
+        for query_parts, reply_parts in variants:
+            query = termcontract.render(query_parts, values)
+            page_queries.add(query)
+            wanted = termcontract.pattern(reply_parts, values)
+            name = f"page: {' '.join(row.cells[0].split())} {values if values else ''}".rstrip()
+            expected = vte_answers(RIS + query)
+            check(
+                f"{name}: VTE answers as the page says",
+                len(expected) == 1 and wanted.fullmatch(expected[0]) is not None,
+                f"VTE {expected!r} vs {wanted.pattern!r}",
+            )
+            out = StreamFilter(state_for_vte()).feed(RIS + query)
+            detail = f"{out.replies!r} != {expected!r}"
+            check(f"{name}: the responder answers as VTE", out.replies == expected, detail)
+            check(f"{name}: stripped", out.forward == RIS, repr(out.forward))
+for row in page_tables[termcontract.SILENT]:
+    query = termcontract.render(row.query, {})
+    page_queries.add(query)
+    name = f"page, silent: {' '.join(row.cells[0].split())}"
+    expected = vte_answers(RIS + query)
+    check(f"{name}: VTE answers nothing", expected == [], repr(expected))
+    out = StreamFilter(state_for_vte()).feed(RIS + query)
+    silent = (out.replies, out.forward) == ([], RIS)
+    check(f"{name}: the responder answers nothing and strips", silent, repr(out))
+for row in page_tables[termcontract.PASSED]:
+    query = termcontract.render(row.query, {})
+    name = f"page, passed through: {' '.join(row.cells[0].split())}"
+    out = StreamFilter(state_for_vte()).feed(RIS + query)
+    passed = (out.replies, out.forward) == ([], RIS + query)
+    check(f"{name}: forwarded untouched, unanswered", passed, repr(out))
+    check(f"{name}: not a row the page answers", query not in page_queries)
+for name, query in TABLE:
+    if name in NOT_A_ROW:
+        continue
+    check(f"page covers {name}", query in page_queries, f"{query!r} is no row of {TABLE_PATH}")
 
 print(f"{len(failures)} failure(s)" if failures else "all ok", flush=True)
 os._exit(1 if failures else 0)

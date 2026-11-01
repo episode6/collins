@@ -99,7 +99,9 @@ any code shaped like one, since a newer peer may add codes behind a cap:
 - ``direction``: a known type from the peer that may not send it.
 - ``protocol``: hello's protocol window does not meet this peer's.
 - ``sequence``: a request this connection may not make yet (anything
-  before hello, a write to a pty before attach).
+  before hello, a second hello, a sync channel before its primary). An
+  input frame for a pty the client has not attached is not one: it is
+  written to the pty all the same (docs/api/terminal.md, D11).
 - ``gone``: what the request names does not exist (any more): a pty, a
   session, a tool call.
 - ``refused``: the service understood and declined (a prompt that would not

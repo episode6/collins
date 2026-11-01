@@ -83,6 +83,18 @@ downloads of each version, see the
   there and never hear otherwise, so the tab refused the composer and drops until
   it was reopened. What a client is told on attaching and what it hears afterwards
   are now one series, and a wrong reading is corrected within two seconds.
+- **The terminal contract is published.** [The terminal
+  contract](/api/terminal) is the third page of the API spec: what a server
+  does to a pty's stream (the terminal queries it answers in the child's
+  place, with VTE 0.84.0's reply to each measured and tabled, the ones it
+  strips, the pass-through rule), the redraw an attaching client is painted
+  with, the screen model its session facts are read from, the active client
+  whose size a pty takes, and the environment an agent starts in. The spec
+  now says what the service always did: an input frame is written whether or
+  not its sender has attached. The stream fixtures under
+  `tests/fixtures/streams/` are MIT too, so the measurements travel with the
+  page; the answers check reads the page's tables and holds each row to a
+  real VTE and to the service, so the page cannot drift from either.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another
