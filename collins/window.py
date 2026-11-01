@@ -2508,7 +2508,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _show_clone_dialog(self) -> None:
         """Add project → Clone repository: clone into the target directory
         (the clone_directory setting, editable in the dialog), then add the
-        checkout the way Open folder adds a picked one — trust gate and all."""
+        checkout the way Open folder adds a picked one — trust gate and all.
+        A clone is a job: nothing on a service with no `jobs` (D5), whose menu
+        has no such item."""
+        if not apilink.has(protocol.CAP_JOBS):
+            return
         dialog = clonedialog.CloneDialog(
             self.state.get_setting("clone_directory"), self._on_project_cloned
         )
@@ -7112,6 +7116,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.set_project_archived(name, not self.state.is_project_archived(name))
 
     def _on_generate_icon(self, _action, param: GLib.Variant) -> None:
+        if not apilink.has(protocol.CAP_JOBS) or not apilink.has(protocol.CAP_USAGE):
+            return  # its menu item is hidden then (D5)
         cwd = param.get_string()
         dialogs.generate_icon_dialog(
             self,

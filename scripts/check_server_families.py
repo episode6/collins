@@ -161,6 +161,7 @@ while True:
     from gi.repository import Gio, GLib
 
     from collins import apilink, blobcache, claudemodels, gitinfo, i18n, modelcatalog, remoteicons, sandboxstatus
+    from collins import prefs as prefs_mod
     from collins import remotefiles, trust
     from collins.api import protocol
     from collins.api.client import ProtocolMismatch
@@ -231,8 +232,15 @@ while True:
         wait_until(lambda: bool(got))
         group_menu = got.pop() if got else []
         prefs = PreferencesDialog(win.state, lambda: None)
+        labels = prefs._quit_behavior_row.get_model()
         return {
             "dialog": prefs,
+            "rows": [row for group in prefs._groups.values() for row in group.rows],
+            "quit_choices": [
+                value
+                for value, label in prefs_mod._QUIT_BEHAVIORS
+                if any(labels.get_string(i) == i18n._(label) for i in range(labels.get_n_items()))
+            ],
             "row": row_menu,
             "group": group_menu,
             "add": actions(sidebar._add_menu),
@@ -274,6 +282,10 @@ while True:
             ("the project menu's Generate Icon", lambda c: "win.generate-icon" in c["group"]),
             ("the row menu's Repair", lambda c: "win.repair-session" in c["row"]),
             ("Preferences' clone folder", lambda c: hasattr(c["dialog"], "_clone_dir_row")),
+            (
+                "Preferences' worktree-archive row",
+                lambda c: any("archive_worktree" in getattr(row, "settings", ()) for row in c["rows"]),
+            ),
         ],
         protocol.CAP_USAGE: [
             ("the usage panel", lambda c: c["win"].sidebar.usage_panel.get_visible()),
@@ -284,6 +296,11 @@ while True:
         protocol.CAP_BACKGROUND: [
             ("the row's background button", lambda c: c["row_widget"]._can_background),
             ("the row menu's Repair", lambda c: "win.repair-session" in c["row"]),
+            ("Preferences' background poll", lambda c: c["dialog"]._bg_poll_row.get_parent() is not None),
+            (
+                "Preferences' background choice on quit",
+                lambda c: "background" in c["quit_choices"],
+            ),
         ],
         protocol.CAP_SHELLS: [
             ("the footer's panel toggle", lambda c: c["tab"]._panel_toggle_btn.get_visible()),

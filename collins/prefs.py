@@ -657,16 +657,17 @@ class PreferencesDialog(Adw.Dialog):
             _("Archiving a session that is still running also closes its tab"),
             "archive_running_session",
         )
-        self._add_running_behavior_row(
-            sessions_group,
-            _("When archiving a session in a git worktree"),
-            _(
-                "Whether to move the session's worktree to the trash once it "
-                "has stopped; Undo brings it back with the session"
-            ),
-            "archive_worktree",
-            behaviors=_WORKTREE_BEHAVIORS,
-        )
+        if apilink.has(protocol.CAP_JOBS):  # a worktree's trash is a job (D5)
+            self._add_running_behavior_row(
+                sessions_group,
+                _("When archiving a session in a git worktree"),
+                _(
+                    "Whether to move the session's worktree to the trash once it "
+                    "has stopped; Undo brings it back with the session"
+                ),
+                "archive_worktree",
+                behaviors=_WORKTREE_BEHAVIORS,
+            )
         self._quit_behavior_row = self._add_running_behavior_row(
             sessions_group,
             _("When quitting with running sessions"),
@@ -734,7 +735,8 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
         self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
-        sessions_group.add(self._bg_poll_row, "background_status_poll")
+        if apilink.has(protocol.CAP_BACKGROUND):  # no yellow lines to keep up (D5)
+            sessions_group.add(self._bg_poll_row, "background_status_poll")
         return sessions_group
 
     def _build_auto_delete_row(self, state: AppState, group: _SearchableGroup | _SplitGroup) -> None:
@@ -2214,6 +2216,11 @@ class PreferencesDialog(Adw.Dialog):
         behaviors: list[tuple[str, str]] | None = None,
     ) -> Adw.ComboRow:
         behaviors = behaviors if behaviors is not None else _RUNNING_BEHAVIORS
+        if not apilink.has(protocol.CAP_BACKGROUND):
+            # No /bg to choose on such a service (D5): a saved "background"
+            # reads as the first choice here, and exits where it is acted on
+            # (the window's blocker).
+            behaviors = [choice for choice in behaviors if choice[0] != "background"]
         row = Adw.ComboRow(title=title, subtitle=subtitle)
         labels = [_(label) for _v, label in behaviors]
         row.set_model(Gtk.StringList.new(labels))

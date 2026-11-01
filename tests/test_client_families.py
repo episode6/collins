@@ -353,6 +353,17 @@ def test_only_one_hello_is_read_as_a_pre_family_service(bare_link, hello, predat
     assert apilink.serves_restart() is predates or protocol.CAP_INTERNAL in bare_link.families
 
 
+def test_the_shape_is_every_cap_a_pre_family_service_could_not_list() -> None:
+    """A cap added later is one such a service never listed either, and goes
+    in the set; `local`, `debug`, `git` and `files` are what it did list."""
+    assert apilink._SINCE_FAMILIES == protocol.CAPABILITIES - {
+        protocol.CAP_LOCAL,
+        protocol.CAP_DEBUG,
+        protocol.CAP_GIT,
+        protocol.CAP_FILES,
+    }
+
+
 def test_a_restart_with_no_link_is_nobody_s_business() -> None:
     apilink.set_current(None)
     assert apilink.predates_families() is False
