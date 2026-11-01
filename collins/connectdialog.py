@@ -257,7 +257,7 @@ class ConnectDialog(Adw.Dialog):
             return GLib.SOURCE_REMOVE
         self.test_btn.set_sensitive(True)
         if result.ok:
-            self._say(_("A Collins service answers at {path}").format(path=result.path))
+            self._say(_("A service answers at {path}").format(path=result.path))
         else:
             text = result.text
             if result.batch_mode_hint:
