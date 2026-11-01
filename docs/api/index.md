@@ -315,8 +315,8 @@ The sequence the Collins window follows, which any client can:
    `forked` each mark something happening: sent true every time it does, and
    never false. `landed` comes with every read of the transcript, so expect
    it often, even from an idle session. What each fact means, what every
-   server must guarantee of it and how Collins reads it off Claude Code is
-   the [session facts](./sessions) page. Requests a
+   server must guarantee of it and what any reading of it off Claude Code
+   contends with is the [session facts](./sessions) page. Requests a
    client makes of a session name its pty: `prompt` to type a prompt in
    (refused when the box is not empty, so nothing lands mid-sentence),
    `switch` for the model or effort, `write` and `send` for raw text,
