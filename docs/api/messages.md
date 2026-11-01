@@ -243,6 +243,8 @@ A client's view of a pty gained or lost focus.
 
 The session asks its active client to put the keyboard in the terminal.
 
+*Optional for another client.* Asks for the keyboard to go to the terminal. A client can ignore it.
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -328,6 +330,8 @@ Start a session or a panel shell in a new pty.
 
 File a shell's panel history under a new key, or under none; name the session it belongs to.
 
+*Optional for another client.* Only for a client that keeps its shells' scrollback between runs.
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -345,6 +349,8 @@ No fields.
 ### `panel.history`
 
 Write a session's panel history: each shell's scrollback, from its pty's model or as text.
+
+*Optional for another client.* Only for a client that keeps its shells' scrollback between runs.
 
 *Request*, client → service, answered by one response.
 
@@ -726,6 +732,8 @@ An agent session's facts, whole on attach and as changed fields after.
 
 The session asks the active client's composer for something.
 
+*Optional for another client.* Asks a client with a composer for something. Without one, ignore it.
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -740,6 +748,8 @@ The session asks the active client's composer for something.
 
 The session says something about the panel shells beside it.
 
+*Optional for another client.* About shells beside a session. A client that opens none can ignore it.
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -752,6 +762,8 @@ The session says something about the panel shells beside it.
 ### `resolver.arm`
 
 A client mapped the tab: the transcript resolver's background budget starts over.
+
+*Optional for another client.* The window sends this when a tab is first shown. The service binds a session to its id without it.
 
 *Request*, client → service, answered by one response.
 
@@ -768,6 +780,8 @@ No fields.
 ### `transcript.update`
 
 Re-read the transcript now; with `discover`, ask the branch which PR it has.
+
+*Optional for another client.* The window's footer asks for a read sooner. The service follows each transcript itself.
 
 *Request*, client → service, answered by one response.
 
@@ -786,6 +800,8 @@ No fields.
 
 Tail another transcript (or none).
 
+*Optional for another client.* No Collins client sends this. The service finds each session's transcript itself.
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -802,6 +818,8 @@ No fields.
 ### `transcript.relocate`
 
 Follow the session's transcript to where the CLI moved it.
+
+*Optional for another client.* No Collins client sends this. The service follows a transcript the CLI moved.
 
 *Request*, client → service, answered by one response.
 
@@ -820,6 +838,8 @@ No fields.
 
 Re-adopt the pull requests saved for the session.
 
+*Optional for another client.* Shows a session's saved pull requests before the next read. Pull requests in the transcript come back on their own; one found only by a branch lookup is saved nowhere else.
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -836,6 +856,8 @@ No fields.
 ### `cwd.settle`
 
 Whether the agent has moved, as the editor rooted at `root` should see it.
+
+*Optional for another client.* Only for a file view that follows the agent's directory.
 
 *Request*, client → service, answered by one response.
 
@@ -858,6 +880,8 @@ Whether the agent has moved, as the editor rooted at `root` should see it.
 
 Whether the shells beside a new chat are owed the offer to follow its worktree.
 
+*Optional for another client.* Only for a client with shells beside a new chat.
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -874,6 +898,8 @@ No fields.
 ### `finish.witness`
 
 What the transcript says right now, for the finish ledger.
+
+*Optional for another client.* No Collins client sends this; only the test suite does.
 
 *Request*, client → service, answered by one response.
 
@@ -894,6 +920,8 @@ What the transcript says right now, for the finish ledger.
 
 Fold what runs under a pristine fresh spawn into its plumbing baseline.
 
+*Optional for another client.* No Collins client sends this; only the test suite does.
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -911,6 +939,8 @@ Fold what runs under a pristine fresh spawn into its plumbing baseline.
 ### `baseline.cmdlines`
 
 The cmdlines running directly below the session's agent right now.
+
+*Optional for another client.* No Collins client sends this; only the test suite does.
 
 *Request*, client → service, answered by one response.
 
@@ -1087,7 +1117,7 @@ Call a method of the service's sandbox host, its live grants, or the core.
 
 ### `state.set`
 
-Write a shared state key (request), or a key changed (event).
+Write a [shared state key](#state-keys) (request), or a key changed (event).
 
 *Request*, client → service, answered by one response.
 
@@ -1115,7 +1145,7 @@ No fields.
 
 ### `state.get`
 
-Read a shared state key.
+Read a [shared state key](#state-keys).
 
 *Request*, client → service, answered by one response.
 
@@ -2433,6 +2463,8 @@ No fields.
 
 A session's transcript went: its box, and what it was allowed, go too.
 
+*Optional for another client.* No Collins client sends this. `store.forget` already does it.
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2475,7 +2507,7 @@ A sandboxed session's grants or plan changed; a delivery for the toast; the prob
 
 ### `git.run`
 
-Run one of gitops' argv builders, by name and keyword args, on the service's git.
+Run one of the [git builders](#git-builders), by name and keyword args, on the service's git.
 
 *Request*, client → service, answered by one response.
 
@@ -3050,3 +3082,129 @@ The service's claude CLI: where it is, where it might be, and a path's verdict.
 | `found` | string, at most 4,096 characters | required |
 | `detected` | string, at most 4,096 characters | optional |
 | `status` | string, one of `bad-name`, `missing`, `ok`, `version-managed`, `versioned` | optional |
+
+## Git builders
+
+What `git.run`'s `builder` may name, with the keyword arguments its `args` takes. A client never sends a command line: the service builds it, and refuses arguments that don't fit (`invalid`). Every path is taken literally, never as a glob. Each command below runs as `git <command>` in `cwd`; the diff builders also pin git's prefix and quoting settings, so their output doesn't depend on the user's config.
+
+A `load` is what a diff is of: the string `unstaged`, `staged` or `branch` (which needs `parent_target`), `{"show": "<ref>"}` for a commit, or `{"range": "<a>...<b>"}` for a range, with exactly three dots.
+
+| Builder | Arguments | Runs |
+| --- | --- | --- |
+| `commit_argv` | `summary: string`, `body?: string` | `commit -q -m <summary> [-m <body>]` |
+| `fixup_argv` | `sha: string` | `commit -q -m "fixup! <sha>"`: the index as a fixup of a commit |
+| `stage_all_argv` | none | `add -A` |
+| `unstage_all_argv` | none | `reset -q` |
+| `add_paths_argv` | `paths: list of string` | `add -A -- <paths>` |
+| `reset_paths_argv` | `paths: list of string` | `reset -q -- <paths>` |
+| `remove_paths_argv` | `paths: list of string` | `rm -q -- <paths>` |
+| `checkout_paths_argv` | `paths: list of string` | `checkout -q -- <paths>` |
+| `checkout_side_argv` | `side: string`, `paths: list of string` | `checkout -q --<side> -- <paths>`, with `side` `ours` or `theirs` |
+| `checkout_branch_argv` | `branch: string` | `checkout <branch>` |
+| `pull_argv` | none | `pull --no-edit` |
+| `apply_argv` | `cached: boolean`, `reverse: boolean`, `three_way?: boolean` | `apply --recount --unidiff-zero [--cached] [--reverse] [--3way] -`, the patch in `stdin` |
+| `revert_argv` | `sha: string`, `commit: boolean` | `revert --no-edit <sha>` when `commit` is true, else `revert --no-commit <sha>` |
+| `revert_quit_argv` | none | `revert --quit` |
+| `continue_argv` | `kind: string` | `<kind> --continue`, with `kind` one of `rebase`, `am`, `merge`, `cherry-pick`, `revert` |
+| `abort_argv` | `kind: string` | `<kind> --abort`, the same kinds |
+| `log_argv` | `range_args: list of string`, `limit: integer` | `log --no-decorate --format=%H%x00%h%x00%s%x1e -n <limit> <range_args> --` |
+| `unpushed_argv` | none | `rev-list HEAD --not --remotes --` |
+| `stack_walk_argv` | `lower: string or null`, `upper: string`, `limit: integer` | `rev-list --topo-order -n <limit> <lower>..<upper> --` |
+| `commit_subject_argv` | `ref: string` | `log -1 --format=%s <ref>^{commit} --` |
+| `commit_message_argv` | `ref: string` | `log -1 --format=%H%x00%an%x00%aI%x00%s%x00%b <ref>^{commit} --` |
+| `resolve_commit_argv` | `ref: string` | `rev-parse --verify --quiet <ref>^{commit}` |
+| `rev_parse_argv` | `rev: string` | `rev-parse --verify --quiet <rev>` |
+| `head_abbrev_argv` | none | `rev-parse --short HEAD` |
+| `merge_base_argv` | `a: string`, `b: string` | `merge-base <a> <b>` |
+| `branch_tips_argv` | none | `for-each-ref --format=%(objectname) %(refname:short) refs/heads` |
+| `has_remote_tracking_argv` | none | `for-each-ref --count=1 --format=%(refname) refs/remotes/` |
+| `status_argv` | none | `--no-optional-locks status --porcelain=v2 -z --untracked-files=all` |
+| `status_porcelain_argv` | none | `--no-optional-locks status --porcelain` |
+| `staged_paths_argv` | none | `diff --cached --name-only -z` |
+| `unmerged_stages_argv` | `path: string` | `ls-files -u -z -- <path>` |
+| `check_ignore_argv` | none | `--no-optional-locks check-ignore -z --stdin`, the paths in `stdin` |
+| `diff_argv` | `load: load`, `parent_target?: string`, `untracked?: boolean`, `pathspecs?: list of string`, `excludes?: list of string` | `diff --no-ext-diff --find-renames --no-color <revisions> -- <paths>` for the load, or `show_argv`'s command for a commit. `untracked` changes nothing here |
+| `numstat_argv` | `load: load`, `parent_target?: string`, `pathspecs?: list of string` | The same load with `--numstat -z` |
+| `show_argv` | `ref: string`, `pathspecs?: list of string`, `excludes?: list of string` | `show --format= --no-ext-diff --find-renames --no-color <ref> -- <paths>` |
+| `untracked_diff_argv` | `path: string` | `diff --no-color --no-ext-diff --no-index -- /dev/null <path>`: a new file as a diff |
+| `conflict_diff_argv` | `paths: list of string` | `diff --no-ext-diff --find-renames --no-color --ours -- <paths>` |
+| `file_at_argv` | `ref: string`, `path: string` | `show <ref>:<path>`; an empty `ref` is the index |
+
+## State keys
+
+What `state.get` and `state.set` may name. A `map` is a JSON object whose entries `entry` reads and writes one at a time, a `set` a list of distinct strings, a `list` an ordered list. A key that is not writable is refused `refused`, and an unknown one `gone`. Where a family of requests exists (`store.*`, `sandbox.*`, `notify.*`), use it: a direct write skips what the service does on top of it.
+
+| Key | Form | A client may write | Holds |
+| --- | --- | --- | --- |
+| `service_id` | scalar | no | This service's id, as the hello reply names it. |
+| `names` | map | yes | Session id to the name a person gave it. |
+| `generated_names` | map | yes | Session id to its generated title. |
+| `cli_titles` | map | yes | Session id to the title the CLI gave it. |
+| `emojis` | map | yes | Session id to its tab emoji. |
+| `favorites` | set | yes | The favorite sessions' ids. |
+| `archived` | set | yes | The archived sessions' ids. `store.archive` is the way to change it. |
+| `archived_at` | map | yes | Session id to when it was archived, in seconds. |
+| `archived_projects` | set | yes | The archived projects. |
+| `project_worktree` | map | yes | Project to whether its new sessions start in a worktree. |
+| `project_sandbox` | map | yes | Project to whether its new sessions start sandboxed. |
+| `sandboxed_sessions` | map | yes | Session id to its sandbox's box id. |
+| `sandbox_grants` | map | yes | Box id to its directory grants. Use `sandbox.allow` and `sandbox.revoke`. |
+| `sandbox_project_grants` | map | yes | Project to the grants its new sessions start with. |
+| `sandbox_tools` | map | yes | Box id to the session tools it is offered. Use `sandbox.tools`. |
+| `project_order` | list | yes | The projects in sidebar order. `store.move-project` is the way to change it. |
+| `virtual_projects` | map | yes | Project name to its folder, for one kept with no sessions. |
+| `expanded_groups` | set | no | Sidebar groups once open. No longer written; a device keeps its own. |
+| `session_prs` | map | yes | Session id to its pull request records. |
+| `session_attachments` | map | yes | Session id to its attachment records. |
+| `session_drafts` | map | yes | Session id to its unsent prompt. |
+| `new_chat_drafts` | map | yes | Draft id to a new chat not started yet. |
+| `process_baselines` | map | yes | Session id to the processes that don't count as it being busy. |
+| `session_forwards` | map | yes | A session id to the id it continued under. |
+| `pending_detaches` | map | yes | Session id to a background handoff still to be replayed. |
+| `resume_on_start` | list | no | The sessions a stopping service ended, resumable when reopened. |
+| `ptys` | map | no | The pty table, by app id. |
+| `pty_next_id` | map | no | The next pty id, by app id. |
+| `inflight_copies` | list | no | The tree copies `fs.paste` has in flight. |
+| `notifications` | list | no | The notification history. Use the `notify.*` requests. |
+| `diff_notes` | map | no | Session id to the marks on its diff. Use `diff.set-notes`. |
+| `pending_diffs` | map | no | Session id to a `show_diff` asked for with no client attached. |
+| `settings` | map | yes | The service's settings, written one entry at a time (below). |
+
+### Service settings
+
+The entries of `settings`. A value of another type is refused `refused`. So is a setting not listed here: appearance, geometry, sounds and the like belong to each client, which keeps its own.
+
+| Setting | Value | What it does |
+| --- | --- | --- |
+| `claude_cli_path` | string | Where the CLI is when the service's `PATH` doesn't say. |
+| `notify_command` | string | A command run for a notification when no client is attached. |
+| `title_model` | string | The `--model` for generated session titles; empty is automatic. |
+| `icon_model` | string | The `--model` for generated project icons; empty is automatic. |
+| `auto_renew_login` | boolean | Repair an expired CLI login with one headless run. |
+| `worktree_new_sessions` | boolean | Start new sessions in a git worktree. |
+| `clone_directory` | string | Where a cloned repository goes by default. |
+| `sandbox_new_sessions` | boolean | Start new sessions sandboxed. |
+| `sandbox_bypass_permissions` | boolean | Sandboxed sessions default to bypassing permissions. |
+| `sandbox_share_gh` | boolean | Share the GitHub CLI login with sandboxed sessions. |
+| `sandbox_share_ssh` | boolean | Share the ssh agent with sandboxed sessions. |
+| `sandbox_settings_editable` | boolean | Let sandboxed sessions write the CLI's settings. |
+| `attach_prompt_prs` | boolean | Attach pull requests a session's first prompt links to. |
+| `pr_title_sessions` | boolean | Title a session after its newest pull request. |
+| `cli_title_sessions` | boolean | Show the titles the CLI gives its sessions. |
+| `refresh_prs_on_launch` | boolean | Refresh pull requests once when a client starts. |
+| `archive_running_session` | string | Archiving a session with a running tab: `ask`, `exit` or `background`. |
+| `archive_worktree` | string | A session's worktree on archive: `ask`, `always` or `never`. |
+| `archive_on_claude_ai` | boolean | Mirror archiving to the session's claude.ai page. |
+| `auto_delete_archived_after` | integer | Trash archived sessions after this many units; 0 is never. |
+| `auto_delete_archived_unit` | string | That unit: `days`, `weeks`, `months` or `years`. |
+| `background_status_poll` | boolean | Poll background agents' status on a timer as well. |
+| `progress_termprop` | boolean | Read busy from the CLI's own progress announcements. |
+| `git_parent_branch` | string | The branch a session's branch is measured against when none is found. |
+| `git_untracked` | boolean | Include untracked files in working-tree reviews. |
+| `git_log_page` | integer | Commits per page of a commit list. |
+| `welcome_seen` | boolean | The first-run welcome has been answered. |
+| `gh_welcome_dismissed` | boolean | The GitHub CLI notice has been dismissed for good. |
+| `mcp_tool_<tool>` | boolean | Whether sessions are offered this session tool. |
+| `sandbox_tool_<tool>` | boolean | Whether sandboxed sessions are offered it by default. |
+
+The session tools: `set_session_title`, `open_in_editor`, `show_diff`, `diff_context`, `annotate_diff`, `highlight_diff`, `clear_diff_marks`, `show_image`, `notify_user`, `attach_pr`, `start_session`, `read_terminal`, `run_in_terminal`.

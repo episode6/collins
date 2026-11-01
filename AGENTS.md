@@ -194,8 +194,12 @@ window (a client speaks the service's protocol or the one before it).
 prose spec (transport, frames, handshake, errors, the client's life,
 connecting over ssh),
 `docs/api/messages.md` the message reference that
-`scripts/gen_api_reference.py` renders from the table (run it after any
-table edit; `tests/test_api_reference.py` fails on a stale copy, and pins
+`scripts/gen_api_reference.py` renders from the table and from what its free
+fields name (`protocol.GIT_BUILDERS`, `STATE_KEYS`, `SERVICE_SETTINGS`,
+`OPTIONAL_TYPES`: a new builder, shared key or service setting is listed
+there too) (run it after any
+table edit; `tests/test_api_reference.py` fails on a stale copy or an
+unlisted name, and pins
 the five MIT files — the two pages, the generator, `protocol.py` and
 `sshremote.py` — to their SPDX tags and everything else to none; `debian/copyright` has the
 stanza). Keep `protocol.py` standard-library only and free of
@@ -523,7 +527,9 @@ goes to `/dev/null` unless it is set; under the unit it is the journal), `COLLIN
 - **Settings.** A new setting is one entry in `state.DEFAULT_SETTINGS` (with a
   comment saying what it does and where it is read), its name in
   `state.SERVICE_SETTINGS` or `state.DEVICE_SETTINGS` (which file it lives
-  in; `tests/test_state_split.py` fails until it is on a side), a row in `prefs.py`
+  in; `tests/test_state_split.py` fails until it is on a side), for a service
+  setting a line in `protocol.SERVICE_SETTINGS` (the published list;
+  `tests/test_api_reference.py` fails until it is there), a row in `prefs.py`
   placed per `prefslayout.GROUPS` (added with the setting it writes,
   `group.add(row, "key")`, and the key in `prefslayout.GROUP_SETTINGS`: the
   dialog is two pages, This device and Service, and a row lands on its

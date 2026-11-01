@@ -41,7 +41,8 @@ downloads of each version, see the
 - **The service's API is published, under MIT.** The protocol
   `collins-service` speaks over its socket has a spec of its own at
   [docs/api](/api/): the transport, connecting over ssh, the frames, the
-  handshake and the rules, and a [message reference](/api/messages)
+  handshake and the rules, what a client can leave out and a minimal client
+  to start from, and a [message reference](/api/messages)
   generated from the message table in `collins/api/protocol.py` (a unit
   test fails when the two disagree). The spec, the reference, its
   generator, the protocol module and `collins/sshremote.py`, which connects

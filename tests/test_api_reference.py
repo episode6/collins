@@ -9,10 +9,13 @@ span. All five MIT-licensed source files carry their SPDX tag, since the rest of
 the repository is GPL and a reader of any one of them must be able to tell.
 """
 
+import ast
 import importlib.util
+import inspect
 import os
 import re
 
+from collins import gitloads, gitmodel, gitops, mcptools, state
 from collins.api import protocol as p
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +57,96 @@ def test_index_names_every_error_code_and_capability():
         assert f"`{code}`" in text, code
     for cap in p.CAPABILITIES:
         assert f"`{cap}`" in text, cap
+
+
+def test_the_git_builders_table_is_the_registry():
+    assert set(p.GIT_BUILDERS) == set(gitops.BUILDERS)
+    for name, entry in gitops.BUILDERS.items():
+        documented = {arg.split(":")[0]: arg for arg in p.GIT_BUILDERS[name].args}
+        wanted = {
+            param.name + ("" if param.default is inspect.Parameter.empty else "?")
+            for param in inspect.signature(entry.build).parameters.values()
+        }
+        assert set(documented) == wanted, name
+
+
+def test_the_git_builders_table_prints_the_formats_a_client_parses():
+    assert gitmodel.LOG_FORMAT in p.GIT_BUILDERS["log_argv"].runs
+    assert gitloads.COMMIT_FORMAT in p.GIT_BUILDERS["commit_message_argv"].runs
+    assert ", ".join(f"`{kind}`" for kind in gitops.OPERATION_KINDS) in p.GIT_BUILDERS["continue_argv"].runs
+    assert all(f"`{side}`" in p.GIT_BUILDERS["checkout_side_argv"].runs for side in gitops.RESOLVE_SIDES)
+
+
+def test_the_state_keys_table_is_what_the_service_serves():
+    assert set(p.STATE_KEYS) == set(state.SHARED_KEYS)
+    for name, key in state.SHARED_KEYS.items():
+        assert p.STATE_KEYS[name].form == key.form, name
+        assert p.STATE_KEYS[name].writable == key.writable, name
+
+
+def test_the_settings_table_is_the_services_settings():
+    prefixes = ("mcp_tool_", "sandbox_tool_")
+    tools = {f"{prefix}{tool}" for tool in p.SESSION_TOOLS for prefix in prefixes}
+    assert set(p.SERVICE_SETTINGS) | tools == set(state.SERVICE_SETTINGS)
+    assert not set(p.SERVICE_SETTINGS) & tools
+    assert set(p.SESSION_TOOLS) == set(mcptools.tool_names())
+    json_types = {bool: "boolean", int: "integer", str: "string"}
+    for name, setting in p.SERVICE_SETTINGS.items():
+        assert setting.kind == json_types[type(state.DEFAULT_SETTINGS[name])], name
+
+
+def _client_sources():
+    """The text of every module of the client: all of collins but the
+    service, the API package's table and its server."""
+    root = os.path.join(ROOT, "collins")
+    for directory, _dirs, files in os.walk(root):
+        if os.path.relpath(directory, root).split(os.sep)[0] == "service":
+            continue
+        for name in files:
+            path = os.path.join(directory, name)
+            excluded = ("api/protocol.py", "api/server.py")
+            if name.endswith(".py") and os.path.relpath(path, root) not in excluded:
+                with open(path, encoding="utf-8") as handle:
+                    yield handle.read()
+
+
+def test_every_optional_type_is_a_type():
+    assert set(p.OPTIONAL_TYPES) <= set(p.TYPES)
+
+
+def test_what_the_reference_says_no_client_sends_no_client_sends():
+    """A type marked as sent by no client: no client module builds it. Should
+    one start to, the reference has to stop saying so."""
+    sources = list(_client_sources())
+    for name in ("finish.witness", "baseline.absorb", "baseline.cmdlines", "sandbox.forget"):
+        assert p.OPTIONAL_TYPES[name].startswith("No Collins client sends")
+        assert not any(f'"{name}"' in text for text in sources), name
+    # These two keep a method on the client's session mirror that nothing calls.
+    for name, method in (
+        ("transcript.set", ".set_transcript_path("),
+        ("transcript.relocate", ".relocate_transcript("),
+    ):
+        assert p.OPTIONAL_TYPES[name].startswith("No Collins client sends")
+        callers = [text for text in sources if method in text]
+        assert all("def relocate_transcript" in text for text in callers), name
+
+
+def test_the_walkthrough_compiles_and_names_real_messages():
+    """The minimal client in docs/api/index.md: valid Python, and every
+    message it sends one the table validates."""
+    text = _read("docs", "api", "index.md")
+    section = text.split("## A minimal client", 1)[1]
+    code = section.split("```python\n", 1)[1].split("```", 1)[0]
+    tree = ast.parse(code)
+    sent = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            keys = [key.value for key in node.keys if isinstance(key, ast.Constant)]
+            if "t" in keys:
+                sent.append(node.values[keys.index("t")].value)
+    assert {"hello", "subscribe", "spawn", "attach", "ack", "prompt"} <= set(sent)
+    assert set(sent) <= set(p.TYPES)
+    assert not set(sent) & set(p.OPTIONAL_TYPES)
 
 
 def _outside_code(markdown: str) -> str:

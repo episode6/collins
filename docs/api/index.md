@@ -192,7 +192,7 @@ tag:u8  flags:u8  reserved:u16  stream:u32  offset:u64
 
 | Tag | Meaning |
 | --- | --- |
-| `0x01` | pty output, service → client. `stream` is the pty, `offset` the count of live output bytes sent to this client for this pty so far. Flags: `0x01` part of a redraw, `0x02` the redraw's last frame. |
+| `0x01` | pty output, service → client. `stream` is the pty, `offset` the count of live output bytes sent to this client for this pty before this frame. Flags: `0x01` part of a redraw, `0x02` the redraw's last frame. |
 | `0x02` | pty input, client → service. `stream` is the pty; the payload is what the user typed, bytes for the pty. |
 | `0x03` | a chunk of a chunked message, either way. `stream` is the message id masked to 32 bits, `offset` the chunk's byte offset. |
 
@@ -221,8 +221,8 @@ works in both directions: a reply's `stdout` from the service, a request's
 WebSockets offer no backpressure, so the client acks. For every pty it is
 attached to, the client sends an `ack {pty, offset}` event every 64 KiB of
 live output fed to its terminal or 100 ms after the last unacked frame,
-whichever comes first, with `offset` the output frame's counter. The
-service hands a client at most 1 MiB of unacked live bytes and holds the
+whichever comes first, with `offset` the count of live bytes fed so far: a
+frame's `offset` plus its payload's length. The service hands a client at most 1 MiB of unacked live bytes and holds the
 rest; a client that never acks is cut off at 4 MiB and redrawn. Redraw
 frames carry the same counter but are neither counted nor acked.
 
@@ -287,7 +287,9 @@ The sequence the Collins window follows, which any client can:
    prompt; `busy` and `finished` are the service's reading of the agent's
    activity; `model`, `effort` and `permission_mode` are read off the
    transcript, null while unknown; `landed`, `reset`, `finished` and
-   `forked` are one-shots, sent true once and never false. Requests a
+   `forked` each mark something happening: sent true every time it does, and
+   never false. `landed` comes with every read of the transcript, so expect
+   it often, even from an idle session. Requests a
    client makes of a session name its pty: `prompt` to type a prompt in
    (refused when the box is not empty, so nothing lands mid-sentence),
    `switch` for the model or effort, `write` and `send` for raw text,
@@ -295,8 +297,10 @@ The sequence the Collins window follows, which any client can:
    graceful exit, `background` for the `/bg` handoff, `kill` to force it).
 7. **`state.get` / `state.set`** read and write the shared state by key
    and, for map-valued keys, entry: names, favorites, archives, project
-   order, the service-side settings. The service decides what a client may
-   write and refuses the rest. The `store.*` requests are the higher-level
+   order, the service-side settings. The reference lists the
+   [keys](./messages#state-keys) and
+   [settings](./messages#service-settings). The service decides what a client
+   may write and refuses the rest. The `store.*` requests are the higher-level
    mutations the sidebar makes (rename, favorite, archive, trash, …) and
    `store.flags` carries what a person did at a client's screen; the
    service's own verdicts (`busy`, `unread`, `background`) come back as
@@ -306,11 +310,114 @@ The sequence the Collins window follows, which any client can:
    (`job.start` and `job` events for a clone, a login repair, an icon
    generation), token use (`usage.get`, `models.get`), the session tools a
    running agent calls that need a screen (`tool` events and `tool-reply`),
-   the sandbox (`sandbox.*`), git (`git.*`), files (`fs.*`) and the
+   the sandbox (`sandbox.*`), git (`git.*`, with `git.run` taking one of the
+   [git builders](./messages#git-builders)), files (`fs.*`) and the
    service itself (`service.status`, `service.restart`).
 
 An event a client does not understand is dropped. A request the service
 refuses leaves nothing changed.
+
+## What a client can leave out
+
+The Collins window is one client with many surfaces, and the reference lists
+everything it sends. A client that shows sessions and terminals needs very
+little of that: `hello`, `subscribe` if it lists what is running, `spawn`,
+`attach`, `resize`, `ack`, input frames, and `prompt` and `close` for an agent.
+The other families are features to add when you want them, and the `caps` in
+the hello reply say which of them a service offers.
+
+The reference marks a message *Optional for another client* when the window
+sends it only for one of its own surfaces or for its own timing, or when it is
+an event a client can ignore. A session works without them.
+
+**One event needs an answer.** A running agent can call session tools that need
+a screen, such as `show_diff`. Those reach the session's active client, the one
+whose size the pty takes, as `tool` events. If no `tool-reply` comes back, the
+agent waits 14 seconds for that call to fail. A client that doesn't implement a
+tool should answer at once with `ok: false` and a `text` saying so.
+
+## A minimal client
+
+This starts an agent, waits until its input box will take a prompt, sends one,
+and prints what comes back. It uses the [`websockets`](https://websockets.readthedocs.io/)
+package for the WebSocket and the MIT-licensed `collins/api/protocol.py` for
+the binary frames. Pass it the socket's path: the one
+[`--print-socket`](#finding-the-service) prints, or a forward's
+[local socket](#connecting-over-ssh).
+
+```python
+import itertools
+import json
+import sys
+import time
+import uuid
+
+from websockets.sync.client import unix_connect
+
+import protocol as p  # a vendored copy of collins/api/protocol.py
+
+path, cwd = sys.argv[1], sys.argv[2]
+next_id = itertools.count(1)
+facts = {}  # what the session events have said, by pty
+
+
+def handle(frame):
+    """A frame that is not a reply: pty output or an event."""
+    if isinstance(frame, bytes):
+        header, payload = p.unpack_frame(frame)
+        if header.tag == p.TAG_OUTPUT:
+            sys.stdout.buffer.write(payload)
+            sys.stdout.buffer.flush()
+            if not header.flags & p.FLAG_REDRAW:
+                fed = header.offset + len(payload)
+                ws.send(json.dumps({"t": "ack", "pty": header.stream, "offset": fed}))
+        return
+    event = json.loads(frame)
+    if event.get("t") == "session":
+        facts.setdefault(event["pty"], {}).update(event)
+    elif event.get("t") == "tool":
+        reply = {"t": "tool-reply", "call": event["call"], "ok": False, "text": "Not supported here"}
+        ws.send(json.dumps(reply))
+
+
+def call(message):
+    """Send a request and answer what arrives until its reply does."""
+    request_id = next(next_id)
+    ws.send(json.dumps({**message, "id": request_id}))
+    while True:
+        frame = ws.recv()
+        reply = json.loads(frame) if isinstance(frame, str) else {}
+        if reply.get("re") == request_id:
+            if not reply["ok"]:
+                raise RuntimeError(reply["msgid"].format(**reply.get("args", {})))
+            return reply
+        handle(frame)
+
+
+with unix_connect(path, "ws://localhost/api/ws", max_size=p.MAX_INCOMING) as ws:
+    call({"t": "hello", "protocol": p.PROTOCOL, "version": "0.1", "client_id": uuid.uuid4().hex, "device": "example"})
+    call({"t": "subscribe"})
+
+    pty = call({"t": "spawn", "kind": "agent", "cwd": cwd, "cols": 100, "rows": 30})["pty"]
+    call({"t": "attach", "pty": pty, "cols": 100, "rows": 30})
+
+    while not facts.get(pty, {}).get("takes_prompt"):
+        handle(ws.recv())
+    call({"t": "prompt", "pty": pty, "text": "Say hello."})
+
+    stop = time.monotonic() + 60
+    while time.monotonic() < stop:  # a real client keeps going until it is closed
+        try:
+            handle(ws.recv(timeout=1))
+        except TimeoutError:
+            pass
+# The connection is gone and the session keeps running on the service.
+```
+
+Run it again with the same `cwd` and it starts a second agent. To come back to
+this one, find its pty in the `pty` events `subscribe` sends and `attach` to it.
+A real client also watches for `pty-exited`, sends `resize` when its grid
+changes, and feeds the output to a terminal emulator instead of printing it.
 
 ## Plain HTTP on the same socket
 

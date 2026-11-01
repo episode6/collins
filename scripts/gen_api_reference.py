@@ -279,6 +279,8 @@ def _peer(sender: str) -> str:
 
 def message_section(entry: p.MessageType) -> list[str]:
     lines = [f"### `{entry.name}`", "", entry.summary, ""]
+    if entry.name in p.OPTIONAL_TYPES:
+        lines.extend([f"*Optional for another client.* {p.OPTIONAL_TYPES[entry.name]}", ""])
     if entry.request is not None:
         lines.append("*Request*, client → service, answered by one response.")
         lines.append("")
@@ -335,6 +337,73 @@ def sections(source_path: str) -> list[tuple[str, list[str]]]:
     return out
 
 
+def git_builders_section() -> list[str]:
+    lines = [
+        "## Git builders",
+        "",
+        "What `git.run`'s `builder` may name, with the keyword arguments its `args` takes. A client "
+        "never sends a command line: the service builds it, and refuses arguments that don't fit "
+        "(`invalid`). Every path is taken literally, never as a glob. Each command below runs as "
+        "`git <command>` in `cwd`; the diff builders also pin git's prefix and quoting settings, so "
+        "their output doesn't depend on the user's config.",
+        "",
+        "A `load` is what a diff is of: the string `unstaged`, `staged` or `branch` (which needs "
+        "`parent_target`), `{\"show\": \"<ref>\"}` for a commit, or `{\"range\": \"<a>...<b>\"}` "
+        "for a range, with exactly three dots.",
+        "",
+        "| Builder | Arguments | Runs |",
+        "| --- | --- | --- |",
+    ]
+    for name, builder in p.GIT_BUILDERS.items():
+        args = ", ".join(_code(arg) for arg in builder.args) or "none"
+        lines.append(f"| {_code(name)} | {args} | {builder.runs.replace('|', chr(92) + '|')} |")
+    lines.append("")
+    return lines
+
+
+def state_keys_section() -> list[str]:
+    lines = [
+        "## State keys",
+        "",
+        "What `state.get` and `state.set` may name. A `map` is a JSON object whose entries `entry` "
+        "reads and writes one at a time, a `set` a list of distinct strings, a `list` an ordered list. "
+        "A key that is not writable is refused `refused`, and an unknown one `gone`. Where a family of "
+        "requests exists (`store.*`, `sandbox.*`, `notify.*`), use it: a direct write skips what the "
+        "service does on top of it.",
+        "",
+        "| Key | Form | A client may write | Holds |",
+        "| --- | --- | --- | --- |",
+    ]
+    for name, key in p.STATE_KEYS.items():
+        lines.append(f"| {_code(name)} | {key.form} | {'yes' if key.writable else 'no'} | {key.summary} |")
+    lines.extend(
+        [
+            "",
+            "### Service settings",
+            "",
+            "The entries of `settings`. A value of another type is refused `refused`. So is a setting "
+            "not listed here: appearance, geometry, sounds and the like belong to each client, which "
+            "keeps its own.",
+            "",
+            "| Setting | Value | What it does |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for name, setting in p.SERVICE_SETTINGS.items():
+        lines.append(f"| {_code(name)} | {setting.kind} | {setting.summary} |")
+    tools = ", ".join(_code(tool) for tool in p.SESSION_TOOLS)
+    lines.extend(
+        [
+            "| `mcp_tool_<tool>` | boolean | Whether sessions are offered this session tool. |",
+            "| `sandbox_tool_<tool>` | boolean | Whether sandboxed sessions are offered it by default. |",
+            "",
+            f"The session tools: {tools}.",
+            "",
+        ]
+    )
+    return lines
+
+
 def render(source_path: str) -> str:
     lines = [HEADER]
     lines.append("## Numbers")
@@ -378,6 +447,8 @@ def render(source_path: str) -> str:
         lines.append("")
         for name in names:
             lines.extend(message_section(p.TYPES[name]))
+    lines.extend(git_builders_section())
+    lines.extend(state_keys_section())
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

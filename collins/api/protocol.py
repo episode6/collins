@@ -1579,13 +1579,13 @@ _TABLE: tuple[MessageType, ...] = (
     # -- state (§3.8)
     MessageType(
         "state.set",
-        "Write a shared state key (request), or a key changed (event).",
+        "Write a [shared state key](#state-keys) (request), or a key changed (event).",
         request=_request({**_STATE_FIELDS, "value": _req(_null(_JSON))}),
         event=_event(SERVICE, {**_STATE_FIELDS, "value": _req(_null(_JSON))}),
     ),
     MessageType(
         "state.get",
-        "Read a shared state key.",
+        "Read a [shared state key](#state-keys).",
         request=_request(_STATE_FIELDS, reply={"value": _req(_null(_JSON))}),
     ),
     # -- the store (§3.15)
@@ -2265,7 +2265,7 @@ _TABLE: tuple[MessageType, ...] = (
     # -- git over the API (§3.23, PR-2.1, D33)
     MessageType(
         "git.run",
-        "Run one of gitops' argv builders, by name and keyword args, on the service's git.",
+        "Run one of the [git builders](#git-builders), by name and keyword args, on the service's git.",
         request=_request(
             {
                 "cwd": _req(_PATH),
@@ -2743,6 +2743,280 @@ _TABLE: tuple[MessageType, ...] = (
 )
 
 TYPES: Mapping[str, MessageType] = {entry.name: entry for entry in _TABLE}
+
+# ---- what the table's free fields name ----------------------------------------
+#
+# `git.run` names a builder, `state.get` and `state.set` a key, and those
+# fields are free strings on the wire. These tables say what they may name, for
+# the reference; tests/test_api_reference.py holds each to the code that serves
+# it, so a new builder, key or setting fails there until it is listed here.
+
+
+@dataclass(frozen=True)
+class GitBuilder:
+    """One `git.run` builder: its keyword arguments (``name: type``, with
+    ``name?: type`` for an optional one) and what it runs."""
+
+    args: tuple[str, ...]
+    runs: str
+
+
+GIT_BUILDERS: Mapping[str, GitBuilder] = {
+    # The index and commits.
+    "commit_argv": GitBuilder(("summary: string", "body?: string"), "`commit -q -m <summary> [-m <body>]`"),
+    "fixup_argv": GitBuilder(
+        ("sha: string",), "`commit -q -m \"fixup! <sha>\"`: the index as a fixup of a commit",
+    ),
+    "stage_all_argv": GitBuilder((), "`add -A`"),
+    "unstage_all_argv": GitBuilder((), "`reset -q`"),
+    "add_paths_argv": GitBuilder(("paths: list of string",), "`add -A -- <paths>`"),
+    "reset_paths_argv": GitBuilder(("paths: list of string",), "`reset -q -- <paths>`"),
+    "remove_paths_argv": GitBuilder(("paths: list of string",), "`rm -q -- <paths>`"),
+    "checkout_paths_argv": GitBuilder(("paths: list of string",), "`checkout -q -- <paths>`"),
+    "checkout_side_argv": GitBuilder(
+        ("side: string", "paths: list of string"),
+        "`checkout -q --<side> -- <paths>`, with `side` `ours` or `theirs`",
+    ),
+    "checkout_branch_argv": GitBuilder(("branch: string",), "`checkout <branch>`"),
+    "pull_argv": GitBuilder((), "`pull --no-edit`"),
+    "apply_argv": GitBuilder(
+        ("cached: boolean", "reverse: boolean", "three_way?: boolean"),
+        "`apply --recount --unidiff-zero [--cached] [--reverse] [--3way] -`, the patch in `stdin`",
+    ),
+    "revert_argv": GitBuilder(
+        ("sha: string", "commit: boolean"),
+        "`revert --no-edit <sha>` when `commit` is true, else `revert --no-commit <sha>`",
+    ),
+    "revert_quit_argv": GitBuilder((), "`revert --quit`"),
+    "continue_argv": GitBuilder(
+        ("kind: string",),
+        "`<kind> --continue`, with `kind` one of `rebase`, `am`, `merge`, `cherry-pick`, `revert`",
+    ),
+    "abort_argv": GitBuilder(("kind: string",), "`<kind> --abort`, the same kinds"),
+    # Reading history.
+    "log_argv": GitBuilder(
+        ("range_args: list of string", "limit: integer"),
+        "`log --no-decorate --format=%H%x00%h%x00%s%x1e -n <limit> <range_args> --`",
+    ),
+    "unpushed_argv": GitBuilder((), "`rev-list HEAD --not --remotes --`"),
+    "stack_walk_argv": GitBuilder(
+        ("lower: string or null", "upper: string", "limit: integer"),
+        "`rev-list --topo-order -n <limit> <lower>..<upper> --`",
+    ),
+    "commit_subject_argv": GitBuilder(("ref: string",), "`log -1 --format=%s <ref>^{commit} --`"),
+    "commit_message_argv": GitBuilder(
+        ("ref: string",), "`log -1 --format=%H%x00%an%x00%aI%x00%s%x00%b <ref>^{commit} --`"
+    ),
+    "resolve_commit_argv": GitBuilder(("ref: string",), "`rev-parse --verify --quiet <ref>^{commit}`"),
+    "rev_parse_argv": GitBuilder(("rev: string",), "`rev-parse --verify --quiet <rev>`"),
+    "head_abbrev_argv": GitBuilder((), "`rev-parse --short HEAD`"),
+    "merge_base_argv": GitBuilder(("a: string", "b: string"), "`merge-base <a> <b>`"),
+    "branch_tips_argv": GitBuilder((), "`for-each-ref --format=%(objectname) %(refname:short) refs/heads`"),
+    "has_remote_tracking_argv": GitBuilder(
+        (), "`for-each-ref --count=1 --format=%(refname) refs/remotes/`"
+    ),
+    # Reading the working tree.
+    "status_argv": GitBuilder((), "`--no-optional-locks status --porcelain=v2 -z --untracked-files=all`"),
+    "status_porcelain_argv": GitBuilder((), "`--no-optional-locks status --porcelain`"),
+    "staged_paths_argv": GitBuilder((), "`diff --cached --name-only -z`"),
+    "unmerged_stages_argv": GitBuilder(("path: string",), "`ls-files -u -z -- <path>`"),
+    "check_ignore_argv": GitBuilder(
+        (), "`--no-optional-locks check-ignore -z --stdin`, the paths in `stdin`",
+    ),
+    # Reading diffs. A load is what the Git builders section of the reference says.
+    "diff_argv": GitBuilder(
+        (
+            "load: load",
+            "parent_target?: string",
+            "untracked?: boolean",
+            "pathspecs?: list of string",
+            "excludes?: list of string",
+        ),
+        "`diff --no-ext-diff --find-renames --no-color <revisions> -- <paths>` for the load, or "
+        "`show_argv`'s "
+        "command for a commit. `untracked` changes nothing here",
+    ),
+    "numstat_argv": GitBuilder(
+        ("load: load", "parent_target?: string", "pathspecs?: list of string"),
+        "The same load with `--numstat -z`",
+    ),
+    "show_argv": GitBuilder(
+        ("ref: string", "pathspecs?: list of string", "excludes?: list of string"),
+        "`show --format= --no-ext-diff --find-renames --no-color <ref> -- <paths>`",
+    ),
+    "untracked_diff_argv": GitBuilder(
+        ("path: string",),
+        "`diff --no-color --no-ext-diff --no-index -- /dev/null <path>`: a new file as a diff",
+    ),
+    "conflict_diff_argv": GitBuilder(
+        ("paths: list of string",), "`diff --no-ext-diff --find-renames --no-color --ours -- <paths>`"
+    ),
+    "file_at_argv": GitBuilder(
+        ("ref: string", "path: string"), "`show <ref>:<path>`; an empty `ref` is the index",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class StateKey:
+    """One shared state key: its form, whether a client may write it, and
+    what it holds."""
+
+    form: str  # "map", "set", "list" or "scalar"
+    writable: bool
+    summary: str
+
+
+STATE_KEYS: Mapping[str, StateKey] = {
+    "service_id": StateKey("scalar", False, "This service's id, as the hello reply names it."),
+    "names": StateKey("map", True, "Session id to the name a person gave it."),
+    "generated_names": StateKey("map", True, "Session id to its generated title."),
+    "cli_titles": StateKey("map", True, "Session id to the title the CLI gave it."),
+    "emojis": StateKey("map", True, "Session id to its tab emoji."),
+    "favorites": StateKey("set", True, "The favorite sessions' ids."),
+    "archived": StateKey("set", True, "The archived sessions' ids. `store.archive` is the way to change it."),
+    "archived_at": StateKey("map", True, "Session id to when it was archived, in seconds."),
+    "archived_projects": StateKey("set", True, "The archived projects."),
+    "project_worktree": StateKey("map", True, "Project to whether its new sessions start in a worktree."),
+    "project_sandbox": StateKey("map", True, "Project to whether its new sessions start sandboxed."),
+    "sandboxed_sessions": StateKey("map", True, "Session id to its sandbox's box id."),
+    "sandbox_grants": StateKey(
+        "map", True, "Box id to its directory grants. Use `sandbox.allow` and `sandbox.revoke`.",
+    ),
+    "sandbox_project_grants": StateKey("map", True, "Project to the grants its new sessions start with."),
+    "sandbox_tools": StateKey("map", True, "Box id to the session tools it is offered. Use `sandbox.tools`."),
+    "project_order": StateKey(
+        "list", True, "The projects in sidebar order. `store.move-project` is the way to change it.",
+    ),
+    "virtual_projects": StateKey("map", True, "Project name to its folder, for one kept with no sessions."),
+    "expanded_groups": StateKey(
+        "set", False, "Sidebar groups once open. No longer written; a device keeps its own.",
+    ),
+    "session_prs": StateKey("map", True, "Session id to its pull request records."),
+    "session_attachments": StateKey("map", True, "Session id to its attachment records."),
+    "session_drafts": StateKey("map", True, "Session id to its unsent prompt."),
+    "new_chat_drafts": StateKey("map", True, "Draft id to a new chat not started yet."),
+    "process_baselines": StateKey(
+        "map", True, "Session id to the processes that don't count as it being busy.",
+    ),
+    "session_forwards": StateKey("map", True, "A session id to the id it continued under."),
+    "pending_detaches": StateKey("map", True, "Session id to a background handoff still to be replayed."),
+    "resume_on_start": StateKey(
+        "list", False, "The sessions a stopping service ended, resumable when reopened.",
+    ),
+    "ptys": StateKey("map", False, "The pty table, by app id."),
+    "pty_next_id": StateKey("map", False, "The next pty id, by app id."),
+    "inflight_copies": StateKey("list", False, "The tree copies `fs.paste` has in flight."),
+    "notifications": StateKey("list", False, "The notification history. Use the `notify.*` requests."),
+    "diff_notes": StateKey("map", False, "Session id to the marks on its diff. Use `diff.set-notes`."),
+    "pending_diffs": StateKey("map", False, "Session id to a `show_diff` asked for with no client attached."),
+    "settings": StateKey("map", True, "The service's settings, written one entry at a time (below)."),
+}
+
+# The session tools, each with two settings: `mcp_tool_<tool>` (offered at all)
+# and `sandbox_tool_<tool>` (offered to a sandboxed session by default).
+SESSION_TOOLS: tuple[str, ...] = (
+    "set_session_title",
+    "open_in_editor",
+    "show_diff",
+    "diff_context",
+    "annotate_diff",
+    "highlight_diff",
+    "clear_diff_marks",
+    "show_image",
+    "notify_user",
+    "attach_pr",
+    "start_session",
+    "read_terminal",
+    "run_in_terminal",
+)
+
+
+@dataclass(frozen=True)
+class ServiceSetting:
+    """One entry of the `settings` key: the JSON type its value must have,
+    and what it does."""
+
+    kind: str  # "boolean", "integer" or "string"
+    summary: str
+
+
+SERVICE_SETTINGS: Mapping[str, ServiceSetting] = {
+    "claude_cli_path": ServiceSetting("string", "Where the CLI is when the service's `PATH` doesn't say."),
+    "notify_command": ServiceSetting(
+        "string", "A command run for a notification when no client is attached.",
+    ),
+    "title_model": ServiceSetting(
+        "string", "The `--model` for generated session titles; empty is automatic.",
+    ),
+    "icon_model": ServiceSetting("string", "The `--model` for generated project icons; empty is automatic."),
+    "auto_renew_login": ServiceSetting("boolean", "Repair an expired CLI login with one headless run."),
+    "worktree_new_sessions": ServiceSetting("boolean", "Start new sessions in a git worktree."),
+    "clone_directory": ServiceSetting("string", "Where a cloned repository goes by default."),
+    "sandbox_new_sessions": ServiceSetting("boolean", "Start new sessions sandboxed."),
+    "sandbox_bypass_permissions": ServiceSetting(
+        "boolean", "Sandboxed sessions default to bypassing permissions.",
+    ),
+    "sandbox_share_gh": ServiceSetting("boolean", "Share the GitHub CLI login with sandboxed sessions."),
+    "sandbox_share_ssh": ServiceSetting("boolean", "Share the ssh agent with sandboxed sessions."),
+    "sandbox_settings_editable": ServiceSetting(
+        "boolean", "Let sandboxed sessions write the CLI's settings.",
+    ),
+    "attach_prompt_prs": ServiceSetting("boolean", "Attach pull requests a session's first prompt links to."),
+    "pr_title_sessions": ServiceSetting("boolean", "Title a session after its newest pull request."),
+    "cli_title_sessions": ServiceSetting("boolean", "Show the titles the CLI gives its sessions."),
+    "refresh_prs_on_launch": ServiceSetting("boolean", "Refresh pull requests once when a client starts."),
+    "archive_running_session": ServiceSetting(
+        "string", "Archiving a session with a running tab: `ask`, `exit` or `background`."
+    ),
+    "archive_worktree": ServiceSetting(
+        "string", "A session's worktree on archive: `ask`, `always` or `never`.",
+    ),
+    "archive_on_claude_ai": ServiceSetting("boolean", "Mirror archiving to the session's claude.ai page."),
+    "auto_delete_archived_after": ServiceSetting(
+        "integer", "Trash archived sessions after this many units; 0 is never.",
+    ),
+    "auto_delete_archived_unit": ServiceSetting("string", "That unit: `days`, `weeks`, `months` or `years`."),
+    "background_status_poll": ServiceSetting("boolean", "Poll background agents' status on a timer as well."),
+    "progress_termprop": ServiceSetting("boolean", "Read busy from the CLI's own progress announcements."),
+    "git_parent_branch": ServiceSetting(
+        "string", "The branch a session's branch is measured against when none is found.",
+    ),
+    "git_untracked": ServiceSetting("boolean", "Include untracked files in working-tree reviews."),
+    "git_log_page": ServiceSetting("integer", "Commits per page of a commit list."),
+    "welcome_seen": ServiceSetting("boolean", "The first-run welcome has been answered."),
+    "gh_welcome_dismissed": ServiceSetting("boolean", "The GitHub CLI notice has been dismissed for good."),
+}
+
+# What another client may leave out or ignore, and why. The window sends the
+# requests for its own surfaces or its own timing; the rest of a session works
+# without them, and tests/test_api_reference.py pins the ones it never sends.
+OPTIONAL_TYPES: Mapping[str, str] = {
+    "composer": "Asks a client with a composer for something. Without one, ignore it.",
+    "shells": "About shells beside a session. A client that opens none can ignore it.",
+    "focus.terminal": "Asks for the keyboard to go to the terminal. A client can ignore it.",
+    "resolver.arm": (
+        "The window sends this when a tab is first shown. The service binds a session to its id without it."
+    ),
+    "transcript.update": (
+        "The window's footer asks for a read sooner. The service follows each transcript itself."
+    ),
+    "transcript.set": "No Collins client sends this. The service finds each session's transcript itself.",
+    "transcript.relocate": "No Collins client sends this. The service follows a transcript the CLI moved.",
+    "prs.restore": (
+        "Shows a session's saved pull requests before the next read. Pull requests in the transcript come "
+        "back "
+        "on their own; one found only by a branch lookup is saved nowhere else."
+    ),
+    "cwd.settle": "Only for a file view that follows the agent's directory.",
+    "shells.follow": "Only for a client with shells beside a new chat.",
+    "panel.key": "Only for a client that keeps its shells' scrollback between runs.",
+    "panel.history": "Only for a client that keeps its shells' scrollback between runs.",
+    "finish.witness": "No Collins client sends this; only the test suite does.",
+    "baseline.absorb": "No Collins client sends this; only the test suite does.",
+    "baseline.cmdlines": "No Collins client sends this; only the test suite does.",
+    "sandbox.forget": "No Collins client sends this. `store.forget` already does it.",
+}
 
 # Names a message's own fields can't take: the envelope's. A response is told
 # apart by `re` and no `t`, so `ok`, `msgid` and `args` are a response's only
