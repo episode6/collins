@@ -95,8 +95,11 @@ oversized (below). The server does **not** rewrite, reorder or coalesce what
 it forwards.
 
 **Forwarded and also read.** Some of what passes through unchanged the server
-reads for itself: OSC 9;4 progress (ended by `BEL` or `ST`; states 0 to 4,
-the percentage clamped to 0–100), `BEL`, the `OSC 0` and `OSC 2` titles,
+reads for itself: OSC 9;4 progress (`OSC 9 ; 4 ; <state> ; <percent>`
+ended by `BEL` or `ST`; states 0 to 4, the percentage clamped to 0–100; the
+percent field may be missing, as Claude Code 2.1.288 wrote `9;4;3`, or
+present and empty, as 2.1.316 writes `9;4;3;`, and a reader accepts both),
+`BEL`, the `OSC 0` and `OSC 2` titles,
 every mode set and reset and the alternate-screen switch. They are how the
 server knows the agent is working and keeps its mode tracker current, and the
 client sees them too. OSC 9;4 is not stripped.
@@ -166,6 +169,7 @@ knows.
 | `DCS $qr ST` | DECRQSS for anything but `m`. |
 | `DCS +q436f ST` | XTGETTCAP for a name other than `TN`. |
 | `OSC 9 ; 4 ; 1 ; 50 ST` | Progress: forwarded unchanged, and read by the server. |
+| `OSC 9 ; 4 ; 3 ; ST` | Progress with an empty percent field, as Claude Code 2.1.316 writes it: forwarded unchanged, and read as state 3. |
 
 ### Tokenizing the stream (normative where it meets the tables)
 
