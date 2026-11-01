@@ -277,6 +277,14 @@ plain text with no escape sequences, under these rules:
 - the text is truncated to the protocol's text bound (1 MiB of characters),
   oldest rows first.
 
+**Painted text.** `paint {pty, text}` inserts text into the pty's output
+stream as if the child had written it: the model takes it, and every
+attached client receives it as output frames. The pty itself is not
+written, so the child never sees it. It is how a client puts a line of its
+own in front of everyone watching the pty (Collins' session-manager notes in
+an agent tab, a panel shell's saved scrollback painted back on reopen), and a
+server serves it at Level 1.
+
 ## The active client (normative)
 
 Several clients may attach to one pty. One of them is **active**: the pty is

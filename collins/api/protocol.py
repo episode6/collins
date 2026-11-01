@@ -1466,7 +1466,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "paint",
-        "Insert text into a pty's output stream (rule 2).",
+        "Insert text into a pty's output stream as if the child had written it: the screen model takes "
+        "it and every attached client sees it. The pty itself is not written.",
         family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
     ),

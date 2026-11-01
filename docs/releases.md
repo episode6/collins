@@ -94,7 +94,9 @@ downloads of each version, see the
   not its sender has attached. The stream fixtures under
   `tests/fixtures/streams/` are MIT too, so the measurements travel with the
   page; the answers check reads the page's tables and holds each row to a
-  real VTE and to the service, so the page cannot drift from either.
+  real VTE and to the service, so the page cannot drift from either. The
+  message reference's line on `paint` says what the message does, where it
+  cited a rule of a private design document.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another

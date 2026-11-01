@@ -134,6 +134,19 @@ def test_the_prose_keeps_a_server_author_out_of_the_services_code():
         assert module in examples, module
 
 
+PRIVATE_REFERENCE = re.compile(r"\(rule \d|\brule \d+\b|\brulings?\b|§|\bPR-[0-9S]|\bD\d{1,2}\b")
+
+
+def test_the_reference_cites_no_private_spec():
+    """What the generator prints is read by a server author who has no
+    design spec: a summary that said "(rule 2)", a section comment's D-number
+    or PR reference means nothing to them. The generator strips the section
+    titles' references; the summaries and field descriptions are held here."""
+    for number, line in enumerate(_read(gen.OUTPUT).splitlines(), 1):
+        match = PRIVATE_REFERENCE.search(line)
+        assert match is None, f"docs/api/messages.md:{number} cites the private spec: {match.group(0)!r}"
+
+
 def test_the_git_builders_table_is_the_registry():
     assert set(p.GIT_BUILDERS) == set(gitops.BUILDERS)
     for name, entry in gitops.BUILDERS.items():
