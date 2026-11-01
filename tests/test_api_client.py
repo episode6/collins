@@ -88,7 +88,8 @@ def test_the_store_s_lookups_drain_the_primary_on_the_main_thread_alone(monkeypa
 
 
 def test_a_mismatch_carries_what_the_server_listed():
-    assert ProtocolMismatch("x", 0, 1).caps == frozenset()
+    assert ProtocolMismatch("x", 0, 1).caps is None  # it named none: a pre-family service (ruling 18)
+    assert ProtocolMismatch("x", 0, 1, []).caps == frozenset()
     assert ProtocolMismatch("x", 0, 1, ["internal"]).caps == frozenset({"internal"})
 
 

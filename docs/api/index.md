@@ -638,7 +638,10 @@ server, and only a value that asks for a feature the server lacks is refused.
 
 **What you say you serve.** List the families you serve in your hello's `caps`
 and your product's name in `implementation`. A family you do not list is one
-you do not serve. Leave `local` out and omit `local_proof` if you offer no proof.
+you do not serve. You should send `implementation` even if you list no family:
+a hello with neither is the shape of a Collins service from before families,
+and the Collins window answers it by offering to restart that service. Leave
+`local` out and omit `local_proof` if you offer no proof.
 
 **How a client reaches you.** Over ssh a client runs a discovery command to
 learn your socket's path, so document yours.

@@ -46,14 +46,33 @@ __all__ = [
     "call",
     "current",
     "has",
+    "hello_predates_families",
     "implementation",
     "is_local",
+    "predates_families",
+    "serves_restart",
     "service_home",
     "service_host",
     "set_current",
 ]
 
 log = logging.getLogger(__name__)
+
+# The caps that came with the families, every one but those a pre-family
+# service could already list (`local`, `debug`, `git`, `files`).
+_SINCE_FAMILIES = frozenset(
+    {
+        protocol.CAP_PRS,
+        protocol.CAP_SANDBOX,
+        protocol.CAP_TOOLS,
+        protocol.CAP_JOBS,
+        protocol.CAP_USAGE,
+        protocol.CAP_BACKGROUND,
+        protocol.CAP_SHELLS,
+        protocol.CAP_COMPOSER,
+        protocol.CAP_INTERNAL,
+    }
+)
 
 Reply = Callable[[dict], None]
 Refused = Callable[[RequestRefused], None]
@@ -174,6 +193,32 @@ def has(cap: str) -> bool:
         return True
     families = getattr(_current, "families", None)
     return True if families is None else cap in families
+
+
+def hello_predates_families(hello: object) -> bool:
+    """Whether a hello reply has the one shape only a pre-family Collins
+    service ever had (server-side spec D18): no `implementation`, and none of
+    the family caps that came with it. Its caps are within `local`, `debug`,
+    `git` and `files`. No other server is read this way, since a server
+    should name itself (the Conformance section), and nothing is ever read
+    off the name."""
+    if not isinstance(hello, dict) or not hello or hello.get("implementation"):
+        return False
+    return not _SINCE_FAMILIES.intersection(str(cap) for cap in hello.get("caps") or ())
+
+
+def predates_families() -> bool:
+    """`hello_predates_families` of the last hello: the service still runs
+    from before this window's version, which a package upgrade leaves it doing.
+    The window then says so in a banner with a *Restart service* button."""
+    return hello_predates_families(getattr(_current, "hello", None))
+
+
+def serves_restart() -> bool:
+    """Whether `service.restart` may be sent: a service that lists `internal`,
+    or a pre-family Collins service, which serves it without listing it (D18:
+    the identification is the justification)."""
+    return has(protocol.CAP_INTERNAL) or predates_families()
 
 
 def absent(cap: str) -> RequestRefused:

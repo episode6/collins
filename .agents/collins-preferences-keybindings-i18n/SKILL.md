@@ -14,6 +14,13 @@ description: >-
 
 # Preferences, keybindings, themes, translations
 
+**Families.** `prefslayout.GROUP_FAMILIES` names the groups a service's family
+owns whole (server-side spec D5): with the family not listed the dialog builds no
+such group, on either page. A row of its own (`composer_on_typing`,
+`show_usage_panel`, the clone folder) is added only after an `apilink.has`. The
+Service page's description is the host, then which server it is
+(`apilink.implementation`, the hello's word, escaped).
+
 ## Settings
 
 `state.DEFAULT_SETTINGS` (in `state.py`) is the catalogue: every key with a

@@ -69,6 +69,10 @@ ASKED_ELSEWHERE = {
     # D5: `tool` events are accepted from any server and `tool-reply` is only
     # ever an answer to one, so a server that sent the one hears the other.
     "toolclient:ToolClient._reply:tool-reply": "only an answer to a `tool` event the server sent",
+    # `apilink.serves_restart`, which `test_a_restart_asks_its_own_question`
+    # holds these two to: a pre-family Collins service serves it unlisted (D18).
+    "app:App.restart_service:service.restart": "behind apilink.serves_restart",
+    "app:App.cancel_service_restart:service.restart": "behind apilink.serves_restart",
     # The chip exists only on a session with a box, and its one road to the
     # service is `SandboxChip._ask`, which asks.
     "sandboxchip:SandboxChip._rebuild:sandbox.plan": "SandboxChip._ask asks",
@@ -209,6 +213,16 @@ def test_every_family_request_is_behind_its_ask() -> None:
     )
 
 
+def test_a_restart_asks_its_own_question() -> None:
+    def is_ask(node: ast.AST) -> bool:
+        return isinstance(node, ast.Call) and _dotted(node.func) == "apilink.serves_restart"
+
+    restarts = [site for site in family_sites() if site[5] == "service.restart"]
+    assert len(restarts) == 2
+    for _module, qualname, _family, node, function, _what in restarts:
+        assert function is not None and pathless.behind_an_ask(function, node, is_ask), qualname
+
+
 def test_every_exception_still_matches_a_site() -> None:
     found = {f"{module}:{qualname}:{what}" for module, qualname, _f, _n, _fn, what in family_sites()}
     stale = sorted(set(ASKED_ELSEWHERE) - found)
@@ -315,6 +329,34 @@ def test_has_with_nothing_to_go_by_says_nothing_is_missing() -> None:
         assert apilink.has(protocol.CAP_PRS)  # a fake with no hello to go by
     finally:
         apilink.set_current(None)
+
+
+@pytest.mark.parametrize(
+    ("hello", "predates"),
+    [
+        # The one shape: what a pre-family Collins service's hello could say.
+        ({"caps": ["local", "git", "files"]}, True),
+        ({"caps": ["local", "debug", "git", "files"], "version": "0.1.4"}, True),
+        ({"caps": []}, True),
+        ({}, False),  # no hello yet
+        # A name, or any family, and it is a server of this API's.
+        ({"caps": [], "implementation": "stub-server"}, False),
+        ({"caps": ["git", "files"], "implementation": "clinic-server"}, False),
+        ({"caps": ["local", "prs"]}, False),
+        ({"caps": ["internal"]}, False),
+    ],
+)
+def test_only_one_hello_is_read_as_a_pre_family_service(bare_link, hello, predates) -> None:
+    bare_link.hello = hello
+    bare_link.families = frozenset(hello.get("caps") or ())
+    assert apilink.predates_families() is predates
+    assert apilink.serves_restart() is predates or protocol.CAP_INTERNAL in bare_link.families
+
+
+def test_a_restart_with_no_link_is_nobody_s_business() -> None:
+    apilink.set_current(None)
+    assert apilink.predates_families() is False
+    assert apilink.serves_restart() is True  # as `has` answers with no link
 
 
 def test_implementation_is_bounded(bare_link) -> None:

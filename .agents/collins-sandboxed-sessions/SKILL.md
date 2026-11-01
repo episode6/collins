@@ -42,6 +42,11 @@ permission prompts stay *on* inside by default
 (`sandbox_bypass_permissions` is False), and why docs and copy never
 promise containment.
 
+**With no `sandbox` family** (server-side spec D5) the window treats the probe's
+word as unknown whatever `service.status` says (`App._refresh_service_status`), so
+the checkbox and the pin stay hidden on the rule they already had; the
+Preferences group is not built and `SandboxChip._ask` sends nothing.
+
 ## The pieces
 
 **`sandboxplan.py` (GTK-free, unit-tested).** `build_plan(Inputs)` is pure

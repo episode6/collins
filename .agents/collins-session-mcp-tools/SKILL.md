@@ -33,6 +33,12 @@ The config file itself is per app id under
 `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock`. Every tool's definition rides in
 each session's context, which is why the Token use disclosure lists them.
 
+**With no `tools` family** (server-side spec D5): `tool` events are still heard
+and `tool-reply` only ever answers one; the attachments handle is hidden; `PUT
+/api/upload` and the `file` and `remote` blobs go nowhere (`remoteuploads.upload`,
+`blobcache.fetch`), and a drop is refused with a toast. `show_diff` with no `git`
+answers "This service has no git" and opens no page.
+
 ## The three modules
 
 **`mcp_shim.py` — stdlib only, imports nothing from `collins`.** It is spawned

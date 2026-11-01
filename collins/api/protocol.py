@@ -3280,6 +3280,8 @@ CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
             "`service.status` needs only `version` and `protocol`.",
             "A server with no local proof leaves `local_proof` out of its hello and refuses `local` "
             "`refused`. The client then stays remote, which is correct.",
+            "A server should send `implementation`. A hello with neither that nor any family is the shape "
+            "of a service from before families, and a client may offer to restart it.",
         ),
         status_fields=("version", "protocol", "ptys", "busy", "clients", "started", "pid", "cli", "home"),
     ),

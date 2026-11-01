@@ -438,7 +438,11 @@ request or surface, as `is_local()` is for a local extra (server-side spec
 D5): a surface whose family the service does not list is hidden, not
 disabled, and none of that family's requests, blobs or uploads leaves the
 client. With no link at all it answers yes (the service's own process, a test,
-a check's bare widgets); the last hello stands while a link is down. Each
+a check's bare widgets); the last hello stands while a link is down. A hello
+with no `implementation` and no family cap is a pre-family Collins service, the
+one thing that field's absence is read for (`apilink.predates_families`, D18): a
+package upgrade leaves one running, every family stays hidden, and the window's
+banner offers *Restart service* (`apilink.serves_restart`). Each
 transport answers what a refusal would with no round trip (`remotegit`,
 `remotefiles`, both installed on every hello; `remoteprs`, `jobclient`,
 `modelcatalog`, `blobcache.fetch` by the blob's kind, `remoteuploads`), so a

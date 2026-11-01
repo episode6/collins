@@ -37,6 +37,9 @@ The data (every key optional)::
                 blob kinds and an upload are answered `unknown` (404 for the
                 HTTP two) and recorded as ``refused`` with the type, so
                 `check_server_families.py` can hold the window to sending none
+    legacy_hello  true beside a caps_drop of the nine new family caps: the hello
+                of a pre-family Collins service (spec D18), which has no
+                `implementation`, and `service.restart` is still served
     refuse_subscribe  how many of the first `subscribe`s to refuse `unknown`: a
                 server whose first subscribe fails, which is the Reconnecting
                 banner and no failed startup (spec D6)
@@ -98,10 +101,22 @@ def _refuse_subscribe(count: int) -> None:
     server.Connection._answer = answer
 
 
-def _drop_caps(dropped: frozenset) -> None:
+def _drop_caps(dropped: frozenset, legacy: bool = False) -> None:
     """Serve as a server that does not list *dropped* would: class-level, ahead
-    of the `ApiServer` the service builds right after the stubs load."""
+    of the `ApiServer` the service builds right after the stubs load. The hello
+    keeps its `implementation` (D18: a service with every family dropped is no
+    pre-family service) unless *legacy* says it is one."""
     from collins.api import protocol, server
+
+    if legacy:
+        real_hello = server.ApiServer.hello
+
+        def hello(self, connection, message):
+            reply = real_hello(self, connection, message)
+            reply.pop("implementation", None)
+            return reply
+
+        server.ApiServer.hello = hello
 
     forms = {("spawn", "kind", "shell"): protocol.CAP_SHELLS, ("close", "mode", "background"): protocol.CAP_BACKGROUND}
     blob_kinds = {
@@ -124,7 +139,9 @@ def _drop_caps(dropped: frozenset) -> None:
     real_answer = server.Connection._answer
 
     def answer(self, message):
-        if family_of(message) in dropped and self.client is not None:
+        if family_of(message) in dropped and self.client is not None and not (
+            legacy and message.type == "service.restart"
+        ):
             _record("refused", [message.type])
             return protocol.refuse(
                 message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
@@ -189,7 +206,7 @@ def apply() -> None:
 
             prdetail.fetch_threads = fetch_threads
     if data.get("caps_drop"):
-        _drop_caps(frozenset(data["caps_drop"]))
+        _drop_caps(frozenset(data["caps_drop"]), bool(data.get("legacy_hello")))
     if data.get("refuse_subscribe"):
         _refuse_subscribe(int(data["refuse_subscribe"]))
     if "gh_json" in data:

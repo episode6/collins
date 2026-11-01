@@ -18,7 +18,9 @@ family dropped, which is `core` alone. Each holds the window to:
 A run drops nothing and holds every `SURFACES` predicate to true, so that a
 "hidden" above can't pass because the surface was never there. A last one has
 the service refuse the first `subscribe`, which must be the Reconnecting banner
-and not a failed startup (spec D6).
+and not a failed startup (spec D6). A `legacy` run is the hello of a Collins
+service from before families, with the banner and the restart that are the way
+out of it (spec D18).
 
 Each family's run is its own process (a window builds from the hello it finds),
 run a few at a time, so the check stays inside CI's per-check budget:
@@ -47,7 +49,7 @@ def driver() -> int:
     from collins.api import protocol
 
     runs = [cap for cap in protocol.CONFORMANCE_FAMILIES if cap != protocol.CAP_DEBUG]
-    runs += ["all", "none", "refused-subscribe"]
+    runs += ["all", "none", "refused-subscribe", "legacy"]
 
     def one(family: str) -> tuple[str, int, str]:
         try:
@@ -173,7 +175,8 @@ while True:
     AppState().set_group_expanded(f"proj:{os.path.basename(PROJECT)}", True)
 
     every = [cap for cap in protocol.CONFORMANCE_FAMILIES if cap != protocol.CAP_DEBUG]
-    dropped = {"all": every, "none": [], "refused-subscribe": []}.get(family, [family])
+    since_families = [cap for cap in every if cap not in (protocol.CAP_GIT, protocol.CAP_FILES)]
+    dropped = {"all": every, "none": [], "refused-subscribe": [], "legacy": since_families}.get(family, [family])
     results = {"passed": 0, "failed": 0}
 
     def check(label: str, ok: object, detail: object = "") -> None:
@@ -383,10 +386,13 @@ while True:
             tab._stash_draft("")
         elif cap == protocol.CAP_INTERNAL:
             before = protocol.PROTOCOL + 1
-            words = win.get_application()._mismatch_text(ProtocolMismatch("x", 0, before))
+            app_ = win.get_application()
+            words = app_._mismatch_text(ProtocolMismatch("x", 0, before, [protocol.CAP_GIT]))
             check("the mismatch dialog offers Quit only", words[2] is False)
-            words = win.get_application()._mismatch_text(ProtocolMismatch("x", 0, before, [protocol.CAP_INTERNAL]))
+            words = app_._mismatch_text(ProtocolMismatch("x", 0, before, [protocol.CAP_INTERNAL]))
             check("…unless the server lists internal", words[2] is True)
+            words = app_._mismatch_text(ProtocolMismatch("x", 0, before))
+            check("…or named no caps, as only a pre-family service did", words[2] is True)
             win.lookup_action("restart-service").activate(None)
             e2e_service.settle(200)
             check("Restart service asks nothing", win.get_visible_dialog() is None)
@@ -411,6 +417,8 @@ while True:
     os.environ.pop("COLLINS_KEEPER", None)
     if family == "refused-subscribe":
         e2e_service.start_service(stubs={"refuse_subscribe": 1})
+    elif family == "legacy":
+        e2e_service.start_service(stubs={"caps_drop": dropped, "legacy_hello": True})
     else:
         e2e_service.start_service(stubs={"caps_drop": dropped})
     app = App()
@@ -451,6 +459,21 @@ while True:
             and all(apilink.has(cap) for cap in every if cap not in dropped),
             apilink.current().families,
         )
+        banner = win.reconnect_banner
+        if family == "legacy":
+            check("it is read as a pre-family service", apilink.predates_families())
+            check("the banner is up", wait_until(banner.get_revealed), banner.get_title())
+            check("…and says so", "predates this window" in (banner.get_title() or ""), banner.get_title())
+            check(
+                "…naming the command for another app id",
+                "systemctl --user restart collins-service.service" in (banner.get_title() or ""),
+                banner.get_title(),
+            )
+            check("…with its button", banner.get_button_label() == "Restart service", banner.get_button_label())
+            check("the app menu still has no Restart", "win.restart-service" not in actions(win.sidebar._menu))
+        else:
+            check("not read as a pre-family service", not apilink.predates_families())
+            check("no banner", wait_until(lambda: not banner.get_revealed()), banner.get_title())
         session = win.store.get_session(SID)
         win.open_session(session)
         page = win._page_for(SID)
@@ -474,14 +497,32 @@ while True:
                 elif label not in gone:
                     check(f"{cap}: {label} shows", shows(context))
 
-        for cap in dropped:
-            instead(cap, win, tab, toasts)
+        if family == "legacy":
+            win._on_banner_button(banner)
+            dialog = win.get_visible_dialog()
+            check("the button asks with the blast radius", dialog is not None, dialog)
+            if dialog is not None:
+                dialog.force_close()
+                e2e_service.settle(200)
+            win.get_application().cancel_service_restart()  # `service.restart`: served, and the record below says so
+            link = apilink.current()
+            hello, families = link.hello, link.families
+            link.hello = {**hello, "implementation": "collins-service"}
+            link.families = families | {protocol.CAP_PRS}
+            win.apply_families()
+            check("the next hello that lists a family takes the banner down", not banner.get_revealed())
+            link.hello, link.families = hello, families
+            win.apply_families()
+        else:
+            for cap in dropped:
+                instead(cap, win, tab, toasts)
 
         check("a prompt lands", tab.inject_prompt("a prompt", when_empty=True))
         check("…in the agent", wait_until(lambda: shim_said("a prompt")))
         win._graceful_close(page)
         check("the tab closes", wait_until(lambda: win.tab_view.get_n_pages() == 0, 15.0), win.tab_view.get_n_pages())
         e2e_service.settle(200)
+        # The legacy run's Restart went through, and stayed out of this list.
         refused = sorted({call["args"][0] for call in e2e_service.stub_calls() if call["stub"] == "refused"})
         check("the service was asked nothing of what it does not list", not refused, refused)
 

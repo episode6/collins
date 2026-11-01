@@ -2481,6 +2481,8 @@ class App(Adw.Application):
             apilink.implementation() or "a server with no name",
             ", ".join(sorted(self._service_link.families)) or "no family",
         )
+        if apilink.predates_families():
+            log.warning("the service predates this window: it lists no family until it restarts")
 
     def _install_git_transport(self) -> None:
         """Route git through the service, on every hello (the first connect
@@ -2705,7 +2707,7 @@ class App(Adw.Application):
         tabs resume) or ``idle`` (the service waits for no session to be
         busy; "Restarting when idle" stands in the banner's place until
         then, with Cancel)."""
-        if not apilink.has(protocol.CAP_INTERNAL):
+        if not apilink.serves_restart():
             return  # no way here on such a service: Restart Service is hidden (D5)
         link = self._service_link
         if when == "now":
@@ -2728,7 +2730,7 @@ class App(Adw.Application):
     def cancel_service_restart(self) -> None:
         """The banner's Cancel: the restart that waits for the sessions is
         called off."""
-        if not apilink.has(protocol.CAP_INTERNAL):
+        if not apilink.serves_restart():
             return
         try:
             self._service_link.call({"t": "service.restart", "when": "cancel"})
@@ -2752,11 +2754,13 @@ class App(Adw.Application):
         service = mismatch.service if mismatch.service is not None else "?"
         # Only a server that lists `internal` is one a restart starts again
         # (D5): this client stops whatever holds the socket, and another
-        # program's server is not this client's to stop.
+        # program's server is not this client's to stop. A server that named
+        # no caps is a pre-family Collins service (ruling 18), the one a
+        # restart helps.
         can_restart = (
             isinstance(mismatch.service, int)
             and mismatch.service < mismatch.client
-            and protocol.CAP_INTERNAL in mismatch.caps
+            and (mismatch.caps is None or protocol.CAP_INTERNAL in mismatch.caps)
         )
         heading = _("Collins and its service speak different protocols")
         if can_restart:
@@ -3187,6 +3191,7 @@ class App(Adw.Application):
             # Not connected as it opens (a first subscribe that was refused,
             # a window opened mid-reconnect): the banner says so at once.
             self._on_connection_state(self._connection.state)
+        window.sync_legacy_banner()
         self._present(window)
         return window
 

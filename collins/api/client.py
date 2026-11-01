@@ -90,14 +90,16 @@ class ProtocolMismatch(ConnectionLost):
     refused ``protocol``, or the hello's window and ours do not meet):
     *service* and *client* are the two protocol versions, which the
     mismatch dialog names (§3.21). *caps* is what the server listed, its
-    hello's or its refusal's `caps` (empty when it named none): the dialog
-    offers *Restart Service* only to a server that lists `internal` (D5)."""
+    hello's or its refusal's `caps`, and None when it named none, which only a
+    pre-family Collins service ever did (spec D18, ruling 18). The dialog
+    offers *Restart Service* to that one, and otherwise only with `internal`
+    among them (D5)."""
 
-    def __init__(self, message: str, service: int | None, client: int, caps=()) -> None:
+    def __init__(self, message: str, service: int | None, client: int, caps=None) -> None:
         super().__init__(message)
         self.service = service
         self.client = client
-        self.caps = frozenset(str(cap) for cap in caps or ())
+        self.caps = None if caps is None else frozenset(str(cap) for cap in caps)
 
 
 # What a main-thread `call` sends on the primary and drains the landing queue
@@ -295,7 +297,7 @@ class SocketLink(apilink.Link):
                 f"and this Collins speaks {protocol.PROTOCOL}",
                 int(hello["protocol"]),
                 protocol.PROTOCOL,
-                hello.get("caps"),
+                None if apilink.hello_predates_families(hello) else hello.get("caps") or (),
             )
         self._open(self._sync, deadline)
         self._hello(self._sync, deadline)
@@ -381,7 +383,7 @@ class SocketLink(apilink.Link):
                     refusal.msgid.format_map(details),
                     service if isinstance(service, int) and not isinstance(service, bool) else None,
                     protocol.PROTOCOL,
-                    caps if isinstance((caps := details.get("caps")), list) else (),
+                    caps if isinstance((caps := details.get("caps")), list) else None,
                 ) from None
             raise ConnectionLost(f"hello refused: {refusal.msgid}") from None
 

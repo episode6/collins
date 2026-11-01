@@ -380,6 +380,10 @@ class MainWindow(Adw.ApplicationWindow):
         # A remote service that speaks another protocol, after the dialog's
         # Cancel: the name shown with a *Connect to…* button (set_mismatch).
         self._banner_mismatch = ""
+        # A service from before this window's version (spec D18): named
+        # with a *Restart service* button, for as long as its hello is the
+        # last one (sync_legacy_banner).
+        self._banner_legacy = False
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -1119,11 +1123,31 @@ class MainWindow(Adw.ApplicationWindow):
         asks `apilink.has` as it is shown or sent. Nothing is closed or
         opened here (no dock surgery on a hello): a page whose family went
         ends as its pty's or its next request's refusal says."""
+        self.sync_legacy_banner()
         self.sidebar.apply_families()
         for index in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(index).get_child()
             if isinstance(tab, TerminalTab):
                 tab.apply_families()
+
+    def sync_legacy_banner(self) -> None:
+        """Say so when the last hello is a pre-family Collins service's, which
+        a package upgrade leaves running (spec D18): every family stays hidden,
+        and this is the way out. It goes with the next hello that lists one."""
+        self._banner_legacy = apilink.predates_families()
+        self._sync_service_banner()
+
+    def _legacy_banner_title(self) -> str:
+        """The banner's words; for a service the button is not the only way
+        to reach (a remote's, or another app id's), the command too."""
+        title = _("This service predates this window. Restart it to use every feature.")
+        app = self.get_application()
+        label = app.connection_label() if hasattr(app, "connection_label") else ""
+        if label or (app is not None and app.get_application_id() != APP_ID):
+            title += " " + _("Or run {command} where it runs.").format(
+                command="systemctl --user restart collins-service.service"
+            )
+        return title
 
     def set_reconnecting(self, reconnecting: bool, name: str = "", detail: str = "") -> None:
         """Raise or lower the reconnect banner (`App._on_connection_state`).
@@ -1174,6 +1198,10 @@ class MainWindow(Adw.ApplicationWindow):
             banner.set_title(_("Restarting when idle"))
             banner.set_button_label(_("Cancel"))
             banner.set_revealed(True)
+        elif self._banner_legacy:
+            banner.set_title(self._legacy_banner_title())
+            banner.set_button_label(_("Restart service"))
+            banner.set_revealed(True)
         else:
             banner.set_revealed(False)
 
@@ -1184,6 +1212,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if self._banner_restart_pending and hasattr(app, "cancel_service_restart"):
             app.cancel_service_restart()
+            return
+        if self._banner_legacy:
+            self._ask_restart_service()
 
     def close_panel_ptys(self) -> None:
         """The app is quitting: every tab's panel shells end on the service
@@ -5993,9 +6024,11 @@ class MainWindow(Adw.ApplicationWindow):
         each open tab resumes its own once it is back, as a quit and a
         relaunch did before the service. Nothing on a service with no
         `internal`, which serves no `service.restart` (D5: its menu item is
-        hidden too). The CLI's background daemon and
+        hidden too), though a pre-family Collins service serves it without
+        listing it, and its banner's button comes here (D18). The CLI's
+        background daemon and
         its agents run on either way (D52)."""
-        if not apilink.has(protocol.CAP_INTERNAL):
+        if not apilink.serves_restart():
             return
         app = self.get_application()
         link = getattr(app, "_service_link", None)

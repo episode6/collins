@@ -112,6 +112,7 @@ Enough for a client to connect and show an empty list.
 - `subscribe`'s snapshot may be empty: no `item` and no `pty`, then a `rows` with an empty list.
 - `service.status` needs only `version` and `protocol`.
 - A server with no local proof leaves `local_proof` out of its hello and refuses `local` `refused`. The client then stays remote, which is correct.
+- A server should send `implementation`. A hello with neither that nor any family is the shape of a service from before families, and a client may offer to restart it.
 
 ### Level 1: Sessions and terminals
 

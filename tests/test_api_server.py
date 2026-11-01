@@ -159,7 +159,7 @@ def test_a_client_outside_the_window_is_refused_and_closed(served):
     assert reply["args"]["client"] == 99 and reply["args"]["service"] == protocol.PROTOCOL
     # The caps as the hello would list them: a client that cannot talk to this
     # server still reads what it is (the mismatch dialog's Restart Service, D5).
-    assert protocol.CAP_INTERNAL in reply["args"]["caps"]
+    assert protocol.CAP_INTERNAL in reply["args"]["caps"]  # ruling 18
     assert pump(2, lambda: client.closed)
 
 

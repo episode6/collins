@@ -30,6 +30,9 @@ from collins.api import protocol, server  # noqa: E402
 _held = []  # the open connections: a WebsocketConnection nothing holds is collected
 
 
+_named = {"implementation": "stub-server"}  # --predates: none (spec D18)
+
+
 def answer(message: dict) -> dict:
     kind, re_id = message.get("t"), message.get("id")
     if kind == "hello":
@@ -40,8 +43,8 @@ def answer(message: dict) -> dict:
             version="0.0.0",
             service_id="stub",
             host="stub",
-            implementation="stub-server",
             caps=[],
+            **_named,
         )
     if kind == "subscribe":
         return protocol.reply(re_id, items=0, ptys=0)
@@ -69,7 +72,13 @@ def on_websocket(_server, _msg, _path, connection, *_rest) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--app-id", default="com.episode6.Collins.Stub")
-    path = server.socket_path(parser.parse_args().app_id)
+    parser.add_argument(
+        "--predates", action="store_true", help="say hello as a Collins service from before families"
+    )
+    arguments = parser.parse_args()
+    if arguments.predates:
+        _named.clear()
+    path = server.socket_path(arguments.app_id)
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     if os.path.exists(path):
         os.unlink(path)

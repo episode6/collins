@@ -1583,6 +1583,11 @@ is hidden rather than greyed out:
 | `composer` | Typing into the composer: keys go to the agent, Send and the model and effort menus type into an empty box only, and a closed draft is kept rather than put back |
 | `internal` | *Restart service* and the CLI path row |
 
+The one exception is a `collins-service` older than this window, which an
+upgrade leaves running and which lists none of these. Nearly everything is
+hidden then too, and a banner says *This service predates this window* with a
+**Restart service** button.
+
 ## Preferences
 
 Every preference is saved in one of two files under `~/.config/collins/`:
