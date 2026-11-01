@@ -151,7 +151,11 @@ import it. It holds:
   the SPDX tag on exactly five files (the two pages, the generator,
   `protocol.py` and `sshremote.py`): a new module under `collins/api/` is GPL, and nothing
   of the private design spec belongs in a `MessageType.summary`, which
-  the public page prints verbatim.
+  the public page prints verbatim. The reference also prints what the
+  free fields name: `GIT_BUILDERS`, `STATE_KEYS`, `SERVICE_SETTINGS` and
+  `OPTIONAL_TYPES` in `protocol.py`, pinned by the same test to
+  `gitops.BUILDERS` and `state`; a new builder, shared key or service
+  setting fails it until listed, and regenerating the page follows.
 
 The module docstring's "Shapes the spec left to this module" records each
 field shape chosen beyond the spec's text; read it before adding a field.
