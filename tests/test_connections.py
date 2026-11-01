@@ -117,7 +117,7 @@ def test_a_row_without_a_command_is_the_default_and_stays_without_one():
 
 @pytest.mark.parametrize(
     "command",
-    ["x" * 513, "a\nb", "a\0b", "a\rb", "a\x1bb", "", "   ", None, 3, ["clinic"], {"a": 1}, True],
+    ["x" * 513, "a\nb", "a\0b", "a\rb", "a\x1bb", "a‮b", "", "   ", None, 3, ["clinic"], {"a": 1}, True],
 )
 def test_a_command_that_does_not_fit_costs_only_itself(command):
     """Rule 5: the row stays and the default is used, never the bad value."""

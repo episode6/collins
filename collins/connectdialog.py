@@ -229,7 +229,7 @@ class ConnectDialog(Adw.Dialog):
             return None
         command = self.command_entry.get_text().strip()
         if command and not sshremote.valid_command(command):
-            self._say(_("The discovery command must be one line."), error=True)
+            self._say(_("The discovery command must be one line of plain text."), error=True)
             return None
         # A Test with no name yet: the target stands in, cut to a name's
         # length (a valid target can be longer than NAME_MAX).

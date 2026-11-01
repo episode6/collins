@@ -799,7 +799,10 @@ def test_a_remote_app_id_follows_any_command():
 
 @pytest.mark.parametrize(
     "command",
-    ["", "   ", "a\0b", "a\nb", "a\rb", "a\x1bb", "a\tb", "a\x7fb", "x" * 513, None, 3, ["a"]],
+    [
+        "", "   ", "a\0b", "a\nb", "a\rb", "a\x1bb", "a\tb", "a\x7fb", "x" * 513, None, 3, ["a"],
+        "a‮b", "a‍b", "﻿clinic",  # Unicode format characters: shown back to a person
+    ],
 )
 def test_a_command_that_does_not_fit_is_refused(command):
     assert not sshremote.valid_command(command)

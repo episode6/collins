@@ -139,6 +139,9 @@ def drive(app) -> None:
     check("Test refuses two lines", "one line" in words and len(ssh_commands()) == ran, words)
     dialog.add_btn.emit("clicked")
     check("Add refuses two lines", app.connections.all() == [] and "one line" in dialog.status.get_text())
+    dialog.command_entry.set_text("clinic‮server")
+    words = run_test(dialog)
+    check("Test refuses a format character", "one line" in words and len(ssh_commands()) == ran, words)
 
     # Add saves it, and clears the form.
     dialog.command_entry.set_text("clinic-server --socket")

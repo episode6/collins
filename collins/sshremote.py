@@ -86,6 +86,7 @@ import stat
 import subprocess
 import threading
 import time
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -257,10 +258,12 @@ def ssh_options(target: Target) -> list[str]:
 
 def valid_command(command: object) -> bool:
     """A discovery command that may be handed to `print_socket_argv`: not
-    blank, at most `COMMAND_MAX` characters, one line, no control character."""
+    blank, at most `COMMAND_MAX` characters, one line, no control character
+    and no Unicode format character (a right-to-left override, a zero-width
+    joiner): its program's name is shown back to a person when it fails."""
     if not isinstance(command, str) or not command.strip() or len(command) > COMMAND_MAX:
         return False
-    return not any(ord(c) < 32 or c == "\x7f" for c in command)
+    return not any(ord(c) < 32 or c == "\x7f" or unicodedata.category(c) == "Cf" for c in command)
 
 
 def command_program(command: str) -> str:

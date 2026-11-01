@@ -57,8 +57,8 @@ shown as its placeholder. The command must print the socket's path as the
 last line of its output and exit 0, or exit non-zero. It goes through the
 same login-shell wrapper and your login shell reads it as `exec <command>`,
 so it is one program and its arguments, with your shell's quoting and
-`$VARIABLES`; one line, at most 512 characters. Error messages name the
-program it runs.
+`$VARIABLES`; one line of plain text, at most 512 characters. Error
+messages name the program it runs.
 
 From a terminal, `collins --connect NAME` opens the window on a saved
 connection (`local` names this computer); if a window is already running,
