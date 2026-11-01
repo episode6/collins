@@ -149,7 +149,7 @@ import it. It holds:
   one). After any edit to the table run the script and commit the page:
   `tests/test_api_reference.py` fails on a stale copy. The same test pins
   the SPDX tag on exactly five files (the two pages, the generator,
-  `protocol.py`, `sshremote.py`): a new module under `collins/api/` is GPL, and nothing
+  `protocol.py` and `sshremote.py`): a new module under `collins/api/` is GPL, and nothing
   of the private design spec belongs in a `MessageType.summary`, which
   the public page prints verbatim.
 
