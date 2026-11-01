@@ -84,7 +84,7 @@ from gi.repository import GLib
 from . import apilink
 from .api import protocol
 from .api.protocol import RequestRefused
-from .i18n import _
+from .i18n import N_, _
 from .projectfiles import PasteError, RenameError
 from .sessions import worktree_project_root
 
@@ -161,6 +161,16 @@ class Entry:
         return self.kind == "dir"
 
 
+# What every `fs.*` answers on a service that serves no `files` (D5, ruling
+# 17): nothing crosses the wire, and the editor's banner says this instead of
+# a refusal per open.
+NO_FILES = N_("This service has no files")
+
+
+def no_files() -> RequestRefused:
+    return RequestRefused(protocol.ERROR_UNKNOWN, NO_FILES, {})
+
+
 def refusal_words(refusal: RequestRefused) -> str:
     """A refusal's msgid translated and filled, for a banner (§3.14); the
     code when the service sent no words."""
@@ -178,6 +188,8 @@ def read(path: str, max_bytes: int | None = None) -> FileText:
     """`fs.read` of *path*: blocking, on the caller's thread (a worker's).
     Raises `RequestRefused` (``refused`` over the cap or outside every
     root, ``gone`` for a file that is not there, ``failed``)."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     message: dict = {"t": "fs.read", "path": path}
     if max_bytes is not None:
         message["max"] = int(max_bytes)
@@ -198,6 +210,8 @@ def write(
     *expect_mtime* is the mtime the last read or write answered (None:
     write regardless). Raises `RequestRefused`; ``stale`` (`is_stale`)
     when the file moved and nothing was written."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     message = {
         "t": "fs.write",
         "path": path,
@@ -220,6 +234,8 @@ def stat_path(path: str, root: str | None = None, timeout: float | None = None) 
     None). *timeout* is for a caller something waits on (a held launch:
     `checkouts.ask_answer`), CALL_TIMEOUT_S otherwise. Raises
     `RequestRefused`."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     message: dict = {"t": "fs.stat", "path": str(path)}
     if root is not None:
         message["root"] = str(root)
@@ -239,6 +255,8 @@ def stat_path(path: str, root: str | None = None, timeout: float | None = None) 
 def list_dir(path: str, root: str, hidden: bool = False) -> tuple[list[Entry], bool]:
     """`fs.list` of the directory *path* under the tree's *root*:
     (entries, truncated). Blocking; raises `RequestRefused`."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     fields = apilink.call(
         {"t": "fs.list", "path": str(path), "hidden": bool(hidden), "root": str(root)},
         timeout=CALL_TIMEOUT_S,
@@ -254,6 +272,8 @@ def list_dir(path: str, root: str, hidden: bool = False) -> tuple[list[Entry], b
 def walk_root(root: str, hidden: bool = False) -> tuple[list[str], bool]:
     """`fs.walk` of *root*: (relative paths, truncated). Blocking; raises
     `RequestRefused`."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     fields = apilink.call({"t": "fs.walk", "root": str(root), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
     return [str(p) for p in fields.get("paths") or ()], bool(fields.get("truncated", False))
 
@@ -286,6 +306,8 @@ def present(path: str) -> bool:
 def root_names(root: str) -> tuple[list[str], bool]:
     """`fs.names` of *root*: (the names that are not directories,
     truncated). Blocking; raises `RequestRefused`."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     fields = apilink.call({"t": "fs.names", "root": str(root)}, timeout=CALL_TIMEOUT_S)
     return [str(n) for n in fields.get("names") or ()], bool(fields.get("truncated", False))
 
@@ -359,6 +381,8 @@ def rename_path(path: str, target: str, root: str) -> int | None:
     file's mtime (None for a folder, or a name that was unchanged).
     Raises `RequestRefused`; `rename_reason` names the rule a refusal
     broke."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     fields = apilink.call(
         {"t": "fs.rename", "path": str(path), "target": str(target), "root": str(root)},
         timeout=CALL_TIMEOUT_S,
@@ -389,6 +413,8 @@ def paste_files(entries: list[str], target: str, cut: bool, root: str) -> list[P
     answered as `FAILED` outcomes carrying the refusal's words, so the
     caller always sees one outcome per entry, spends the cut only for
     what landed and counts the rest."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     entries = [str(e) for e in entries]
     outcomes: list[PasteOutcome] = []
     for start in range(0, len(entries), protocol.FS_PASTE_MAX):
@@ -448,6 +474,8 @@ def list_dirs(path: str, hidden: bool = False) -> Dirs:
     """`fs.dirs` of *path* (absolute, or led by `~`, the service's home):
     blocking, on the caller's thread. Raises `RequestRefused` (``gone``
     when no folder is there; ``unknown`` from a service without it)."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     fields = apilink.call({"t": "fs.dirs", "path": str(path), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
     where = fields.get("path")
     return Dirs(
@@ -465,6 +493,8 @@ def new_dir(path: str) -> str:
     """`fs.newdir` of *path*: one folder made under a folder that is
     there; the path made. Blocking. Raises `RequestRefused` (its `reason`
     one of `protocol.FS_MKDIR_REASONS`)."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     fields = apilink.call({"t": "fs.newdir", "path": str(path)}, timeout=CALL_TIMEOUT_S)
     made = fields.get("path")
     return made if isinstance(made, str) else str(path)
@@ -474,6 +504,8 @@ def make_dir(path: str, root: str) -> None:
     """`fs.mkdir` of the folder *path* inside *root*: blocking, on the
     caller's thread. Raises `RequestRefused` (its `reason` one of
     `protocol.FS_MKDIR_REASONS`)."""
+    if not apilink.has(protocol.CAP_FILES):
+        raise no_files()
     apilink.call({"t": "fs.mkdir", "path": str(path), "root": str(root)}, timeout=CALL_TIMEOUT_S)
 
 
@@ -582,7 +614,7 @@ class Watcher:
             return
         with self._lock:
             known = self._watches.pop(handle, None)
-        if known is None or not self.installed:
+        if known is None or not self.installed or not apilink.has(protocol.CAP_FILES):
             return
         link = self._link_of()
         if link is not None:
@@ -622,7 +654,7 @@ class Watcher:
         link = self._link_of()
         with self._lock:
             watch = self._watches.get(handle)
-        if link is None or not self.installed or watch is None:
+        if link is None or not self.installed or watch is None or not apilink.has(protocol.CAP_FILES):
             return
         path = watch.path
         message = {"t": "fs.watch", "path": path, "kind": watch.kind, "handle": handle}

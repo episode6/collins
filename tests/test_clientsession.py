@@ -7,7 +7,7 @@ records them and answers as the test says (PR-1.12a, spec §3.19)."""
 
 import pytest
 
-from collins import editorfiles
+from collins import apilink, editorfiles
 from collins.api import protocol
 from collins.api.protocol import RequestRefused
 from collins.clientsession import ClientSession
@@ -24,6 +24,7 @@ class FakeClient:
         self.sent = []
         self.replies = {}
         self.refuse = set()
+        self.waiting = []
 
     def request(self, message):
         checked = protocol.validate(dict(message, id=1), protocol.CLIENT)
@@ -33,12 +34,27 @@ class FakeClient:
             raise RequestRefused(protocol.ERROR_REFUSED, "no", {})
         return dict(self.replies.get(message["t"], {}))
 
+    def send(self, message, on_reply=None, on_refused=None):
+        """`Link.send`: held until the test lands it, as a socket would."""
+        checked = protocol.validate(dict(message, id=1), protocol.CLIENT)
+        assert isinstance(checked, protocol.Message), checked
+        self.sent.append(message)
+        self.waiting.append((message, on_reply, on_refused))
+
+    def land(self):
+        message, on_reply, on_refused = self.waiting.pop(0)
+        if message["t"] in self.refuse:
+            on_refused(RequestRefused(protocol.ERROR_REFUSED, "no", {}))
+        else:
+            on_reply(dict(self.replies.get(message["t"], {})))
+
 
 @pytest.fixture
 def mirror():
     client = FakeClient()
     session = ClientSession(
         request=client.request,
+        send=client.send,
         provider=ClaudeProvider(),
         cwd="/home/u/project",
         options=SessionOptions(model="opus"),
@@ -289,15 +305,115 @@ def test_the_transcript_and_the_resolver_requests(mirror):
     assert client.sent[4]["records"] == [{"url": "https://github.com/o/r/pull/1"}]
 
 
+@pytest.fixture
+def no_families():
+    """A link whose last hello listed no family (D5)."""
+
+    class Bare(apilink.Link):
+        def __init__(self) -> None:
+            super().__init__()
+            self.families = frozenset()
+
+    apilink.set_current(Bare())
+    yield
+    apilink.set_current(None)
+
+
+def test_with_no_family_the_session_sends_none_of_their_requests(mirror, no_families):
+    session, client = mirror
+    assert session.begin_cut() is None
+    session.cancel_cut()
+    session.request_update(True)
+    session.relocate_transcript("/x")
+    session.set_transcript_path("/x")
+    session.restore_prs([{"url": "u"}])
+    session.end_close()
+    session.nudge_exit()
+    session.relaunch_without_worktree()
+    session.set_shells_follow_armed(True)
+    assert session.shells_follow_armed is True  # the flag is the tab's alone
+    assert session.restore_draft("a draft") is False  # so it stays in the stash
+    assert session.judge_cwd("/x", "/y") is None
+    scopes = []
+    session.settle_cwd("/x", "/y", scopes.append)
+    assert scopes == [None]
+    assert session.restart_sandboxed() is False
+    assert client.sent == []
+
+
+def test_a_handoff_is_refused_with_no_background_and_an_exit_goes_out(mirror, no_families):
+    session, client = mirror
+    assert session.begin_close("/bg", True) is False
+    assert client.sent == []
+    assert session.begin_close("\x03\x03", False) is True
+    assert client.sent[-1]["t"] == "close" and client.sent[-1]["mode"] == "exit"
+
+
+def test_with_no_composer_a_send_is_a_prompt_into_an_empty_box(mirror, no_families):
+    session, client = mirror
+    cleared = []
+    session.send_composed("a draft", lambda: cleared.append(True))
+    assert client.sent[-1] == {
+        "t": "prompt",
+        "pty": 7,
+        "text": "a draft",
+        "focus": False,
+        "when_empty": True,
+    }
+    assert cleared == [True]
+    client.refuse.add("prompt")
+    said = []
+    cleared.clear()
+    session.send_composed("another", lambda: cleared.append(True), on_refused=lambda: said.append(True))
+    assert cleared == [] and said == [True]
+
+
+def test_with_no_composer_a_switch_types_the_command(mirror, no_families):
+    session, client = mirror
+    session.switch_model("opus")
+    assert client.sent[-1] == {
+        "t": "prompt",
+        "pty": 7,
+        "text": "/model opus",
+        "focus": True,
+        "when_empty": True,
+    }
+    session.switch_effort("low")
+    assert client.sent[-1]["text"] == "/effort low"
+    client.refuse.add("prompt")
+    said = []
+    session.switch_model("sonnet", on_refused=lambda: said.append(True))
+    assert said == [True]
+
+
+def test_with_no_composer_a_mention_is_written(mirror, no_families):
+    session, client = mirror
+    assert session.mention("/home/u/project/a.py") is None
+    assert client.sent[-1]["t"] == "write" and client.sent[-1]["mention"] is True
+    assert "a.py" in client.sent[-1]["text"]
+
+
 def test_the_cwd_settles_as_a_follow_scope(mirror):
     session, client = mirror
+    scopes = []
     client.replies["cwd.settle"] = {"scope": "auto"}
-    scope = session.settle_cwd("/home/u/project/.claude/worktrees/x", "/home/u/project")
-    assert scope is editorfiles.FollowScope.AUTO
+    session.settle_cwd("/home/u/project/.claude/worktrees/x", "/home/u/project", scopes.append)
+    assert scopes == []  # the tick never waits on the service (spec §2.3): it lands later
+    client.land()
+    assert scopes == [editorfiles.FollowScope.AUTO]
     client.replies["cwd.settle"] = {"scope": "offer"}
-    assert session.settle_cwd("/elsewhere", "/home/u/project") is editorfiles.FollowScope.OFFER
+    session.settle_cwd("/elsewhere", "/home/u/project", scopes.append)
+    client.land()
+    assert scopes[-1] is editorfiles.FollowScope.OFFER
     client.replies["cwd.settle"] = {"scope": ""}
-    assert session.settle_cwd(None, "/home/u/project") is None
+    session.settle_cwd(None, "/home/u/project", scopes.append)
+    client.land()
+    assert scopes[-1] is None
+    client.refuse.add("cwd.settle")
+    scopes.clear()
+    session.settle_cwd("/x", "/home/u/project", scopes.append)
+    client.land()
+    assert scopes == [None]
     session.set_shells_follow_armed(False)
     assert client.sent[-1] == {"t": "shells.follow", "pty": 7, "armed": False}
     assert session.shells_follow_armed is False
@@ -333,7 +449,7 @@ def test_the_restart_goes_by_the_box(mirror):
 
 def test_nothing_is_asked_before_the_spawn_or_after_the_exit():
     client = FakeClient()
-    session = ClientSession(request=client.request, provider=ClaudeProvider())
+    session = ClientSession(request=client.request, send=client.send, provider=ClaudeProvider())
     session.inject_prompt("x")
     session.begin_cut()
     assert client.sent == []

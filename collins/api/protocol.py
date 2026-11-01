@@ -437,7 +437,7 @@ CAP_PRS = "prs"  # pr.*, pr, pr-status, prs.restore, GET /api/blob?kind=pr
 CAP_SANDBOX = "sandbox"  # sandbox.*, the sandbox event, spawn's sandbox fields
 CAP_TOOLS = "tools"  # tool, tool-reply, diff.*, kind=file and kind=remote blobs, PUT /api/upload
 CAP_JOBS = "jobs"  # job.start, job.cancel, job
-CAP_USAGE = "usage"  # usage.get, models.*, icon.save, kind=icon blobs
+CAP_USAGE = "usage"  # usage.get, models.*, icon.save
 CAP_BACKGROUND = "background"  # close's background mode, store.forward, the item's background fields
 CAP_SHELLS = "shells"  # spawn's shell kind, panel.*, clear
 CAP_COMPOSER = "composer"  # cut, cut.cancel, draft.restore, send, switch, mention, composer
@@ -956,6 +956,10 @@ _MARKS = {
 _SANDBOX_TARGET = {"box": _req(_ID), "pty": _PTY, "handle": _ID}
 
 _SESSIONS = Field(K_LIST, low=1, high=ROWS_MAX, item=_ID)
+# Sessions in a reply, each record what an `item` event for it would carry, so
+# that a client holds them when the reply lands, whichever connection it asked
+# on. A client validates each one as an `item` and drops what does not fit.
+_ITEM_RECORDS = Field(K_LIST, high=ROWS_MAX, item=Field(K_JSON_OBJECT))
 _PROJECT = _s(NAME_MAX, low=1)  # a project's name: the group's identity in the sidebar
 
 # A sidebar group, as the `rows` event lists them: its kind (``fav``,
@@ -1787,15 +1791,15 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "store.lookup",
-        "Send one session's item, archived or not (a session the client was never sent).",
+        "Send one session's item, archived or not (a session the client was never sent), and answer with it.",
         family=FAMILY_CORE, level=2,
-        request=_request({"session": _req(_ID)}, reply={"found": _req(_BOOL)}),
+        request=_request({"session": _req(_ID)}, reply={"found": _req(_BOOL), "sessions": _ITEM_RECORDS}),
     ),
     MessageType(
         "store.page-archived",
-        "Send the sessions kept out of sight as items, and keep them current.",
+        "Send the sessions kept out of sight as items, keep them current, and answer with them.",
         family=FAMILY_CORE, level=2,
-        request=_request(reply={"items": _COUNT}),
+        request=_request(reply={"items": _COUNT, "sessions": _ITEM_RECORDS}),
     ),
     MessageType(
         "store.refresh",
@@ -3280,6 +3284,8 @@ CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
             "`service.status` needs only `version` and `protocol`.",
             "A server with no local proof leaves `local_proof` out of its hello and refuses `local` "
             "`refused`. The client then stays remote, which is correct.",
+            "A server should send `implementation`. A hello with neither that nor any family is the shape "
+            "of a service from before families, and a client may offer to restart it.",
         ),
         status_fields=("version", "protocol", "ptys", "busy", "clients", "started", "pid", "cli", "home"),
     ),
@@ -3385,7 +3391,8 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
     ),
     CAP_FILES: Conformance(
         "Files",
-        "The editor's files, the file tree, quick open and the path picker.",
+        "The editor's files, the file tree, quick open, the path picker and a project's icon.",
+        ("`GET /api/blob?kind=icon`.",),
         session_fields=("touched_files",),
     ),
     CAP_PRS: Conformance(
@@ -3429,8 +3436,7 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
     ),
     CAP_USAGE: Conformance(
         "Token use",
-        "The usage panel, the model catalog, the CLI's defaults and project icons.",
-        ("`GET /api/blob?kind=icon`.",),
+        "The usage panel, the model catalog, the CLI's defaults and saving a generated icon.",
     ),
     CAP_BACKGROUND: Conformance(
         "Background agents",

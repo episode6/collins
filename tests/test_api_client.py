@@ -17,7 +17,7 @@ from liveservice import LiveService
 from collins import uistate
 from collins.api import protocol
 from collins.api import server as api_server
-from collins.api.client import SocketLink
+from collins.api.client import ProtocolMismatch, SocketLink
 from collins.api.protocol import RequestRefused
 from collins.remotestate import RemoteState
 
@@ -49,6 +49,61 @@ def link(service):
     link.lost_reasons = lost
     yield link
     link.shutdown()
+
+
+def test_only_the_subscribe_drains_and_only_on_the_main_thread(monkeypatch):
+    """A call can come from inside a landing, and a drain there would run other
+    landings inside it: the store's lookups answer with their records instead
+    (spec D6, ruling 25). Off the main thread even a subscribe takes the sync
+    channel."""
+    import threading
+
+    link = SocketLink("")
+    link.connected = True
+    asked = []
+
+    def on_primary(message, _wait):
+        asked.append(("primary", message["t"]))
+        return {}
+
+    def on_sync(_channel, message, _wait):
+        asked.append(("sync", message["t"]))
+        return {}
+
+    monkeypatch.setattr(link, "_primary_blocking", on_primary)
+    monkeypatch.setattr(link, "_blocking", on_sync)
+    for kind in ("store.lookup", "store.page-archived", "subscribe", "service.status"):
+        link._request({"t": kind})
+    assert asked == [
+        ("sync", "store.lookup"),
+        ("sync", "store.page-archived"),
+        ("primary", "subscribe"),
+        ("sync", "service.status"),
+    ]
+    asked.clear()
+    worker = threading.Thread(target=lambda: link._request({"t": "subscribe"}))
+    worker.start()
+    worker.join()
+    assert asked == [("sync", "subscribe")]
+
+
+def test_a_mismatch_carries_what_the_server_listed():
+    assert ProtocolMismatch("x", 0, 1).caps is None  # it named none: a pre-family service (ruling 18)
+    assert ProtocolMismatch("x", 0, 1, []).caps == frozenset()
+    assert ProtocolMismatch("x", 0, 1, ["internal"]).caps == frozenset({"internal"})
+
+
+def test_a_refusal_that_names_caps_that_are_no_list_offers_nothing(monkeypatch):
+    """Only a refusal that names none is read as a pre-family service."""
+    link = SocketLink("")
+
+    def refused(_channel, _message, _wait):
+        raise RequestRefused(protocol.ERROR_PROTOCOL, "no", {"service": 0, "caps": "internal"})
+
+    monkeypatch.setattr(link, "_blocking", refused)
+    with pytest.raises(ProtocolMismatch) as mismatch:
+        link._hello(link._primary, time.monotonic() + 1)
+    assert mismatch.value.caps == frozenset()
 
 
 def test_a_blocking_call_on_the_main_thread_is_answered(link):

@@ -7,6 +7,7 @@ remote path (a transport in place of find and start, §3.24)."""
 import os
 
 from collins import APP_ID, connection
+from collins.api import protocol
 
 
 class FakeLink:
@@ -583,6 +584,103 @@ def test_the_owner_can_declare_the_link_lost():
     world.manager.start_local()
     world.manager.lost("resubscribe refused gone")
     assert world.manager.state == "lost" and world.lost == ["resubscribe refused gone"]
+
+
+def _refusing_world(*refusals: str, forever: bool = False) -> tuple[World, list]:
+    """A world whose owner subscribes as `App._on_connected` does, against a
+    stub refusing with each of *refusals* in turn and then serving (*forever*:
+    never serving): what it subscribed is the list."""
+    world = World(live=True)
+    left, served = list(refusals), []
+
+    def on_connected(first: bool) -> None:
+        world.connected.append(first)
+        if first:
+            return
+        if left or forever:
+            code = left.pop(0) if left else protocol.ERROR_UNKNOWN
+            world.manager.lost(connection.resubscribe_refused_words(code))
+            return
+        served.append(True)
+
+    world.manager.on_connected = on_connected
+    return world, served
+
+
+def test_a_resubscribe_refused_twice_stays_lost_until_one_is_served():
+    """Spec D6 and ruling 32: whatever the code, a refused resubscribe is a lost
+    link, so the banner stays up and another try comes. Left connected, the
+    window would sit on empty mirrors with no word and no retry."""
+    world, served = _refusing_world(protocol.ERROR_UNKNOWN, protocol.ERROR_FAILED)
+    world.manager.start_local()
+    world.link.on_lost("the service closed the connection")
+    assert world.manager.state == "lost"
+
+    world.fire()  # the first reconnect: connected, the subscribe refused
+    assert world.manager.state == "lost", "connected on a refusal: no banner and no retry"
+    assert world.lost[-1] == connection.SUBSCRIPTION_REFUSED
+    assert world.timers, "no retry is scheduled"
+    assert not served
+
+    world.fire()  # the second: refused again
+    assert world.manager.state == "lost"
+    assert world.lost[-1] == connection.SUBSCRIPTION_REFUSED
+    assert world.timers, "no retry is scheduled"
+    assert not served
+
+    world.fire()  # the third is served
+    assert world.manager.state == "connected"
+    assert served == [True]
+    assert not world.timers
+    assert world.link.connects == 4
+    assert world.connected == [True, False, False, False]
+
+
+def test_a_service_refusing_every_time_climbs_the_ladder():
+    """The ruling's words are "the backoff retry": the handshake's success must
+    not start the ladder over while the same round goes on failing."""
+    world, served = _refusing_world(forever=True)
+    world.manager.start_local()
+    world.link.on_lost("the service closed the connection")
+    delays = []
+    for _ in range(7):
+        delays += world.fire()
+        assert world.manager.state == "lost"
+    assert delays == [1000, 2000, 5000, 10000, 30000, 30000, 30000]
+    assert not served
+
+
+def test_a_loss_after_a_subscribe_was_served_starts_the_ladder_over():
+    world, served = _refusing_world(protocol.ERROR_UNKNOWN, protocol.ERROR_UNKNOWN)
+    world.manager.start_local()
+    world.link.on_lost("the service closed the connection")
+    assert [world.fire(), world.fire(), world.fire()] == [[1000], [2000], [5000]]
+    assert world.manager.state == "connected" and served == [True]
+    # Outside the landing: a healthy link that drops starts at the first rung.
+    world.link.on_lost("the service closed the connection")
+    assert world.fire() == [1000]
+    assert world.manager.state == "connected" and served == [True, True]
+
+
+def test_the_landing_only_counts_inside_on_connected():
+    """An owner's `lost` after `on_connected` returned (the first subscribe, a
+    resubscribe's later word) is a loss like any other: the first rung."""
+    world = World(live=True)
+    world.manager.start_local()
+    assert world.manager.attempts == 0 and world.manager._landing_attempts is None
+    world.manager.lost(connection.SUBSCRIPTION_REFUSED)
+    assert [ms for ms, _ in world.timers] == [1000]
+
+
+def test_a_gone_resubscribe_keeps_its_own_words():
+    world, served = _refusing_world(protocol.ERROR_GONE)
+    world.manager.start_local()
+    world.link.on_lost("the service closed the connection")
+    world.fire()
+    assert world.manager.state == "lost"
+    assert world.lost[-1] == connection.RESUBSCRIBE_GONE
+    world.fire()
+    assert world.manager.state == "connected" and served == [True]
 
 
 # -- PR-1.12c: the mismatch and a restart this client asked for -----------------------

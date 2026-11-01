@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-30. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -114,6 +114,13 @@ class Session:
     # service's). None when nobody worked it out: `resume_at` falls back to
     # `cwd`.
     resume_dir: str | None = None
+
+    @property
+    def has_transcript(self) -> bool:
+        """Whether this session names a transcript. Every session the scan
+        finds does; an `item` from a server that has none to name builds a
+        row without one (spec D6), and its transcript actions are hidden."""
+        return str(self.jsonl_path) not in ("", ".")
 
     @property
     def resume_at(self) -> str | None:

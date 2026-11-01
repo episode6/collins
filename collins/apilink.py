@@ -40,10 +40,39 @@ from .api import protocol
 from .api.protocol import RequestRefused
 
 __all__ = [
-    "Link", "RequestRefused", "call", "current", "is_local", "service_home", "service_host", "set_current",
+    "Link",
+    "RequestRefused",
+    "absent",
+    "call",
+    "current",
+    "has",
+    "hello_predates_families",
+    "implementation",
+    "is_local",
+    "predates_families",
+    "serves_restart",
+    "service_home",
+    "service_host",
+    "set_current",
 ]
 
 log = logging.getLogger(__name__)
+
+# The caps that came with the families, every one but those a pre-family
+# service could already list (`local`, `debug`, `git`, `files`).
+_SINCE_FAMILIES = frozenset(
+    {
+        protocol.CAP_PRS,
+        protocol.CAP_SANDBOX,
+        protocol.CAP_TOOLS,
+        protocol.CAP_JOBS,
+        protocol.CAP_USAGE,
+        protocol.CAP_BACKGROUND,
+        protocol.CAP_SHELLS,
+        protocol.CAP_COMPOSER,
+        protocol.CAP_INTERNAL,
+    }
+)
 
 Reply = Callable[[dict], None]
 Refused = Callable[[RequestRefused], None]
@@ -59,6 +88,11 @@ class Link:
         # (`home`; the app keeps it here, like the CLI's word): None until
         # said, or from a service older than the field.
         self.service_home: str | None = None
+        # The families the service lists in its hello's `caps` (`has`). None
+        # is a link with no hello to go by, which says nothing is missing
+        # (a test's fake); `SocketLink` starts empty and fills it from each
+        # hello.
+        self.families: frozenset[str] | None = None
 
     def on(self, event_type: str, handler: Callable[[dict], None]) -> None:
         """Call *handler* with every event of *event_type*."""
@@ -141,6 +175,69 @@ def is_local() -> bool:
     Ghostty, a dropped file mentioned by its own path), which are hidden,
     not disabled, for a client that is not local. With no link, False."""
     return bool(getattr(_current, "local", False))
+
+
+def has(cap: str) -> bool:
+    """Whether the service serves the family *cap* (a `protocol.CAP_*`), as
+    its last hello listed it (server-side spec D5). The window hides a
+    surface whose family is missing, as it hides a local extra, and never
+    sends that family's requests, so this is asked **before** the send or
+    the show; `tests/test_client_families.py` holds every family request to
+    it. The last hello stands while the link is down: a service restarting
+    does not take its surfaces away for the second it is gone.
+
+    With no link at all (the service's own process, a test, a check driving
+    bare widgets) nothing is missing, so a shared module behaves as it did;
+    every request there is refused ``gone`` regardless (`call`)."""
+    if _current is None:
+        return True
+    families = getattr(_current, "families", None)
+    return True if families is None else cap in families
+
+
+def hello_predates_families(hello: object) -> bool:
+    """Whether a hello reply has the one shape only a pre-family Collins
+    service ever had (server-side spec D18): no `implementation`, and none of
+    the family caps that came with it. Its caps are within `local`, `debug`,
+    `git` and `files`. No other server is read this way, since a server
+    should name itself (the Conformance section), and nothing is ever read
+    off the name."""
+    if not isinstance(hello, dict) or not hello or hello.get("implementation"):
+        return False
+    return not _SINCE_FAMILIES.intersection(str(cap) for cap in hello.get("caps") or ())
+
+
+def predates_families() -> bool:
+    """`hello_predates_families` of the last hello: the service still runs
+    from before this window's version, which a package upgrade leaves it doing.
+    The window then says so in a banner with a *Restart service* button."""
+    return hello_predates_families(getattr(_current, "hello", None))
+
+
+def serves_restart() -> bool:
+    """Whether `service.restart` may be sent: a service that lists `internal`,
+    or a pre-family Collins service, which serves it without listing it (D18:
+    the identification is the justification)."""
+    return has(protocol.CAP_INTERNAL) or predates_families()
+
+
+def absent(cap: str) -> RequestRefused:
+    """What a request of a family the service does not list answers, with
+    no round trip: the refusal a server would send (``unknown``), for the
+    callers that already handle one."""
+    return RequestRefused(protocol.ERROR_UNKNOWN, "This service does not offer that", {"family": cap})
+
+
+def implementation() -> str | None:
+    """The server's product name, as its last hello said it (D2): logged,
+    and shown under the host in Preferences' Service page. Nothing is gated
+    on it. None with no link, before a hello, or when it is not a non-empty
+    string of at most `protocol.IMPLEMENTATION_MAX` characters (rule 5)."""
+    hello = getattr(_current, "hello", None)
+    name = hello.get("implementation") if isinstance(hello, dict) else None
+    if isinstance(name, str) and 0 < len(name) <= protocol.IMPLEMENTATION_MAX:
+        return name
+    return None
 
 
 def service_home() -> str | None:

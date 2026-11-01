@@ -240,7 +240,7 @@ connect again.
 
 ## Restarting the service on the box
 
-**Restart service** in the main menu works on the box the window shows: it asks that service to restart over the link in use, and the package restarts nothing on an upgrade, so this is how a box runs new code. The sessions on the box run through the restart under their keeper, and the window reconnects through the forward and shows each open tab where it was. To end every session on the box for good, stop the keeper there (`systemctl --user stop collins-keeper.service`, over ssh). What the keeper holds, when it is missing and what the dialog says are in [Restarting and stopping](./service#restarting-and-stopping).
+**Restart service** in the main menu (or, for a service older than v0.1.5, the button on the window's banner) works on the box the window shows: it asks that service to restart over the link in use, and the package restarts nothing on an upgrade, so this is how a box runs new code. The sessions on the box run through the restart under their keeper, and the window reconnects through the forward and shows each open tab where it was. To end every session on the box for good, stop the keeper there (`systemctl --user stop collins-keeper.service`, over ssh). What the keeper holds, when it is missing and what the dialog says are in [Restarting and stopping](./service#restarting-and-stopping).
 
 ## Notifications while you are away
 
@@ -277,6 +277,10 @@ would open the wrong file on the wrong machine:
 *Open With…* on a picture or a plain document (pdf, txt, md, csv, json,
 log) still works: it hands your desktop app the window's cached copy.
 
+The window also hides what the service at the other end doesn't serve. A box
+running `collins-service` serves everything; [A service that serves
+less](./features#a-service-that-serves-less) lists what goes when one doesn't.
+
 ## Picking a folder on the box
 
 Every chooser that picks a folder the service will use — where a new
@@ -284,8 +288,9 @@ session starts, *Add project*, *Continue last session*, a new chat, the
 clone destination (in the dialog and in Preferences), a directory allowed
 into a sandboxed session — opens Collins' own **path picker** when the
 service is elsewhere, since your desktop's chooser can only show your own
-disk. It lists the box's folders, the whole filesystem as a native dialog
-would:
+disk. (A server that serves no `files` can't list its folders, so it asks you
+to type the path instead, and the server judges what you typed.) It lists the
+box's folders, the whole filesystem as a native dialog would:
 
 - **The path entry** takes a path on the box; `~` is the box's home.
   Typing filters the folder's subfolders (after a 300 ms pause), and

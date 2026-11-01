@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from . import apilink
+from .api import protocol
 from .api.protocol import RequestRefused
 
 log = logging.getLogger(__name__)
@@ -72,6 +74,8 @@ class DiffNotesMirror:
         if not key or self._marks.get(key, ([], [])) == marks:
             return
         self._marks[key] = marks
+        if not apilink.has(protocol.CAP_TOOLS):
+            return  # the page's own copy is all there is (D5)
         message = {"t": "diff.set-notes", "notes": marks[0], "highlights": marks[1]}
         message["session" if session else "handle"] = key
         try:

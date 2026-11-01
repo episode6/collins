@@ -39,7 +39,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from . import editorfiles
+from . import apilink, editorfiles
+from .api import protocol
 from .api.protocol import RequestRefused
 from .i18n import _
 from .providers import EnteredPrompt, Provider, SessionOptions, options_from_record
@@ -103,6 +104,7 @@ class ClientSession:
         self,
         *,
         request: Callable[[dict], dict],
+        send: Callable[..., None],
         provider: Provider,
         session_id: str | None = None,
         fork: bool = False,
@@ -112,6 +114,10 @@ class ClientSession:
         jsonl_path: str | None = None,
     ) -> None:
         self._request = request
+        # The same request without the wait (`Link.send`: *message*,
+        # *on_reply*, *on_refused*, landing on the main loop), for what the
+        # main thread asks on a timer (`settle_cwd`).
+        self._send = send
         self.provider = provider
         self.pty: int | None = None
         self.handle: str | None = None
@@ -333,18 +339,56 @@ class ClientSession:
             fields["when_empty"] = True
         return self._ask({"t": "prompt"}, **fields) is not None
 
-    def switch_model(self, model_id: str, composer_open: bool = False) -> None:
-        if model_id:
-            self._ask({"t": "switch"}, model=model_id, composer_open=bool(composer_open))
+    def _type_switch(self, command: str | None, on_refused: Callable[[], None] | None) -> None:
+        """D5, no `composer`: a switch is the provider's command typed through
+        `prompt`, into an empty box only. `prompt` with `focus` writes the
+        text, then the Return alone a beat later, the road `switch` itself
+        takes, so the CLI reads it as the command it is."""
+        if command and not self.inject_prompt(command, when_empty=True) and on_refused is not None:
+            on_refused()
 
-    def switch_effort(self, effort: str, composer_open: bool = False) -> None:
-        if effort:
-            self._ask({"t": "switch"}, effort=effort, composer_open=bool(composer_open))
+    def switch_model(
+        self, model_id: str, composer_open: bool = False, on_refused: Callable[[], None] | None = None
+    ) -> None:
+        if not model_id:
+            return
+        if not apilink.has(protocol.CAP_COMPOSER):
+            self._type_switch(self.provider.model_switch_command(model_id), on_refused)
+            return
+        self._ask({"t": "switch"}, model=model_id, composer_open=bool(composer_open))
 
-    def send_composed(self, text: str, clear: Callable[[], None], composer_open: bool = True) -> None:
+    def switch_effort(
+        self, effort: str, composer_open: bool = False, on_refused: Callable[[], None] | None = None
+    ) -> None:
+        if not effort:
+            return
+        if not apilink.has(protocol.CAP_COMPOSER):
+            self._type_switch(self.provider.effort_switch_command(effort), on_refused)
+            return
+        self._ask({"t": "switch"}, effort=effort, composer_open=bool(composer_open))
+
+    def send_composed(
+        self,
+        text: str,
+        clear: Callable[[], None],
+        composer_open: bool = True,
+        on_refused: Callable[[], None] | None = None,
+    ) -> None:
         """The composer's send; *clear* runs when the service says it went
-        now (a send waiting on a cut comes back as a `composer resend`)."""
+        now (a send waiting on a cut comes back as a `composer resend`).
+
+        With no `composer` (D5) nothing was cut, so the box may hold what
+        was typed there: the draft goes through `prompt`, into an empty box
+        only, as a bracketed paste (`focus` off: a composed prompt is free
+        text, often of many lines), and *on_refused* says so when the box
+        would not take it; the draft stays with the composer."""
         if not text:
+            return
+        if not apilink.has(protocol.CAP_COMPOSER):
+            if self.inject_prompt_unfocused(text, when_empty=True):
+                clear()
+            elif on_refused is not None:
+                on_refused()
             return
         reply = self._ask({"t": "send"}, text=text, composer_open=bool(composer_open))
         if reply is not None and reply.get("sent"):
@@ -356,7 +400,7 @@ class ClientSession:
         text would not reach the composer whole is left as it is; the tab
         paints the reason and the composer stays empty over it)."""
         self.cut_refusal = None
-        if self.pty is None or self.exited:
+        if self.pty is None or self.exited or not apilink.has(protocol.CAP_COMPOSER):
             return None
         try:
             reply = self._request({"t": "cut", "pty": self.pty})
@@ -370,20 +414,34 @@ class ClientSession:
         return str(reply["handle"]) if reply and reply.get("handle") else None
 
     def cancel_cut(self, handle: str | None = None) -> None:
+        if not apilink.has(protocol.CAP_COMPOSER):
+            return
         fields = {"handle": handle} if handle else {}
         self._ask({"t": "cut.cancel"}, **fields)
 
     def restore_draft(self, text: str) -> bool:
+        """Whether *text* went back into the CLI's box; False leaves it to
+        the stash, which is every draft with no `composer` (D5)."""
         if not text:
             return True
+        if not apilink.has(protocol.CAP_COMPOSER):
+            return False
         reply = self._ask({"t": "draft.restore"}, text=text)
         return bool(reply and reply.get("restored"))
 
     def mention(self, path: str, start_line: int = 0, end_line: int = 0) -> str | None:
         """Type a file's mention into the box; the refusal's reason (a
-        msgid, translated) when it didn't go, else None."""
+        msgid, translated) when it didn't go, else None. With no `composer`
+        (D5) the reference is built here and typed through `write`, as a
+        dropped file's is."""
         if self.pty is None or self.exited:
             return _("Add to chat: the agent isn't running in this tab")
+        if not apilink.has(protocol.CAP_COMPOSER):
+            reference = self.provider.file_reference(path, self.current_agent_cwd(), start_line, end_line)
+            if reference is None:
+                return _("Add to chat isn't available for this file")
+            self.write_mention(reference + " ")
+            return None
         try:
             self._request(
                 {
@@ -401,39 +459,70 @@ class ClientSession:
         return None
 
     def set_transcript_path(self, path: str | None) -> None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         self._ask({"t": "transcript.set"}, path=str(path) if path else None)
 
     def relocate_transcript(self, path: str) -> None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         self._ask({"t": "transcript.relocate"}, path=str(path))
 
     def request_update(self, discover: bool = False) -> None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         self._ask({"t": "transcript.update"}, discover=bool(discover))
 
     def restore_prs(self, records: object) -> None:
+        if not apilink.has(protocol.CAP_PRS):
+            return
         if isinstance(records, list) and records:
             self._ask({"t": "prs.restore"}, records=[r for r in records if isinstance(r, dict)])
 
-    def settle_cwd(self, cwd: str | None, root: str) -> editorfiles.FollowScope | None:
-        reply = self._ask({"t": "cwd.settle"}, cwd=cwd, root=root)
+    @staticmethod
+    def _follow_scope(reply: dict | None) -> editorfiles.FollowScope | None:
         scope = (reply or {}).get("scope") or ""
         for member in editorfiles.FollowScope:
             if member.value == scope and member is not editorfiles.FollowScope.NONE:
                 return member
         return None
+
+    def settle_cwd(
+        self, cwd: str | None, root: str, on_scope: Callable[[editorfiles.FollowScope | None], None]
+    ) -> None:
+        """Ask how a move of the agent's cwd settles from the editor's
+        *root* (`cwd.settle`, `internal`): *on_scope* gets the
+        `FollowScope`, or None for no move, on the main loop. The tab's
+        tick asks this every 2 s on the main thread, so it never waits: a
+        server that does not answer would freeze the window (§2.3). With no
+        `internal` nothing is sent and the answer is None; the tab roots the
+        editor at `agent_cwd` itself."""
+        if not apilink.has(protocol.CAP_INTERNAL) or self.pty is None or self.exited:
+            on_scope(None)
+            return
+
+        def refused(refusal: RequestRefused) -> None:
+            log.info("session %s: cwd.settle refused: %s", self.handle, refusal.msgid)
+            on_scope(None)
+
+        self._send(
+            {"t": "cwd.settle", "pty": self.pty, "cwd": cwd, "root": root},
+            lambda reply: on_scope(self._follow_scope(reply)),
+            refused,
+        )
 
     def judge_cwd(self, cwd: str | None, root: str) -> editorfiles.FollowScope | None:
         """`cwd.settle` with `judge`: the scope of *cwd* from *root* now,
         none of the settling (the editor's queued move, PR-2.4). Blocking:
         the editor asks from a worker thread."""
-        reply = self._ask({"t": "cwd.settle"}, cwd=cwd, root=root, judge=True)
-        scope = (reply or {}).get("scope") or ""
-        for member in editorfiles.FollowScope:
-            if member.value == scope and member is not editorfiles.FollowScope.NONE:
-                return member
-        return None
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return None
+        return self._follow_scope(self._ask({"t": "cwd.settle"}, cwd=cwd, root=root, judge=True))
 
     def set_shells_follow_armed(self, armed: bool) -> None:
         self.shells_follow_armed = bool(armed)
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return  # the flag is the tab's alone: no worktree follow to arm
         self._ask({"t": "shells.follow"}, armed=bool(armed))
 
     def arm_resolver(self) -> None:
@@ -441,24 +530,31 @@ class ClientSession:
 
     def begin_close(self, exit_text: str, backgrounding: bool) -> bool:
         """The graceful close; False when the service refused it (the
-        window then forces the close)."""
-        reply = self._ask(
-            {"t": "close"}, mode="background" if backgrounding else "exit", text=exit_text
-        )
-        return reply is not None
+        window then forces the close), or would not take a /bg."""
+        if not backgrounding:
+            return self._ask({"t": "close"}, mode="exit", text=exit_text) is not None
+        if not apilink.has(protocol.CAP_BACKGROUND):
+            return False
+        return self._ask({"t": "close"}, mode="background", text=exit_text) is not None
 
     def end_close(self) -> None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         self._ask({"t": "close.end"})
 
     def nudge_exit(self) -> None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         self._ask({"t": "close.nudge"})
 
     def relaunch_without_worktree(self) -> None:
+        if not apilink.has(protocol.CAP_INTERNAL):
+            return
         self._ask({"t": "restart.worktreeless"})
 
     def restart_sandboxed(self) -> bool:
         """The chip's *Restart to apply* (`sandbox.restart`), by the box."""
-        if self.pty is None or self.exited or not self.sandbox_box:
+        if self.pty is None or self.exited or not self.sandbox_box or not apilink.has(protocol.CAP_SANDBOX):
             return False
         try:
             self._request(

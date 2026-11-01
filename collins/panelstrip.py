@@ -45,7 +45,8 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import dialogs, keybindings, paneldnd  # noqa: E402
+from . import apilink, dialogs, keybindings, paneldnd  # noqa: E402
+from .api import protocol  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
 
@@ -152,6 +153,8 @@ class PanelStrip(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
+        self._add_btn = add_btn
+        self._sync_add_btn()
         max_btn = Gtk.Button(icon_name="view-fullscreen-symbolic")
         max_btn.add_css_class("flat")
         max_btn.set_tooltip_text(_("Overlay this tab over the whole session"))
@@ -268,6 +271,15 @@ class PanelStrip(Gtk.Box):
         worktree while it was off screen. Idle shells only; one with a
         command running is left alone (see PanelPage.open_shell)."""
         shell.open_shell(self._cwd())
+
+    def apply_families(self) -> None:
+        """A hello listed the service's families (`PanelDock.apply_families`)."""
+        self._sync_add_btn()
+
+    def _sync_add_btn(self) -> None:
+        """The strip's *New terminal tab*, hidden on a service with no shells
+        (D5), as the last hello said."""
+        self._add_btn.set_visible(apilink.has(protocol.CAP_SHELLS))
 
     def set_sandboxed_shell_offer(self, offer) -> None:
         """`offer() -> bool` says whether the tab menu should carry *New

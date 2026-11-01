@@ -161,28 +161,35 @@ class StoreFeed:
     def is_subscribed(self, client) -> bool:
         return id(client) in self._subscribers
 
-    def page(self, client) -> int:
+    def page(self, client) -> list[dict]:
         """Send *client* every session kept out of sight, and keep them
-        current from now on. Returns how many were sent."""
+        current from now on. Returns what was sent, as `item` records: the
+        reply carries them, since the events land on another connection."""
         sub = self._subscribers.get(id(client))
         if sub is None:
-            return 0
+            return []
         sub.paged = True
-        sent = 0
+        sent: list[dict] = []
         for session in self.store.all_sessions():
             if session.session_id not in sub.known and self._sync_item(sub, session):
-                sent += 1
+                sent.append(self.item_record(session))
         return sent
 
-    def send_one(self, client, session_id: str) -> bool:
-        """Send *client* one session, row or not, and keep it current.
-        False when the service has no such session."""
+    def send_one(self, client, session_id: str) -> dict | None:
+        """Send *client* one session, row or not, and keep it current. Its
+        `item` record (see `page`), None when the service has no such
+        session."""
         sub = self._subscribers.get(id(client))
         session = self.store.get_session(session_id)
         if sub is None or session is None:
-            return False
+            return None
         self._sync_item(sub, session, force=True)
-        return True
+        return self.item_record(session)
+
+    def item_record(self, session) -> dict:
+        """One session as a reply carries it: an `item` event's fields, with
+        `session` among them."""
+        return {"session": session.session_id, **self.item_fields(session)}
 
     # -- state ------------------------------------------------------------------
 

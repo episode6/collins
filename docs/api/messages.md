@@ -112,6 +112,7 @@ Enough for a client to connect and show an empty list.
 - `subscribe`'s snapshot may be empty: no `item` and no `pty`, then a `rows` with an empty list.
 - `service.status` needs only `version` and `protocol`.
 - A server with no local proof leaves `local_proof` out of its hello and refuses `local` `refused`. The client then stays remote, which is correct.
+- A server should send `implementation`. A hello with neither that nor any family is the shape of a service from before families, and a client may offer to restart it.
 
 ### Level 1: Sessions and terminals
 
@@ -162,11 +163,15 @@ The git page and everything else that asks about a repository.
 
 ### Family `files`: Files
 
-The editor's files, the file tree, quick open and the path picker.
+The editor's files, the file tree, quick open, the path picker and a project's icon.
 
 **Message types:** `fs.trash`, `fs.read`, `fs.write`, `fs.watch`, `fs.unwatch`, `file-changed`, `dir-changed`, `fs.stat`, `fs.list`, `fs.walk`, `fs.rename`, `fs.paste`, `fs.mkdir`, `fs.names`, `fs.dirs`, `fs.newdir`
 
 **`session` fields:** `touched_files`
+
+**Also:**
+
+- `GET /api/blob?kind=icon`.
 
 ### Family `prs`: Pull requests
 
@@ -225,13 +230,9 @@ Work that outlasts a request, such as a clone, a worktree's trash or restore, a 
 
 ### Family `usage`: Token use
 
-The usage panel, the model catalog, the CLI's defaults and project icons.
+The usage panel, the model catalog, the CLI's defaults and saving a generated icon.
 
 **Message types:** `usage.get`, `models.get`, `models.defaults`, `icon.save`
-
-**Also:**
-
-- `GET /api/blob?kind=icon`.
 
 ### Family `background`: Background agents
 
@@ -1568,7 +1569,7 @@ Family: `core` · Level 2
 
 ### `store.lookup`
 
-Send one session's item, archived or not (a session the client was never sent).
+Send one session's item, archived or not (a session the client was never sent), and answer with it.
 
 Family: `core` · Level 2
 
@@ -1585,10 +1586,11 @@ Family: `core` · Level 2
 | Field | Value | Presence |
 | --- | --- | --- |
 | `found` | boolean | required |
+| `sessions` | list of at most 10,000 items of: JSON object (bounded: see [Free JSON](./index#free-json)) | optional |
 
 ### `store.page-archived`
 
-Send the sessions kept out of sight as items, and keep them current.
+Send the sessions kept out of sight as items, keep them current, and answer with them.
 
 Family: `core` · Level 2
 
@@ -1603,6 +1605,7 @@ No fields.
 | Field | Value | Presence |
 | --- | --- | --- |
 | `items` | integer, 0–2^31 − 1 | optional |
+| `sessions` | list of at most 10,000 items of: JSON object (bounded: see [Free JSON](./index#free-json)) | optional |
 
 ### `store.refresh`
 
