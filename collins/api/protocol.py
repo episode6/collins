@@ -3282,24 +3282,6 @@ SPAWN_CORE_FIELDS: tuple[str, ...] = (
     "cols",
     "rows",
 )
-STORE_STATE_KEYS: tuple[str, ...] = (
-    "names",
-    "generated_names",
-    "cli_titles",
-    "emojis",
-    "favorites",
-    "archived",
-    "archived_at",
-    "archived_projects",
-    "project_order",
-    "virtual_projects",
-    "project_worktree",
-    "project_sandbox",
-    "session_drafts",
-    "new_chat_drafts",
-    "session_attachments",
-    "expanded_groups",
-)
 SESSION_COMPOSER_FIELDS: tuple[str, ...] = ("entered", "foreign_paste", "prompt_block")
 ITEM_BACKGROUND_FIELDS: tuple[str, ...] = ("background", "backgrounding", "can_background")
 SPAWN_SANDBOX_FIELDS: tuple[str, ...] = ("sandbox", "sandbox_box", "sandbox_plan")
@@ -3311,12 +3293,16 @@ def _codes(names: tuple[str, ...]) -> str:
 
 @dataclass(frozen=True)
 class Conformance:
-    """One level or family: its name, what serving it gives a client, and
-    what it covers beyond the message types that name it."""
+    """One level or family: its name, what serving it gives a client, what
+    it covers beyond the message types that name it, and the state keys and
+    `service.status` fields that are its own. Every key and field is one
+    level's or one family's."""
 
     title: str
     summary: str
     notes: tuple[str, ...] = ()
+    state_keys: tuple[str, ...] = ()
+    status_fields: tuple[str, ...] = ()
 
 
 CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
@@ -3329,6 +3315,7 @@ CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
             "A server with no local proof leaves `local_proof` out of its hello and refuses `local` "
             "`refused`. The client then stays remote, which is correct.",
         ),
+        status_fields=("version", "protocol", "ptys", "busy", "clients", "started", "pid", "cli", "home"),
     ),
     1: Conformance(
         "Sessions and terminals",
@@ -3346,17 +3333,32 @@ CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
             f"`session`: the fields {_codes(SESSION_CORE_FIELDS)}.",
             f"`item`: the fields {_codes(ITEM_CORE_FIELDS)}.",
             "The input frames, `resize`, `focus`, `theme` and `ack` are honoured.",
+            "`service.status`: a Level 1 server should send `cli` and `home`. A client reads a missing `cli` "
+            "as unknown, and without `home` it can't abbreviate paths or start a path picker at home.",
         ),
+        state_keys=("settings", "service_id"),
     ),
     2: Conformance(
         "The store",
         "A list a person can organise: names, favorites, archives, projects, trash, the transcript's "
         "links and export, folder trust and the notification history. Levels 1 and 2 together are the "
         "*sessions* profile, the one to aim for first.",
-        (
-            f"`state.set`: the keys {_codes(STORE_STATE_KEYS)}.",
-            "A state key that belongs to a family is emitted, read and written only by a server that lists "
-            "the family. A client reads a key it never received as empty.",
+        state_keys=(
+            "names",
+            "generated_names",
+            "cli_titles",
+            "emojis",
+            "favorites",
+            "archived",
+            "archived_at",
+            "archived_projects",
+            "project_order",
+            "virtual_projects",
+            "project_worktree",
+            "session_drafts",
+            "new_chat_drafts",
+            "expanded_groups",
+            "notifications",
         ),
     ),
 }
@@ -3375,20 +3377,28 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
         "Pull requests",
         "What a session's pull requests are and every action on one.",
         ("`GET /api/blob?kind=pr`.",),
+        state_keys=("session_prs",),
+        status_fields=("gh",),
     ),
     CAP_SANDBOX: Conformance(
         "Sandboxed sessions",
         "Sessions in a filesystem sandbox, and the grants that widen one.",
-        (
-            f"`spawn`: the fields {_codes(SPAWN_SANDBOX_FIELDS)}.",
-            "`service.status`: `sandbox`, absent on a server without this family.",
+        (f"`spawn`: the fields {_codes(SPAWN_SANDBOX_FIELDS)}.",),
+        state_keys=(
+            "project_sandbox",
+            "sandboxed_sessions",
+            "sandbox_grants",
+            "sandbox_project_grants",
+            "sandbox_tools",
         ),
+        status_fields=("sandbox", "live"),
     ),
     CAP_TOOLS: Conformance(
         "Session tools",
         "The tools a running agent calls that need a screen, the marks on a diff, and files handed "
         "between a client and a session.",
         ("`GET /api/blob?kind=file` and `kind=remote`.", "`PUT /api/upload`."),
+        state_keys=("session_attachments", "diff_notes", "pending_diffs"),
     ),
     CAP_JOBS: Conformance(
         "Long-running operations",
@@ -3405,8 +3415,8 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
         (
             "`close`: the mode `background`.",
             f"`item`: the fields {_codes(ITEM_BACKGROUND_FIELDS)}.",
-            "`state.set`: the key `session_forwards`.",
         ),
+        state_keys=("session_forwards", "pending_detaches"),
     ),
     CAP_SHELLS: Conformance(
         "Panel shells",
@@ -3423,10 +3433,9 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
         "The Collins service's own",
         "What the Collins service does for its own window's timing and its own test suite. Another "
         "server need not serve it.",
-        (
-            "`session`: every field not listed under Level 1, `composer` or another family.",
-            "`service.status`: the `keeper` fields.",
-        ),
+        ("`session`: every field not listed under Level 1, `composer` or another family.",),
+        state_keys=("process_baselines", "resume_on_start", "ptys", "pty_next_id", "inflight_copies"),
+        status_fields=("keeper", "keeper_mismatch", "keeper_unread", "keeper_held", "unkept"),
     ),
     CAP_DEBUG: Conformance(
         "The debug probe",

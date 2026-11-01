@@ -97,11 +97,15 @@ This document and the module it is generated from are licensed
 
 What a server must serve to be a server of this API; the rules are in [Implementing a server](./index#implementing-a-server). The levels build on each other. A family is optional at any level: a server serves one by listing its name in `caps`, and answers a type it doesn't serve `unknown`. Each message type below names its family and level.
 
+Every state key and `service.status` field belongs to one level or family. One that belongs to a family is emitted, read and written only by a server that lists the family. A client reads a key it never received as empty and a field it never received as unknown. Of `service.status`, only `version` and `protocol` are required.
+
 ### Level 0: The wire
 
 Enough for a client to connect and show an empty list.
 
 **Message types:** `hello`, `local`, `subscribe`, `service.status`
+
+**`service.status` fields:** `version`, `protocol`, `ptys`, `busy`, `clients`, `started`, `pid`, `cli`, `home`
 
 **Also:**
 
@@ -115,6 +119,8 @@ Enough to run a Claude Code session in a terminal, with its list row, whether it
 
 **Message types:** `attach`, `detach`, `resize`, `focus`, `theme`, `ack`, `spawn`, `pty.info`, `pty.capture`, `prompt`, `write`, `close`, `session`, `resolver.arm`, `state.set`, `state.get`, `item`, `rows`, `store.flags`, `pty`, `pty-exited`
 
+**State keys:** `settings`, `service_id`
+
 **Also:**
 
 - `spawn`: `kind: "agent"` with `cwd`, `session`, `prompt`, `model`, `effort`, `permission_mode`, `cols`, `rows`. Any other field may be refused `refused` with a `msgid` saying why.
@@ -126,6 +132,7 @@ Enough to run a Claude Code session in a terminal, with its list row, whether it
 - `session`: the fields `pty`, `handle`, `session`, `cwd`, `agent_cwd`, `pid`, `takes_prompt`, `agent_running`, `running_command`, `busy`, `finished`, `model`, `effort`, `permission_mode`, `transcript_path`, `landed`, `reset`.
 - `item`: the fields `session`, `path`, `cwd`, `resume_cwd`, `display_name`, `subtitle`, `preview`, `mtime`, `created`, `size`, `status`, `busy`, `unread`, `running`, `removed`.
 - The input frames, `resize`, `focus`, `theme` and `ack` are honoured.
+- `service.status`: a Level 1 server should send `cli` and `home`. A client reads a missing `cli` as unknown, and without `home` it can't abbreviate paths or start a path picker at home.
 
 ### Level 2: The store
 
@@ -133,10 +140,7 @@ A list a person can organise: names, favorites, archives, projects, trash, the t
 
 **Message types:** `put-away`, `forgotten`, `store.lookup`, `store.page-archived`, `store.refresh`, `store.show-archived`, `store.rename`, `store.regenerate-name`, `store.favorite`, `store.archive`, `store.archive-project`, `store.trash`, `store.delete`, `store.add-project`, `store.keep-projects`, `store.forget-project`, `store.move-project`, `store.forget`, `store.transcript-tail`, `store.transcript-export`, `trust.check`, `trust.grant`, `notify`, `notify.post`, `notify.remove`, `notify.clear`, `notify.green`, `notify.rekey`, `notify.test`, `seen`
 
-**Also:**
-
-- `state.set`: the keys `names`, `generated_names`, `cli_titles`, `emojis`, `favorites`, `archived`, `archived_at`, `archived_projects`, `project_order`, `virtual_projects`, `project_worktree`, `project_sandbox`, `session_drafts`, `new_chat_drafts`, `session_attachments`, `expanded_groups`.
-- A state key that belongs to a family is emitted, read and written only by a server that lists the family. A client reads a key it never received as empty.
+**State keys:** `names`, `generated_names`, `cli_titles`, `emojis`, `favorites`, `archived`, `archived_at`, `archived_projects`, `project_order`, `virtual_projects`, `project_worktree`, `session_drafts`, `new_chat_drafts`, `expanded_groups`, `notifications`
 
 ### Family `git`: Git
 
@@ -161,6 +165,10 @@ What a session's pull requests are and every action on one.
 
 **Message types:** `prs.restore`, `pr`, `pr-status`, `pr.set`, `pr.fetch`, `pr.sweep`, `pr.detail`, `pr.threads`, `pr.blob`, `pr.action`, `pr.comment`, `pr.review`, `pr.thread`
 
+**State keys:** `session_prs`
+
+**`service.status` fields:** `gh`
+
 **Also:**
 
 - `GET /api/blob?kind=pr`.
@@ -171,16 +179,21 @@ Sessions in a filesystem sandbox, and the grants that widen one.
 
 **Message types:** `sandbox.plan`, `sandbox.grants`, `sandbox.allow`, `sandbox.revoke`, `sandbox.tools`, `sandbox.restart`, `sandbox.derive`, `sandbox.drop`, `sandbox.forget`, `sandbox`
 
+**State keys:** `project_sandbox`, `sandboxed_sessions`, `sandbox_grants`, `sandbox_project_grants`, `sandbox_tools`
+
+**`service.status` fields:** `sandbox`, `live`
+
 **Also:**
 
 - `spawn`: the fields `sandbox`, `sandbox_box`, `sandbox_plan`.
-- `service.status`: `sandbox`, absent on a server without this family.
 
 ### Family `tools`: Session tools
 
 The tools a running agent calls that need a screen, the marks on a diff, and files handed between a client and a session.
 
 **Message types:** `tool`, `tool-reply`, `diff.notes`, `diff.set-notes`
+
+**State keys:** `session_attachments`, `diff_notes`, `pending_diffs`
 
 **Also:**
 
@@ -209,11 +222,12 @@ Handing a session to the CLI's background agents and following it there.
 
 **Message types:** `store.forward`
 
+**State keys:** `session_forwards`, `pending_detaches`
+
 **Also:**
 
 - `close`: the mode `background`.
 - `item`: the fields `background`, `backgrounding`, `can_background`.
-- `state.set`: the key `session_forwards`.
 
 ### Family `shells`: Panel shells
 
@@ -241,10 +255,13 @@ What the Collins service does for its own window's timing and its own test suite
 
 **Message types:** `focus.terminal`, `close.nudge`, `close.end`, `shells`, `transcript.update`, `transcript.set`, `transcript.relocate`, `cwd.settle`, `shells.follow`, `finish.witness`, `baseline.absorb`, `baseline.cmdlines`, `restart.worktreeless`, `service.restart`, `cli.check`
 
+**State keys:** `process_baselines`, `resume_on_start`, `ptys`, `pty_next_id`, `inflight_copies`
+
+**`service.status` fields:** `keeper`, `keeper_mismatch`, `keeper_unread`, `keeper_held`, `unkept`
+
 **Also:**
 
 - `session`: every field not listed under Level 1, `composer` or another family.
-- `service.status`: the `keeper` fields.
 
 ### Family `debug`: The debug probe
 

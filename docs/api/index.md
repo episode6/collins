@@ -588,19 +588,22 @@ for the child that holds the forward (its `on_exit` is the signal to
 reconnect) and `sweep_orphans` for a forward a crashed client left behind.
 Its checks on a recorded pid read `/proc`, so they work on Linux only.
 
-The GPL-licensed parts of Collins are the worked examples: `collins/api/server.py` is the
-service's end, `collins/api/client.py` the window's, `collins/connection.py`
-the find-start-connect-reconnect loop and `collins/sshforward.py` the transport
+The GPL-licensed parts of Collins are the worked examples for a client:
+`collins/api/client.py` is the window's end, `collins/connection.py` the
+find-start-connect-reconnect loop and `collins/sshforward.py` the transport
 that drives `sshremote` for it. Read them for how, not to copy from: their
-license is Collins'.
+license is Collins'. A server author who wants the
+[Interoperability](#interoperability) section's reading writes from the MIT
+pages alone and reads neither `collins/api/server.py` nor `collins/service/`.
 
 ## Implementing a server
 
 A client is not the only program this specification allows: a program may
 serve the same API in place of `collins-service`. The Collins window is one
 client such a server would meet, and the other clients are the ones these pages
-describe. Write it from these pages and the [message reference](./messages),
-not from the service's code: see [Interoperability](#interoperability).
+describe. A server author who wants the [Interoperability](#interoperability)
+section's reading writes from the MIT pages alone and reads neither
+`collins/api/server.py` nor `collins/service/`.
 
 **Levels and families.** Every message type has a family and a level, printed
 under its summary in the reference and gathered in
@@ -624,10 +627,11 @@ and your product's name in `implementation`. A family you do not list is one
 you do not serve. Leave `local` out and omit `local_proof` if you offer no proof.
 
 **State.** A Level 1 server answers `state.get` for every key it emits
-`state.set` for, and refuses any other `gone`. A state key that belongs to a
-family, such as `session_forwards` to `background`, is emitted, read and written
-only by a server that lists the family, and a client reads a key it never
-received as empty.
+`state.set` for, and refuses any other `gone`. A state key or `service.status`
+field that belongs to a family, such as `session_forwards` to `background`, is
+emitted, read and written only by a server that lists the family. A client reads
+a key it never received as empty and a field it never received as unknown.
+[Conformance](./messages#conformance) says where each one belongs.
 
 **Answer every request.** A server must answer every request it receives, and
 a type outside its families gets `unknown` with nothing changed. Answer within
@@ -644,9 +648,10 @@ for a server. A refused first `subscribe` is fatal to the window's startup, and
 a few refusals are matched by their exact sentence, which
 [Conformance](./messages#refusal-sentences-a-client-matches) lists.
 
-**What is still to be written.** These pages specify the messages. What a Level
-1 server has to do to a terminal stream, and how it reads a session's facts from
-Claude Code, are not published yet.
+**What is still to be written.** These pages specify the messages, and three
+things a server needs are not published yet. What a Level 1 server has to do to
+a terminal stream will get a page of its own. So will how it reads a session's
+facts from Claude Code. A conformance kit will test a server against these pages.
 
 **Where this lives.** This documentation is kept in the Collins repository for
 now, and may move to a repository both projects share once it settles. Every

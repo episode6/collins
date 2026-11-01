@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -157,9 +157,10 @@ _log = logging.getLogger(__name__)
 
 
 def _pty_unknown(refusal: RequestRefused) -> bool:
-    """Whether a refusal says the service no longer has the pty (the
-    core's ``no such pty``), as against the link being gone again."""
-    return refusal.error == protocol.ERROR_GONE and refusal.msgid.startswith("no such pty")
+    """Whether a refusal says the service no longer has the pty, as against
+    the link being gone again. A prefix, since a service of an earlier build
+    says which pty after the same words."""
+    return refusal.error == protocol.ERROR_GONE and refusal.msgid.startswith(protocol.PTY_GONE_MSGID)
 
 
 

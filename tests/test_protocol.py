@@ -150,9 +150,52 @@ def test_what_a_level_or_family_covers_inside_a_message_exists():
     assert set(p.ITEM_CORE_FIELDS) | set(p.ITEM_BACKGROUND_FIELDS) <= set(item)
     assert not set(p.ITEM_CORE_FIELDS) & set(p.ITEM_BACKGROUND_FIELDS)
     assert set(p.SPAWN_CORE_FIELDS) | set(p.SPAWN_SANDBOX_FIELDS) <= set(spawn)
-    assert set(p.STORE_STATE_KEYS) <= set(p.STATE_KEYS)
-    assert "keeper" in p.TYPES["service.status"].request.reply
-    assert "sandbox" in p.TYPES["service.status"].request.reply
+
+
+# Where every state key and `service.status` field belongs (§3.1), written out
+# for the same reason as the types' table.
+STATE_KEY_HOMES = {
+    1: {"settings", "service_id"},
+    2: {
+        "names", "generated_names", "cli_titles", "emojis", "favorites", "archived", "archived_at",
+        "archived_projects", "project_order", "virtual_projects", "project_worktree", "session_drafts",
+        "new_chat_drafts", "expanded_groups", "notifications",
+    },
+    "sandbox": {
+        "project_sandbox", "sandboxed_sessions", "sandbox_grants", "sandbox_project_grants", "sandbox_tools",
+    },
+    "prs": {"session_prs"},
+    "background": {"session_forwards", "pending_detaches"},
+    "tools": {"session_attachments", "diff_notes", "pending_diffs"},
+    "internal": {"process_baselines", "resume_on_start", "ptys", "pty_next_id", "inflight_copies"},
+}
+STATUS_FIELD_HOMES = {
+    0: {"version", "protocol", "ptys", "busy", "clients", "started", "pid", "cli", "home"},
+    "sandbox": {"sandbox", "live"},
+    "prs": {"gh"},
+    "internal": {"keeper", "keeper_mismatch", "keeper_unread", "keeper_held", "unkept"},
+}
+
+
+def _conformance_entries():
+    yield from p.CONFORMANCE_LEVELS.items()
+    yield from p.CONFORMANCE_FAMILIES.items()
+
+
+def test_every_state_key_has_the_one_home_the_spec_gives_it():
+    homes = {home: set(entry.state_keys) for home, entry in _conformance_entries() if entry.state_keys}
+    assert homes == STATE_KEY_HOMES
+    listed = [key for entry in dict(_conformance_entries()).values() for key in entry.state_keys]
+    assert sorted(listed) == sorted(p.STATE_KEYS)
+
+
+def test_every_status_field_has_the_one_home_the_spec_gives_it():
+    homes = {home: set(entry.status_fields) for home, entry in _conformance_entries() if entry.status_fields}
+    assert homes == STATUS_FIELD_HOMES
+    listed = [name for entry in dict(_conformance_entries()).values() for name in entry.status_fields]
+    reply = p.TYPES["service.status"].request.reply
+    assert sorted(listed) == sorted(reply)
+    assert {name for name, spec in reply.items() if spec.required} == {"version", "protocol"}
 
 
 def test_a_session_keeps_its_core_field_list():
@@ -164,11 +207,6 @@ def test_a_session_keeps_its_core_field_list():
     assert set(p.ITEM_CORE_FIELDS) == {
         "session", "path", "cwd", "resume_cwd", "display_name", "subtitle", "preview", "mtime", "created",
         "size", "status", "busy", "unread", "running", "removed",
-    }
-    assert set(p.STORE_STATE_KEYS) == {
-        "names", "generated_names", "cli_titles", "emojis", "favorites", "archived", "archived_at",
-        "archived_projects", "project_order", "virtual_projects", "project_worktree", "project_sandbox",
-        "session_drafts", "new_chat_drafts", "session_attachments", "expanded_groups",
     }
 
 

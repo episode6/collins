@@ -161,9 +161,11 @@ import it. It holds:
   `LEVEL_FAMILY` (3). `OPTIONAL_TYPES` is what a client may leave out and
   `family` what a server may; `CONFORMANCE_LEVELS` and
   `CONFORMANCE_FAMILIES` say what each covers inside a message (a field, a
-  mode, a state key, a blob kind). A new type names both, and
-  `tests/test_protocol.py`'s `LEVELS` / `FAMILIES` table fails until it is
-  written down there too; a type the design names nowhere is `internal`.
+  mode, a blob kind) and which state keys and `service.status` fields are
+  its own: each key and field has exactly one home. A new type names both,
+  and `tests/test_protocol.py`'s `LEVELS` / `FAMILIES` table fails until it
+  is written down there too (`STATE_KEY_HOMES` / `STATUS_FIELD_HOMES` for a
+  new key or field); a type the design names nowhere is `internal`.
   `service/core.py` answers every type today, and `api/server.py`'s hello
   lists every cap (`debug` only with the debug API on) and `IMPLEMENTATION`.
   A refusal sentence a client matches (`ALREADY_RUNNING_MSGID`,

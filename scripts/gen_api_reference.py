@@ -363,6 +363,10 @@ def _members(types: list[str]) -> str:
 
 def _conformance_entry(heading: str, entry: p.Conformance, types: list[str]) -> list[str]:
     lines = [f"### {heading}", "", entry.summary, "", f"**Message types:** {_members(types)}", ""]
+    if entry.state_keys:
+        lines.extend([f"**State keys:** {_members(list(entry.state_keys))}", ""])
+    if entry.status_fields:
+        lines.extend([f"**`service.status` fields:** {_members(list(entry.status_fields))}", ""])
     if entry.notes:
         lines.append("**Also:**")
         lines.append("")
@@ -381,6 +385,11 @@ def conformance_section() -> list[str]:
         "[Implementing a server](./index#implementing-a-server). The levels build on each other. A "
         "family is optional at any level: a server serves one by listing its name in `caps`, and "
         "answers a type it doesn't serve `unknown`. Each message type below names its family and level.",
+        "",
+        "Every state key and `service.status` field belongs to one level or family. One that belongs to a "
+        "family is emitted, read and written only by a server that lists the family. A client reads a key "
+        "it never received as empty and a field it never received as unknown. Of `service.status`, only "
+        "`version` and `protocol` are required.",
         "",
     ]
     core = [entry for entry in p.TYPES.values() if entry.family == p.FAMILY_CORE]
