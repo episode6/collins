@@ -17,9 +17,10 @@ message type with its fields and bounds; this page is everything else.
 
 ::: tip License
 This specification, the [message reference](./messages), the script that
-generates it and the Python module that defines the protocol
-(`collins/api/protocol.py`) are licensed [MIT](#license). Collins itself,
-the service included, stays GPL-3.0-or-later. A program that talks to
+generates it, the Python module that defines the protocol
+(`collins/api/protocol.py`) and the one that connects over ssh
+(`collins/sshremote.py`) are licensed [MIT](#license). Collins itself, the
+service included, stays GPL-3.0-or-later. A program that talks to
 `collins-service` only through this API is, in the view of Collins'
 authors, an independent work: see [Interoperability](#interoperability).
 :::
@@ -339,7 +340,9 @@ The service opens no network port and has no login of its own. To reach one
 on another machine, forward its Unix socket with ssh, which supplies the
 authentication, the encryption and the host verification. The protocol does
 not change: the WebSockets and the plain HTTP above all run over the forward
-as they do over the socket itself. It takes two ssh commands.
+as they do over the socket itself. It takes two ssh commands. A Python
+client can vendor `collins/sshremote.py` instead of writing them: see
+[Writing a client](#writing-a-client).
 
 **1. Start the service and learn its path.** Run `--print-socket` on the
 remote machine, adding `--app-id ID` for a service that does not run under
@@ -361,7 +364,8 @@ is there because the plain command `ssh host cmd` runs with a non-login
 `PATH`, which misses `~/.local/bin`, where a pipx install puts
 `collins-service`. Some profiles need more than this; the
 [remote guide](../guide/remote#what-ssh-does-for-you) describes the shell
-wrapper Collins uses. Put a time limit on this run (Collins gives it 10
+wrapper Collins uses, and `remote_command` in `collins/sshremote.py` is that
+wrapper. Put a time limit on this run (Collins gives it 10
 seconds), and read its exit status, `$code` above:
 
 | Exit | Meaning |
@@ -455,11 +459,20 @@ language reads the [message reference](./messages) instead, which is
 generated from that module by `scripts/gen_api_reference.py` and pinned by
 the unit suite, so the two never disagree.
 
+`collins/sshremote.py` is [Connecting over ssh](#connecting-over-ssh) as code,
+and is MIT-licensed too. It imports nothing but the standard library, so a
+Python client may vendor it as one file. It gives `parse_target` for a
+`[user@]host[:port]` destination, `print_socket` for the first command (a
+failure comes back as a code, and the words are yours to choose), `Forward`
+for the child that holds the forward (its `on_exit` is the signal to
+reconnect) and `sweep_orphans` for a forward a crashed client left behind.
+Its checks on a recorded pid read `/proc`, so they work on Linux only.
+
 The GPL-licensed parts of Collins are the worked examples: `collins/api/server.py` is the
 service's end, `collins/api/client.py` the window's, `collins/connection.py`
-the find-start-connect-reconnect loop and `collins/sshforward.py` the ssh
-forward that reaches a service on another machine. Read them for how, not
-to copy from: their license is Collins'.
+the find-start-connect-reconnect loop and `collins/sshforward.py` the transport
+that drives `sshremote` for it. Read them for how, not to copy from: their
+license is Collins'.
 
 ## Interoperability
 
@@ -476,8 +489,9 @@ for the GPL-licensed code.
 ## License
 
 This specification (`docs/api/index.md`), the message reference
-(`docs/api/messages.md`), its generator (`scripts/gen_api_reference.py`)
-and the protocol module (`collins/api/protocol.py`) are:
+(`docs/api/messages.md`), its generator (`scripts/gen_api_reference.py`),
+the protocol module (`collins/api/protocol.py`) and the ssh module
+(`collins/sshremote.py`) are:
 
 ```
 MIT License

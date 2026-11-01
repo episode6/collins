@@ -196,8 +196,8 @@ connecting over ssh),
 `docs/api/messages.md` the message reference that
 `scripts/gen_api_reference.py` renders from the table (run it after any
 table edit; `tests/test_api_reference.py` fails on a stale copy, and pins
-the four MIT files — the two pages, the generator and `protocol.py` — to
-their SPDX tags and everything else to none; `debian/copyright` has the
+the five MIT files — the two pages, the generator, `protocol.py` and
+`sshremote.py` — to their SPDX tags and everything else to none; `debian/copyright` has the
 stanza). Keep `protocol.py` standard-library only and free of
 Collins-private references in what the generator prints (a section
 comment's text up to its first colon is a heading of the public spec;
@@ -236,11 +236,15 @@ state. **Remote** (§3.24, D2, D10): `collins/connections.py` (GTK-free) is
 the reader and validator of `ui-state.json`'s `connections` list and
 `last_connection` (`[user@]host[:port]`, bounded, a bad row dropped;
 `LOCAL` is the one local connection, never stored), and
-`collins/sshforward.py` (GTK-free) the two ssh runs — `ssh TARGET
-collins-service --print-socket` (10 s; exit 255 is "could not connect", its
-stderr's last line the word shown) and the `-N -L` child holding the
-forward of the Unix socket at `<runtime dir>/collins/remote/<id>.sock`
-(unlinked first; only ever a socket) — with `RemoteTransport`, the
+`collins/sshremote.py` (stdlib only and MIT, so another client can vendor
+it: no Collins import and no user-facing text, a failure is a code) the two
+ssh runs — `ssh TARGET collins-service --print-socket` (10 s; exit 255 is
+"could not connect", its stderr's last line the detail) and the `-N -L`
+child holding the forward of the Unix socket (unlinked first; only ever a
+socket), with the target's grammar and the pid files. `collins/sshforward.py`
+(GTK-free, GPL) is Collins' side of them: the socket's place at
+`<runtime dir>/collins/remote/<app id>/<id>.sock`, the words the dialog and
+the banner show, and `RemoteTransport`, the
 manager's find/start for a remote (`start_remote`, `switch`; the forward's
 exit is the manager's `lost`, a hello that fails over a live forward makes
 the next find `none` so `--print-socket` restarts the remote service). The

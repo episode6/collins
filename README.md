@@ -258,10 +258,11 @@ for the app Collins grew out of. Released under
 
 **The service API is MIT.** The protocol `collins-service` speaks over its
 socket is specified in [docs/api](https://episode6.github.io/collins/api/)
-and defined by `collins/api/protocol.py`; the spec, the module and the
-script that renders the message reference from it are MIT-licensed
-([docs/api/LICENSE](docs/api/LICENSE)) so that another development
-environment can be a client. A program that talks to the service only
+and defined by `collins/api/protocol.py`; the spec, the module, the
+script that renders the message reference from it and
+`collins/sshremote.py`, which connects to a service over ssh, are
+MIT-licensed ([docs/api/LICENSE](docs/api/LICENSE)) so that another
+development environment can be a client. A program that talks to the service only
 through that documented API is, in our view, an independent work and not a
 derivative of Collins, whatever its own license; the service and the window
 themselves stay GPL.

@@ -4,8 +4,9 @@ Copyright (c) 2026 episode6, Inc.
 
 This license covers the service API specification in this directory
 (index.md and messages.md), the script that generates messages.md
-(scripts/gen_api_reference.py) and the protocol module it is generated
-from (collins/api/protocol.py). Everything else in Collins is licensed
+(scripts/gen_api_reference.py), the protocol module it is generated from
+(collins/api/protocol.py) and the module that connects to a service over
+ssh (collins/sshremote.py). Everything else in Collins is licensed
 GPL-3.0-or-later; see the LICENSE file at the repository root.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

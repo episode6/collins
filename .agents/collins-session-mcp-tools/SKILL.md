@@ -148,8 +148,8 @@ import it. It holds:
   colon with the §/PR/D references stripped; `_TITLES` renames the odd
   one). After any edit to the table run the script and commit the page:
   `tests/test_api_reference.py` fails on a stale copy. The same test pins
-  the SPDX tag on exactly four files (the two pages, the generator,
-  `protocol.py`): a new module under `collins/api/` is GPL, and nothing
+  the SPDX tag on exactly five files (the two pages, the generator,
+  `protocol.py`, `sshremote.py`): a new module under `collins/api/` is GPL, and nothing
   of the private design spec belongs in a `MessageType.summary`, which
   the public page prints verbatim.
 

@@ -124,7 +124,7 @@ fi
 
 # == what a window on another machine will find =================================
 
-# The same two rounds as `sshforward.remote_command`: the login profile, then
+# The same two rounds as `sshremote.remote_command`: the login profile, then
 # the interactive rc. Bounded, since an rc may hand the shell on.
 login_shell="${SHELL:-/bin/sh}"
 found=$(timeout 5 "$login_shell" -lc 'command -v collins-service' </dev/null 2>/dev/null || true)

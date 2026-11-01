@@ -726,7 +726,9 @@ to the service and a `connection.ConnectionManager` that finds or starts
 `collins-service` (the unit via `systemctl --user start` for the default app
 id, else a detached spawn), connects both channels, subscribes, and on a
 loss backs off (1, 2, 5, 10, then every 30 s) and reconnects. **A remote
-service** (spec §3.24, PR-3.1) puts a `sshforward.RemoteTransport` where
+service** (spec §3.24, PR-3.1; the ssh runs are `sshremote.py`, MIT and
+stdlib only so another client can vendor it, with `sshforward.py` Collins'
+words and transport around them) puts a `sshforward.RemoteTransport` where
 find and start were (`ConnectionManager.start_remote` at launch,
 `switch` while running): *find* probes the forward's local socket
 (`<runtime dir>/collins/remote/<connection id>.sock`, `none` while no
@@ -762,7 +764,7 @@ review of PR 623 (ruled 2026-10-29):** the remote command runs through the
 box's login shell (`exec "$SHELL" -lc 'exec collins-service
 --print-socket'`, one fixed string, the app id validated inside it), since
 `ssh host cmd` gets a non-login PATH without `~/.local/bin`; the printed
-path is taken only when it matches `sshforward.SOCKET_PATH_RE` (ssh
+path is taken only when it matches `sshremote.SOCKET_PATH_RE` (ssh
 expands `${VAR}` and `%u` of a `-L` path on the client, so an attacker's
 line would pick this device's variables); `RemoteCommand=none` and
 `RequestTTY=no` join `ControlMaster=no`; each forward writes
@@ -800,7 +802,7 @@ pipx's `ensurepath` writes bash's PATH behind Debian's guard) — never
 would run instead of the command (the second verification, V1; a `-lic`
 round that prints nothing is reported as that hand-over,
 `MSG_HANDOVER`); `sh -lc` for any other shell
-(`sshforward.remote_command`; the tests run the wrapper under a real
+(`sshremote.remote_command`; the tests run the wrapper under a real
 bash with both rc shapes). The service's own capture (`$SHELL -lic 'env
 -0'`, `service/main.py`) has the same hand-over hazard and fails soft
 (an empty overlay); it is §3.10's and not this chunk's, reported rather

@@ -148,7 +148,7 @@ CLIENT_HELPERS = (
     "remoteicons",
     "remoteimages",
     "remoteuploads",
-    "sshforward",
+    "sshremote",
     "transcriptlinks",
     "uistate",
     "updatecheck",
