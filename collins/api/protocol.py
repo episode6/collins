@@ -439,7 +439,7 @@ CAP_TOOLS = "tools"  # tool, tool-reply, diff.*, kind=file and kind=remote blobs
 CAP_JOBS = "jobs"  # job.start, job.cancel, job
 CAP_USAGE = "usage"  # usage.get, models.*, icon.save, kind=icon blobs
 CAP_BACKGROUND = "background"  # close's background mode, store.forward, the item's background fields
-CAP_SHELLS = "shells"  # spawn's shell kind, panel.*, paint, clear
+CAP_SHELLS = "shells"  # spawn's shell kind, panel.*, clear
 CAP_COMPOSER = "composer"  # cut, cut.cancel, draft.restore, send, switch, mention, composer
 CAP_INTERNAL = "internal"  # what the Collins service keeps for its own window
 CAPABILITIES = frozenset(
@@ -1461,7 +1461,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "paint",
         "Insert text into a pty's output stream (rule 2).",
-        family=CAP_SHELLS, level=3,
+        family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
     ),
     MessageType(

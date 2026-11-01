@@ -117,7 +117,7 @@ Enough for a client to connect and show an empty list.
 
 Enough to run a Claude Code session in a terminal, with its list row, whether it is busy or unread, its model and effort, a prompt typed into it, and closing it.
 
-**Message types:** `attach`, `detach`, `resize`, `focus`, `theme`, `ack`, `spawn`, `pty.info`, `pty.capture`, `prompt`, `write`, `close`, `session`, `resolver.arm`, `state.set`, `state.get`, `item`, `rows`, `store.flags`, `pty`, `pty-exited`
+**Message types:** `attach`, `detach`, `resize`, `focus`, `theme`, `ack`, `spawn`, `pty.info`, `pty.capture`, `prompt`, `write`, `paint`, `close`, `session`, `resolver.arm`, `state.set`, `state.get`, `item`, `rows`, `store.flags`, `pty`, `pty-exited`
 
 **State keys:** `settings`, `service_id`
 
@@ -251,7 +251,7 @@ Handing a session to the CLI's background agents and following it there.
 
 Plain shells beside a session, and their history.
 
-**Message types:** `panel.key`, `panel.history`, `clear`, `paint`
+**Message types:** `panel.key`, `panel.history`, `clear`
 
 **Also:**
 
@@ -847,7 +847,7 @@ No fields.
 
 Insert text into a pty's output stream (rule 2).
 
-Family: `shells` · Level 3
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 

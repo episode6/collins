@@ -74,7 +74,7 @@ def test_capabilities_and_error_codes_are_closed():
 LEVELS = {
     0: {"hello", "local", "subscribe", "service.status"},
     1: {
-        "spawn", "attach", "detach", "pty.info", "pty.capture", "prompt", "write", "close",
+        "spawn", "attach", "detach", "pty.info", "pty.capture", "prompt", "write", "paint", "close",
         "store.flags", "state.set", "state.get", "resolver.arm", "pty", "pty-exited", "session", "item",
         "rows", "resize", "focus", "theme", "ack",
     },
@@ -106,7 +106,7 @@ FAMILIES = {
     "jobs": {"job.start", "job.cancel", "job"},
     "usage": {"usage.get", "models.get", "models.defaults", "icon.save"},
     "background": {"store.forward"},
-    "shells": {"panel.key", "panel.history", "paint", "clear"},
+    "shells": {"panel.key", "panel.history", "clear"},
     "composer": {"cut", "cut.cancel", "draft.restore", "send", "switch", "mention", "composer"},
     "internal": {
         "transcript.update", "transcript.set", "transcript.relocate", "cwd.settle", "shells.follow",
