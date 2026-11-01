@@ -1391,8 +1391,6 @@ class PanelTerminal(Gtk.Box):
         feeds the widget instead."""
         if not self._has_pty():
             return False
-        if not apilink.has(protocol.CAP_SHELLS):
-            return False
         pty = self._view.pty
         step = protocol.TEXT_MAX
         try:
@@ -6360,11 +6358,9 @@ class TerminalTab(Gtk.Box):
 
     def feed_message(self, text: str) -> None:
         line = f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n"
-        if self._view.pty is not None and apilink.has(protocol.CAP_SHELLS):
+        if self._view.pty is not None:
             # Rule 2 (§3.1): the line goes into the pty's output stream on
             # the service (`paint`), so the model and every client show it.
-            # (`paint` is `shells`; with no such family the line is this
-            # widget's alone, as a refused spawn's is.)
             try:
                 self._client.request({"t": "paint", "pty": self._view.pty, "text": line})
                 return

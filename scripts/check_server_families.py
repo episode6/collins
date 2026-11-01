@@ -449,7 +449,11 @@ while True:
             win.lookup_action("toggle-panel").activate(None)
             check("Ctrl+J opens no shell", not tab._dock.shell_pages())
             check("the tool's way in is refused", tab.open_panel_shell() is None)
-            tab.feed_message("a line in the tab")  # `paint` otherwise: the record below says it stayed home
+            tab.feed_message("a line in the tab")  # `paint` is core (ruling 22): no refusal in the record
+            # The line moved the cursor off the box. The CLI redraws its own;
+            # this stub redraws on input.
+            tab.session.write_text("x\x7f")
+            check("…and the box is back under it", wait_until(tab.takes_prompt))
             check("a saved layout's shell does not come back", "shell" not in tab._restorable_kinds())
         elif cap == protocol.CAP_COMPOSER:
             check("a key is the CLI's own", tab._typing_opens_composer(ord("a"), 0) is False)
