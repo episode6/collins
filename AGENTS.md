@@ -205,7 +205,11 @@ the five MIT files — the two pages, the generator, `protocol.py` and
 stanza). Keep `protocol.py` standard-library only and free of
 Collins-private references in what the generator prints (a section
 comment's text up to its first colon is a heading of the public spec;
-spec-section and PR references are stripped). The spec says a program
+spec-section and PR references are stripped). Every type names a `family`
+and a `level` (`core` at 0, 1 or 2, or a cap's name at 3): what a server
+must serve, as `OPTIONAL_TYPES` is what a client may leave out; the hello
+lists every family cap, `debug` only with the debug API on, and
+`implementation`. The spec says a program
 that talks to the service only through the documented API is, in the
 authors' view, an independent work; the service and the window stay GPL.
 `api/server.py` (Gio and libsoup) is the service's `Soup.Server` on

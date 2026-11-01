@@ -57,7 +57,7 @@ This document and the module it is generated from are licensed
 ## Enumerations
 
 - `CAPABILITIES`: The names a service may list in its hello reply's `caps`.  
-  `debug`, `files`, `git`, `local`
+  `background`, `composer`, `debug`, `files`, `git`, `internal`, `jobs`, `local`, `prs`, `sandbox`, `shells`, `tools`, `usage`
 - `ERRORS`: The error codes a refusal carries; a receiver accepts any code-shaped string.  
   `direction`, `failed`, `gone`, `invalid`, `protocol`, `refused`, `sequence`, `stale`, `unknown`
 - `CHANNELS`: A connection's `channel` in its hello.  
@@ -93,6 +93,206 @@ This document and the module it is generated from are licensed
 - `FS_PASTE_ERRORS`: Why one `fs.paste` entry failed (its result's `error`); open: a newer service may add to it.  
   `failed`, `into_itself`, `missing`, `no_room`, `not_a_dir`, `outside`, `source_outside`
 
+## Conformance
+
+What a server must serve to be a server of this API; the rules are in [Implementing a server](./index#implementing-a-server). The levels build on each other. A family is optional at any level: a server serves one by listing its name in `caps`, and answers a type it doesn't serve `unknown`. Each message type below names its family and level.
+
+Every state key, and every field of `service.status`, `session` and `item`, belongs to one level or family. One that belongs to a family is emitted, read and written only by a server that lists the family. A client reads a key it never received as empty and a field it never received as unknown. Of `service.status`, only `version` and `protocol` are required.
+
+### Level 0: The wire
+
+Enough for a client to connect and show an empty list.
+
+**Message types:** `hello`, `local`, `subscribe`, `service.status`
+
+**`service.status` fields:** `version`, `protocol`, `ptys`, `busy`, `clients`, `started`, `pid`, `cli`, `home`
+
+**Also:**
+
+- `subscribe`'s snapshot may be empty: no `item` and no `pty`, then a `rows` with an empty list.
+- `service.status` needs only `version` and `protocol`.
+- A server with no local proof leaves `local_proof` out of its hello and refuses `local` `refused`. The client then stays remote, which is correct.
+
+### Level 1: Sessions and terminals
+
+Enough to run a Claude Code session in a terminal, with its list row, whether it is busy or unread, its model and effort, a prompt typed into it, and closing it.
+
+**Message types:** `attach`, `detach`, `resize`, `focus`, `theme`, `ack`, `spawn`, `pty.info`, `pty.capture`, `prompt`, `write`, `paint`, `close`, `session`, `resolver.arm`, `state.set`, `state.get`, `item`, `rows`, `store.flags`, `pty`, `pty-exited`
+
+**State keys:** `settings`, `service_id`
+
+**`session` fields:** `pty`, `handle`, `session`, `cwd`, `agent_cwd`, `pid`, `takes_prompt`, `agent_running`, `running_command`, `busy`, `finished`, `model`, `effort`, `permission_mode`, `transcript_path`, `landed`, `reset`
+
+**`item` fields:** `session`, `path`, `cwd`, `resume_cwd`, `display_name`, `subtitle`, `preview`, `mtime`, `created`, `size`, `status`, `busy`, `unread`, `running`, `removed`, `project`, `cli_title`, `provider`, `state`, `syncing`
+
+**Also:**
+
+- `spawn`: `kind: "agent"` with `cwd`, `session`, `prompt`, `model`, `effort`, `permission_mode`, `cols`, `rows`, `provider`, which every server accepts. An unknown `provider` reads as Claude.
+- `spawn`: a field whose value asks for nothing (an empty `add_dirs`, a false `worktree` with a `worktree_name` beside it, a false `sandbox`) is accepted and ignored.
+- `spawn`: a server refuses `refused`, with a `msgid` saying why, only a value that asks for a feature it lacks: `sandbox: true`, `sandbox_box` or `sandbox_plan` without `sandbox`; `history` or `ordinal` without `shells`; `worktree: true`, a non-empty `add_dirs`, `fork`, `continue_recent` or another optional field when it can't honour them.
+- `close`: the modes `exit` and `kill`.
+- `store.flags`: `status` and `unread`.
+- `state.set`: as an event, the `settings` key, with the server's defaults; a setting left out reads as the client's default. As a request, a server may refuse every write `refused`.
+- `state.get`: answers every key the server emits `state.set` for, and refuses any other `gone`.
+- `resolver.arm`: answer `ok`. A server with no resolver ignores it.
+- `item`: `project`, `cli_title`, `provider`, `state` and `syncing` are optional, and a missing one reads as absent.
+- The input frames, `resize`, `focus`, `theme` and `ack` are honoured.
+- `service.status`: a Level 1 server should send `cli` and `home`. A client reads a missing `cli` as unknown, and without `home` it can't abbreviate paths or start a path picker at home.
+
+### Level 2: The store
+
+A list a person can organise: names, favorites, archives, projects, trash, the transcript's links and export, folder trust and the notification history. Levels 1 and 2 together are the *sessions* profile, the one to aim for first.
+
+**Message types:** `put-away`, `forgotten`, `store.lookup`, `store.page-archived`, `store.refresh`, `store.show-archived`, `store.rename`, `store.regenerate-name`, `store.favorite`, `store.archive`, `store.archive-project`, `store.trash`, `store.delete`, `store.add-project`, `store.keep-projects`, `store.forget-project`, `store.move-project`, `store.forget`, `store.transcript-tail`, `store.transcript-export`, `trust.check`, `trust.grant`, `notify`, `notify.post`, `notify.remove`, `notify.clear`, `notify.green`, `notify.rekey`, `notify.test`, `seen`
+
+**State keys:** `names`, `generated_names`, `cli_titles`, `emojis`, `favorites`, `archived`, `archived_at`, `archived_projects`, `project_order`, `virtual_projects`, `project_worktree`, `session_drafts`, `new_chat_drafts`, `expanded_groups`, `notifications`
+
+**`item` fields:** `favorite`
+
+### Family `git`: Git
+
+The git page and everything else that asks about a repository.
+
+**Message types:** `git.run`, `git.info`, `git.sizes`, `git.watch`, `git.unwatch`, `git-changed`, `git.plan`
+
+**Also:**
+
+- `GET /api/blob?kind=git`.
+- The [git builders](#git-builders), each with git's own semantics.
+
+### Family `files`: Files
+
+The editor's files, the file tree, quick open and the path picker.
+
+**Message types:** `fs.trash`, `fs.read`, `fs.write`, `fs.watch`, `fs.unwatch`, `file-changed`, `dir-changed`, `fs.stat`, `fs.list`, `fs.walk`, `fs.rename`, `fs.paste`, `fs.mkdir`, `fs.names`, `fs.dirs`, `fs.newdir`
+
+**`session` fields:** `touched_files`
+
+### Family `prs`: Pull requests
+
+What a session's pull requests are and every action on one.
+
+**Message types:** `prs.restore`, `pr`, `pr-status`, `pr.set`, `pr.fetch`, `pr.sweep`, `pr.detail`, `pr.threads`, `pr.blob`, `pr.action`, `pr.comment`, `pr.review`, `pr.thread`
+
+**State keys:** `session_prs`
+
+**`service.status` fields:** `gh`
+
+**`session` fields:** `prs`
+
+**Also:**
+
+- `GET /api/blob?kind=pr`.
+
+### Family `sandbox`: Sandboxed sessions
+
+Sessions in a filesystem sandbox, and the grants that widen one.
+
+**Message types:** `sandbox.plan`, `sandbox.grants`, `sandbox.allow`, `sandbox.revoke`, `sandbox.tools`, `sandbox.restart`, `sandbox.derive`, `sandbox.drop`, `sandbox.forget`, `sandbox`
+
+**State keys:** `project_sandbox`, `sandboxed_sessions`, `sandbox_grants`, `sandbox_project_grants`, `sandbox_tools`
+
+**`service.status` fields:** `sandbox`, `live`
+
+**`session` fields:** `sandboxed`, `sandbox_box`, `sandbox_plan_path`, `defaults_owed`, `can_restart`
+
+**Also:**
+
+- `spawn`: the fields `sandbox`, `sandbox_box`, `sandbox_plan`.
+- `pty`: the fields `sandboxed` and `box`.
+- `pty.info`: the field `plan`.
+
+### Family `tools`: Session tools
+
+The tools a running agent calls that need a screen, the marks on a diff, and files handed between a client and a session.
+
+**Message types:** `tool`, `tool-reply`, `diff.notes`, `diff.set-notes`
+
+**State keys:** `session_attachments`, `diff_notes`, `pending_diffs`
+
+**`session` fields:** `attachments`
+
+**Also:**
+
+- `GET /api/blob?kind=file` and `kind=remote`.
+- `PUT /api/upload`.
+
+### Family `jobs`: Long-running operations
+
+Work that outlasts a request, such as a clone, a worktree's trash or restore, a login repair or an icon's generation. `JOB_KINDS` lists them all.
+
+**Message types:** `job.start`, `job.cancel`, `job`
+
+### Family `usage`: Token use
+
+The usage panel, the model catalog, the CLI's defaults and project icons.
+
+**Message types:** `usage.get`, `models.get`, `models.defaults`, `icon.save`
+
+**Also:**
+
+- `GET /api/blob?kind=icon`.
+
+### Family `background`: Background agents
+
+Handing a session to the CLI's background agents and following it there.
+
+**Message types:** `store.forward`
+
+**State keys:** `session_forwards`, `pending_detaches`
+
+**`item` fields:** `background`, `backgrounding`, `can_background`, `forward`
+
+**Also:**
+
+- `close`: the mode `background`.
+
+### Family `shells`: Panel shells
+
+Plain shells beside a session, and their history.
+
+**Message types:** `panel.key`, `panel.history`, `clear`
+
+**Also:**
+
+- `spawn`: `kind: "shell"`.
+
+### Family `composer`: The composer
+
+Lifting the text out of the CLI's input box and putting it back, switching the model or effort, and mentioning a file.
+
+**Message types:** `switch`, `send`, `mention`, `cut`, `cut.cancel`, `draft.restore`, `composer`
+
+**`session` fields:** `entered`, `foreign_paste`, `prompt_block`
+
+### Family `internal`: The Collins service's own
+
+What the Collins service does for its own window's timing and its own test suite. Another server need not serve it.
+
+**Message types:** `focus.terminal`, `close.nudge`, `close.end`, `shells`, `transcript.update`, `transcript.set`, `transcript.relocate`, `cwd.settle`, `shells.follow`, `finish.witness`, `baseline.absorb`, `baseline.cmdlines`, `restart.worktreeless`, `service.restart`, `cli.check`
+
+**State keys:** `process_baselines`, `resume_on_start`, `ptys`, `pty_next_id`, `inflight_copies`
+
+**`service.status` fields:** `keeper`, `keeper_mismatch`, `keeper_unread`, `keeper_held`, `unkept`
+
+**`session` fields:** `fork`, `forked`, `provider`, `options`, `continue_recent`, `resolver_cwd`, `initial_command`, `worktree_launch`, `new_chat_prompt`, `shells_follow_armed`, `closing`, `unstarted`, `lookup_empty`, `ledger_armed`
+
+### Family `debug`: The debug probe
+
+Collins' own test probe, served only with the service's debug API on. No other client or server should rely on it.
+
+**Message types:** `debug.session.get`, `debug.session.set`, `debug.session.call`, `debug.screen`, `debug.pty`, `debug.local`, `debug.sandbox`
+
+### Refusal sentences a client matches
+
+A client reads almost nothing from a refusal but its code. These three `msgid`s are the exceptions: send them exactly.
+
+| Name | Sentence | When |
+| --- | --- | --- |
+| `ALREADY_RUNNING_MSGID` | `This session is already running in the Collins service` | `spawn` refused `refused` because the session already runs; `args.pty` names its pty, and the client attaches to that instead. |
+| `PTY_GONE_MSGID` | `no such pty` | A request refused `gone` because no such pty exists; `args.pty` names it. The client takes the pty as ended. |
+| `FOLDER_GONE_MSGID` | `The folder is not there` | `fs.list`, `fs.walk`, `fs.names` or `fs.dirs` refused `gone` because the folder is not there. A file tree drops its rows. |
+
 ## Message types
 
 A *request* carries an integer `id` and is answered by exactly one response; an *event* carries none and is never answered. Fields a type does not list are dropped by the receiver. `required` fields must be present; `nullable` ones may be `null`.
@@ -102,6 +302,8 @@ A *request* carries an integer `id` and is answered by exactly one response; an 
 ### `hello`
 
 The client introduces itself; the service answers with its own facts.
+
+Family: `core` · Level 0
 
 *Request*, client → service, answered by one response.
 
@@ -132,6 +334,7 @@ The client introduces itself; the service answers with its own facts.
 | `version` | string, 1–64 characters | required |
 | `service_id` | string, 1–128 characters, matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}` | required |
 | `host` | string, at most 255 characters | optional |
+| `implementation` | string, at most 64 characters | optional |
 | `caps` | list of at most 64 items of: string, at most 64 characters, matching `[a-z][a-z0-9_.-]{0,63}` | optional |
 | `local_proof` | object (fields below) | optional |
 | `local_proof.path` | absolute path, at most 4,096 characters, no NUL | required |
@@ -140,6 +343,8 @@ The client introduces itself; the service answers with its own facts.
 ### `local`
 
 The client proves it shares the service's filesystem and uid.
+
+Family: `core` · Level 0
 
 *Request*, client → service, answered by one response.
 
@@ -156,6 +361,8 @@ No fields.
 ### `subscribe`
 
 Send the snapshot as events, then answer, then keep sending events.
+
+Family: `core` · Level 0
 
 *Request*, client → service, answered by one response.
 
@@ -175,6 +382,8 @@ No fields.
 ### `attach`
 
 Show a pty: a redraw, then live output.
+
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 
@@ -200,6 +409,8 @@ Show a pty: a redraw, then live output.
 
 Stop showing a pty; it keeps running.
 
+Family: `core` · Level 1
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -216,6 +427,8 @@ No fields.
 
 The client's grid for a pty changed.
 
+Family: `core` · Level 1
+
 *Event*, client → service, never answered.
 
 **Event fields**
@@ -230,6 +443,8 @@ The client's grid for a pty changed.
 
 A client's view of a pty gained or lost focus.
 
+Family: `core` · Level 1
+
 *Event*, client → service, never answered.
 
 **Event fields**
@@ -242,6 +457,8 @@ A client's view of a pty gained or lost focus.
 ### `focus.terminal`
 
 The session asks its active client to put the keyboard in the terminal.
+
+Family: `internal` · Level 3
 
 *Optional for another client.* Asks for the keyboard to go to the terminal. A client can ignore it.
 
@@ -256,6 +473,8 @@ The session asks its active client to put the keyboard in the terminal.
 ### `theme`
 
 The client's terminal colours or scheme changed.
+
+Family: `core` · Level 1
 
 *Event*, client → service, never answered.
 
@@ -274,6 +493,8 @@ The client's terminal colours or scheme changed.
 
 The client has fed this much of a pty's live output to its terminal (flow control).
 
+Family: `core` · Level 1
+
 *Event*, client → service, never answered.
 
 **Event fields**
@@ -287,6 +508,8 @@ The client has fed this much of a pty's live output to its terminal (flow contro
 
 Start a session or a panel shell in a new pty.
 
+Family: `core` · Level 1
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -296,6 +519,7 @@ Start a session or a panel shell in a new pty.
 | `kind` | string, one of `agent`, `shell` | required |
 | `cwd` | absolute path, at most 4,096 characters, no NUL | required |
 | `session` | string, 1–128 characters, matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}` | optional |
+| `provider` | string, at most 32 characters | optional |
 | `prompt` | string, at most 1,048,576 (1 MiB) characters | optional |
 | `model` | string, at most 128 characters | optional |
 | `effort` | string, at most 32 characters | optional |
@@ -330,6 +554,8 @@ Start a session or a panel shell in a new pty.
 
 File a shell's panel history under a new key, or under none; name the session it belongs to.
 
+Family: `shells` · Level 3
+
 *Optional for another client.* Only for a client that keeps its shells' scrollback between runs.
 
 *Request*, client → service, answered by one response.
@@ -349,6 +575,8 @@ No fields.
 ### `panel.history`
 
 Write a session's panel history: each shell's scrollback, from its pty's model or as text.
+
+Family: `shells` · Level 3
 
 *Optional for another client.* Only for a client that keeps its shells' scrollback between runs.
 
@@ -373,6 +601,8 @@ No fields.
 ### `pty.info`
 
 A pty's process facts: its child, its shell, the foreground, the shell's cwd, its plan.
+
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 
@@ -401,6 +631,8 @@ A pty's process facts: its child, its shell, the foreground, the shell's cwd, it
 
 A pty's text, scrollback and screen, from the service's model.
 
+Family: `core` · Level 1
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -418,6 +650,8 @@ A pty's text, scrollback and screen, from the service's model.
 ### `prompt`
 
 Type text into the agent's box and submit it.
+
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 
@@ -437,6 +671,8 @@ No fields.
 ### `switch`
 
 Post a model and/or effort switch to the agent.
+
+Family: `composer` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -459,6 +695,8 @@ No fields.
 
 Type raw keystrokes into the agent's pty.
 
+Family: `core` · Level 1
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -476,6 +714,8 @@ No fields.
 ### `send`
 
 The composer's send: submit its draft, now or once a cut has settled.
+
+Family: `composer` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -497,6 +737,8 @@ The composer's send: submit its draft, now or once a cut has settled.
 
 Type a file's mention token into the agent's box.
 
+Family: `composer` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -515,6 +757,8 @@ No fields.
 ### `cut`
 
 Begin the composer's open-cut; `cut` events say what it found.
+
+Family: `composer` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -545,6 +789,8 @@ Begin the composer's open-cut; `cut` events say what it found.
 
 Call a cut off: the composer closed, or the box holds its text again.
 
+Family: `composer` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -561,6 +807,8 @@ No fields.
 ### `draft.restore`
 
 A closing composer's draft goes back into the agent's box, in pieces.
+
+Family: `composer` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -579,7 +827,9 @@ A closing composer's draft goes back into the agent's box, in pieces.
 
 ### `clear`
 
-Erase the agent's box; wipe a shell's screen and scrollback.
+Wipe a shell's screen and scrollback. On an agent pty Collins' service erases the input box; no client sends that and it is not promised.
+
+Family: `shells` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -597,6 +847,8 @@ No fields.
 
 Insert text into a pty's output stream (rule 2).
 
+Family: `core` · Level 1
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -613,6 +865,8 @@ No fields.
 ### `close`
 
 End a pty's session: the graceful exit, the /bg handoff, or force.
+
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 
@@ -643,6 +897,8 @@ No fields.
 
 Feed the exit keystroke again to a CLI parked on a screen.
 
+Family: `internal` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -658,6 +914,8 @@ No fields.
 ### `close.end`
 
 The page is gone: the close poll stops.
+
+Family: `internal` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -676,6 +934,8 @@ No fields.
 ### `session`
 
 An agent session's facts, whole on attach and as changed fields after.
+
+Family: `core` · Level 1
 
 *Event*, service → client, never answered.
 
@@ -732,6 +992,8 @@ An agent session's facts, whole on attach and as changed fields after.
 
 The session asks the active client's composer for something.
 
+Family: `composer` · Level 3
+
 *Optional for another client.* Asks a client with a composer for something. Without one, ignore it.
 
 *Event*, service → client, never answered.
@@ -748,6 +1010,8 @@ The session asks the active client's composer for something.
 
 The session says something about the panel shells beside it.
 
+Family: `internal` · Level 3
+
 *Optional for another client.* About shells beside a session. A client that opens none can ignore it.
 
 *Event*, service → client, never answered.
@@ -762,6 +1026,8 @@ The session says something about the panel shells beside it.
 ### `resolver.arm`
 
 A client mapped the tab: the transcript resolver's background budget starts over.
+
+Family: `core` · Level 1
 
 *Optional for another client.* The window sends this when a tab is first shown. The service binds a session to its id without it.
 
@@ -780,6 +1046,8 @@ No fields.
 ### `transcript.update`
 
 Re-read the transcript now; with `discover`, ask the branch which PR it has.
+
+Family: `internal` · Level 3
 
 *Optional for another client.* The window's footer asks for a read sooner. The service follows each transcript itself.
 
@@ -800,6 +1068,8 @@ No fields.
 
 Tail another transcript (or none).
 
+Family: `internal` · Level 3
+
 *Optional for another client.* No Collins client sends this. The service finds each session's transcript itself.
 
 *Request*, client → service, answered by one response.
@@ -818,6 +1088,8 @@ No fields.
 ### `transcript.relocate`
 
 Follow the session's transcript to where the CLI moved it.
+
+Family: `internal` · Level 3
 
 *Optional for another client.* No Collins client sends this. The service follows a transcript the CLI moved.
 
@@ -838,6 +1110,8 @@ No fields.
 
 Re-adopt the pull requests saved for the session.
 
+Family: `prs` · Level 3
+
 *Optional for another client.* Shows a session's saved pull requests before the next read. Pull requests in the transcript come back on their own; one found only by a branch lookup is saved nowhere else.
 
 *Request*, client → service, answered by one response.
@@ -856,6 +1130,8 @@ No fields.
 ### `cwd.settle`
 
 Whether the agent has moved, as the editor rooted at `root` should see it.
+
+Family: `internal` · Level 3
 
 *Optional for another client.* Only for a file view that follows the agent's directory.
 
@@ -880,6 +1156,8 @@ Whether the agent has moved, as the editor rooted at `root` should see it.
 
 Whether the shells beside a new chat are owed the offer to follow its worktree.
 
+Family: `internal` · Level 3
+
 *Optional for another client.* Only for a client with shells beside a new chat.
 
 *Request*, client → service, answered by one response.
@@ -898,6 +1176,8 @@ No fields.
 ### `finish.witness`
 
 What the transcript says right now, for the finish ledger.
+
+Family: `internal` · Level 3
 
 *Optional for another client.* No Collins client sends this; only the test suite does.
 
@@ -920,6 +1200,8 @@ What the transcript says right now, for the finish ledger.
 
 Fold what runs under a pristine fresh spawn into its plumbing baseline.
 
+Family: `internal` · Level 3
+
 *Optional for another client.* No Collins client sends this; only the test suite does.
 
 *Request*, client → service, answered by one response.
@@ -939,6 +1221,8 @@ Fold what runs under a pristine fresh spawn into its plumbing baseline.
 ### `baseline.cmdlines`
 
 The cmdlines running directly below the session's agent right now.
+
+Family: `internal` · Level 3
 
 *Optional for another client.* No Collins client sends this; only the test suite does.
 
@@ -960,6 +1244,8 @@ The cmdlines running directly below the session's agent right now.
 
 Type the new-session command again with the worktree dropped.
 
+Family: `internal` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -977,6 +1263,8 @@ No fields.
 ### `debug.session.get`
 
 An attribute of a session, JSON-encoded (a method answers `callable`).
+
+Family: `debug` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -998,6 +1286,8 @@ An attribute of a session, JSON-encoded (a method answers `callable`).
 
 Set an attribute of a session.
 
+Family: `debug` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1015,6 +1305,8 @@ No fields.
 ### `debug.session.call`
 
 Call a method of a session with JSON arguments; its result JSON-encoded.
+
+Family: `debug` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1036,6 +1328,8 @@ Call a method of a session with JSON arguments; its result JSON-encoded.
 ### `debug.screen`
 
 A pty's screen model, as the checks read it.
+
+Family: `debug` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1059,6 +1353,8 @@ A pty's screen model, as the checks read it.
 
 A pty's process facts, as the checks read them.
 
+Family: `debug` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1080,6 +1376,8 @@ A pty's process facts, as the checks read them.
 
 Set whether the service treats the asking client as local (a check's stand-in for ssh).
 
+Family: `debug` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1095,6 +1393,8 @@ No fields.
 ### `debug.sandbox`
 
 Call a method of the service's sandbox host, its live grants, or the core.
+
+Family: `debug` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1118,6 +1418,8 @@ Call a method of the service's sandbox host, its live grants, or the core.
 ### `state.set`
 
 Write a [shared state key](#state-keys) (request), or a key changed (event).
+
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 
@@ -1147,6 +1449,8 @@ No fields.
 
 Read a [shared state key](#state-keys).
 
+Family: `core` · Level 1
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1167,6 +1471,8 @@ Read a [shared state key](#state-keys).
 ### `item`
 
 A session row appeared, changed or went away.
+
+Family: `core` · Level 1
 
 *Event*, service → client, never answered.
 
@@ -1204,6 +1510,8 @@ A session row appeared, changed or went away.
 
 The sidebar's rows after a refresh: their order, groups and counts.
 
+Family: `core` · Level 1
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -1234,6 +1542,8 @@ The sidebar's rows after a refresh: their order, groups and counts.
 
 A session was archived: whatever it still asked of the user goes with it.
 
+Family: `core` · Level 2
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -1246,6 +1556,8 @@ A session was archived: whatever it still asked of the user goes with it.
 
 A session's transcript went (the archive sweep): what a client kept for it goes too.
 
+Family: `core` · Level 2
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -1257,6 +1569,8 @@ A session's transcript went (the archive sweep): what a client kept for it goes 
 ### `store.lookup`
 
 Send one session's item, archived or not (a session the client was never sent).
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1276,6 +1590,8 @@ Send one session's item, archived or not (a session the client was never sent).
 
 Send the sessions kept out of sight as items, and keep them current.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1291,6 +1607,8 @@ No fields.
 ### `store.refresh`
 
 Rescan the transcripts.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1308,6 +1626,8 @@ No fields.
 
 Draw the rows kept out of sight (Show archived sessions).
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1323,6 +1643,8 @@ No fields.
 ### `store.rename`
 
 Name a session; an empty name clears the manual one.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1341,6 +1663,8 @@ No fields.
 
 Title a session again with the title model, over a manual name.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1356,6 +1680,8 @@ No fields.
 ### `store.favorite`
 
 Add sessions to the favorites, or take them out.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1374,6 +1700,8 @@ No fields.
 
 Archive sessions, or restore them.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1391,6 +1719,8 @@ No fields.
 
 Archive a whole project, or restore it.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1407,6 +1737,8 @@ No fields.
 ### `store.trash`
 
 Move sessions' transcripts to the trash; the ones that failed, with why.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1426,6 +1758,8 @@ Move sessions' transcripts to the trash; the ones that failed, with why.
 
 Delete a session's transcript for good; why it failed, when it did.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1444,6 +1778,8 @@ Delete a session's transcript for good; why it failed, when it did.
 
 A session continued under a new id (a /bg fork): carry its records over.
 
+Family: `background` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1461,6 +1797,8 @@ No fields.
 
 Put a folder in the sidebar before a session has run there.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1476,6 +1814,8 @@ No fields.
 ### `store.keep-projects`
 
 Keep projects in the sidebar after their sessions go.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1493,6 +1833,8 @@ No fields.
 
 Drop a kept project from the sidebar.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1508,6 +1850,8 @@ No fields.
 ### `store.move-project`
 
 Move a project in the sidebar order, before another or to the end.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1526,6 +1870,8 @@ No fields.
 
 A session's transcript went: its panel history, records and box go too.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1541,6 +1887,8 @@ No fields.
 ### `store.flags`
 
 What the person did at a client's screen, for a session's row: its status, unread off.
+
+Family: `core` · Level 1
 
 *Request*, client → service, answered by one response.
 
@@ -1565,6 +1913,8 @@ No fields.
 
 The links in the tail of a session's transcript, for finishing a wrapped link.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1582,6 +1932,8 @@ The links in the tail of a session's transcript, for finishing a wrapped link.
 ### `store.transcript-export`
 
 A session's transcript rendered as Markdown, for the client to save to a file of its own.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1603,6 +1955,8 @@ A session's transcript rendered as Markdown, for the client to save to a file of
 
 Whether the CLI trusts a folder already, and the folder a trust is recorded on.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1622,6 +1976,8 @@ Whether the CLI trusts a folder already, and the folder a trust is recorded on.
 
 Record the CLI's folder trust: on the folder's root, or on a launch directory.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1640,6 +1996,8 @@ Record the CLI's folder trust: on the folder's root, or on a launch directory.
 ### `pty`
 
 A pty appeared or changed (a row of the pty table).
+
+Family: `core` · Level 1
 
 *Event*, service → client, never answered.
 
@@ -1664,6 +2022,8 @@ A pty appeared or changed (a row of the pty table).
 
 A pty's child exited; status is null when it is unknown (a keeper crash).
 
+Family: `core` · Level 1
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -1677,6 +2037,8 @@ A pty's child exited; status is null when it is unknown (a keeper crash).
 ### `pr`
 
 A session's linked pull requests, as prstatus records.
+
+Family: `prs` · Level 3
 
 *Event*, service → client, never answered.
 
@@ -1692,6 +2054,8 @@ A session's linked pull requests, as prstatus records.
 
 A pull request's fetched status changed (the fetch cache's entry, by URL).
 
+Family: `prs` · Level 3
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -1704,6 +2068,8 @@ A pull request's fetched status changed (the fetch cache's entry, by URL).
 ### `pr.set`
 
 Replace a session's saved pull requests.
+
+Family: `prs` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1722,6 +2088,8 @@ No fields.
 
 Fetch pull requests' statuses again (dropping what is cached, when asked).
 
+Family: `prs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1738,6 +2106,8 @@ No fields.
 ### `pr.sweep`
 
 The sidebar's sweep: fetch and discover the pull requests of sessions.
+
+Family: `prs` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1760,6 +2130,8 @@ The sidebar's sweep: fetch and discover the pull requests of sessions.
 
 A pull request's page: everything gh says about it.
 
+Family: `prs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1778,6 +2150,8 @@ A pull request's page: everything gh says about it.
 
 A pull request's review threads.
 
+Family: `prs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1795,6 +2169,8 @@ A pull request's review threads.
 ### `pr.blob`
 
 Name the blob URL of one file of a repository at a commit (an image the Files view shows).
+
+Family: `prs` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1817,6 +2193,8 @@ Name the blob URL of one file of a repository at a commit (an image the Files vi
 
 Run one of a pull request's actions through gh (practions.perform).
 
+Family: `prs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1835,6 +2213,8 @@ Run one of a pull request's actions through gh (practions.perform).
 ### `pr.comment`
 
 Comment on a pull request.
+
+Family: `prs` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1855,6 +2235,8 @@ Comment on a pull request.
 
 Review a pull request: approve, or request changes.
 
+Family: `prs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1874,6 +2256,8 @@ Review a pull request: approve, or request changes.
 ### `pr.thread`
 
 Reply in a pull request's review thread, or resolve it.
+
+Family: `prs` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -1900,6 +2284,8 @@ At least one of `body`, `resolved` must be present.
 
 A notification record, its body as msgid and args.
 
+Family: `core` · Level 2
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -1922,6 +2308,8 @@ A notification record, its body as msgid and args.
 ### `notify.post`
 
 Add a row to the notification history (the service mints it).
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -1949,6 +2337,8 @@ Add a row to the notification history (the service mints it).
 
 Drop rows from the notification history.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1967,6 +2357,8 @@ Drop rows from the notification history.
 
 Drop every row of the notification history but the finished runs'.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -1982,6 +2374,8 @@ No fields.
 ### `notify.green`
 
 A finished run's row: raise it (unread) or take it down.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -2004,6 +2398,8 @@ A finished run's row: raise it (unread) or take it down.
 
 File a placeholder's rows under the session it resolved to.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2023,6 +2419,8 @@ File a placeholder's rows under the session it resolved to.
 
 Run a notify command as given, whether or not a client is attached.
 
+Family: `core` · Level 2
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2041,6 +2439,8 @@ Run a notify command as given, whether or not a client is attached.
 ### `seen`
 
 Notifications or a session were seen: a client says so, the service tells the rest.
+
+Family: `core` · Level 2
 
 *Request*, client → service, answered by one response.
 
@@ -2076,6 +2476,8 @@ At least one of `ids`, `session`, `all` must be present.
 
 Start a long-running operation; its progress and outcome arrive as job events.
 
+Family: `jobs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2095,6 +2497,8 @@ Start a long-running operation; its progress and outcome arrive as job events.
 
 End a job early.
 
+Family: `jobs` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2110,6 +2514,8 @@ No fields.
 ### `job`
 
 A job's progress, or how it ended.
+
+Family: `jobs` · Level 3
 
 *Event*, service → client, never answered.
 
@@ -2130,6 +2536,8 @@ A job's progress, or how it ended.
 
 The plan's usage, as the usage panel shows it, or why there is none.
 
+Family: `usage` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2147,6 +2555,8 @@ No fields.
 ### `models.get`
 
 The model catalog: the service's cache, fetched again when asked.
+
+Family: `usage` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2170,6 +2580,8 @@ The model catalog: the service's cache, fetched again when asked.
 
 The CLI's default model for a directory, and its effort for a model.
 
+Family: `usage` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2189,6 +2601,8 @@ The CLI's default model for a directory, and its effort for a model.
 ### `icon.save`
 
 Write a generated project icon into the project.
+
+Family: `usage` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2211,6 +2625,8 @@ Write a generated project icon into the project.
 
 A UI-bound tool call for the session's active client.
 
+Family: `tools` · Level 3
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -2228,6 +2644,8 @@ A UI-bound tool call for the session's active client.
 
 The active client's answer to a tool call.
 
+Family: `tools` · Level 3
+
 *Event*, client → service, never answered.
 
 **Event fields**
@@ -2241,6 +2659,8 @@ The active client's answer to a tool call.
 ### `diff.notes`
 
 A session's notes and highlights on its diff, whole.
+
+Family: `tools` · Level 3
 
 *Event*, service → client, never answered.
 
@@ -2258,6 +2678,8 @@ At least one of `handle`, `session` must be present.
 ### `diff.set-notes`
 
 Write a session's notes and highlights on its diff, whole.
+
+Family: `tools` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2282,6 +2704,8 @@ No fields.
 
 The plan a sandboxed session's box was launched with.
 
+Family: `sandbox` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2301,6 +2725,8 @@ The plan a sandboxed session's box was launched with.
 ### `sandbox.grants`
 
 What the Sandboxed chip draws: grants, defaults, tools, staleness.
+
+Family: `sandbox` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2335,6 +2761,8 @@ What the Sandboxed chip draws: grants, defaults, tools, staleness.
 
 Allow a directory to a session's box, or make it a project default.
 
+Family: `sandbox` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2357,6 +2785,8 @@ Allow a directory to a session's box, or make it a project default.
 
 Take a directory back from a session's box, or from the project defaults.
 
+Family: `sandbox` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2378,6 +2808,8 @@ Take a directory back from a session's box, or from the project defaults.
 ### `sandbox.tools`
 
 Set which session tools a sandboxed session is offered, or reset them.
+
+Family: `sandbox` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2403,6 +2835,8 @@ At least one of `tools`, `reset` must be present.
 
 Exit a sandboxed session and resume it with the current plan.
 
+Family: `sandbox` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2420,6 +2854,8 @@ No fields.
 ### `sandbox.derive`
 
 A sibling's plan, derived from a box's launched one for its directory.
+
+Family: `sandbox` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2444,6 +2880,8 @@ A sibling's plan, derived from a box's launched one for its directory.
 
 A derived plan and its box, let go of: nothing will launch from them.
 
+Family: `sandbox` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2462,6 +2900,8 @@ No fields.
 ### `sandbox.forget`
 
 A session's transcript went: its box, and what it was allowed, go too.
+
+Family: `sandbox` · Level 3
 
 *Optional for another client.* No Collins client sends this. `store.forget` already does it.
 
@@ -2482,6 +2922,8 @@ No fields.
 ### `sandbox`
 
 A sandboxed session's grants or plan changed; a delivery for the toast; the probe's verdict.
+
+Family: `sandbox` · Level 3
 
 *Event*, service → client, never answered.
 
@@ -2508,6 +2950,8 @@ A sandboxed session's grants or plan changed; a delivery for the toast; the prob
 ### `git.run`
 
 Run one of the [git builders](#git-builders), by name and keyword args, on the service's git.
+
+Family: `git` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2536,6 +2980,8 @@ Run one of the [git builders](#git-builders), by name and keyword args, on the s
 ### `git.info`
 
 Everything gitinfo reads off a repository's .git, at once (the client's per-cwd mirror).
+
+Family: `git` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2574,6 +3020,8 @@ Everything gitinfo reads off a repository's .git, at once (the client's per-cwd 
 
 The size on disk of repository paths (the read's too-large gate for untracked and unmerged files).
 
+Family: `git` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2592,6 +3040,8 @@ The size on disk of repository paths (the read's too-large gate for untracked an
 ### `git.watch`
 
 Watch a tree for this client: the page's directory monitors and its 2 s tick, on the service.
+
+Family: `git` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2613,6 +3063,8 @@ No fields.
 
 Stop one watch of this client's, by its handle.
 
+Family: `git` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2629,6 +3081,8 @@ No fields.
 
 A watched working tree moved: the three signatures, each a short digest.
 
+Family: `git` · Level 3
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -2643,6 +3097,8 @@ A watched working tree moved: the three signatures, each a short digest.
 ### `git.plan`
 
 Carry a gitpatch plan out on the service, refused stale when its keys moved.
+
+Family: `git` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2676,6 +3132,8 @@ Carry a gitpatch plan out on the service, refused stale when its keys moved.
 
 Move files to the trash on the service's machine.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2696,6 +3154,8 @@ Move files to the trash on the service's machine.
 ### `fs.read`
 
 A file's text off the service's machine, with the mtime the save that follows expects.
+
+Family: `files` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2722,6 +3182,8 @@ A file's text off the service's machine, with the mtime the save that follows ex
 
 Write a file's text on the service's machine, refused stale when its mtime moved.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2747,6 +3209,8 @@ Write a file's text on the service's machine, refused stale when its mtime moved
 
 Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the service.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2766,6 +3230,8 @@ No fields.
 
 Stop a watch of this client's, by its handle.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2781,6 +3247,8 @@ No fields.
 ### `file-changed`
 
 A watched file moved: its stat now (null when gone), debounced 300 ms on the service.
+
+Family: `files` · Level 3
 
 *Event*, service → client, never answered.
 
@@ -2798,6 +3266,8 @@ A watched file moved: its stat now (null when gone), debounced 300 ms on the ser
 
 Something changed in a watched directory, debounced 300 ms on the service: list it again.
 
+Family: `files` · Level 3
+
 *Event*, service → client, never answered.
 
 **Event fields**
@@ -2812,6 +3282,8 @@ Something changed in a watched directory, debounced 300 ms on the service: list 
 ### `fs.stat`
 
 What is at a path on the service's machine, and whether it is inside a root.
+
+Family: `files` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2835,6 +3307,8 @@ What is at a path on the service's machine, and whether it is inside a root.
 ### `fs.list`
 
 A directory's entries in the tree's order, with the ignored names marked.
+
+Family: `files` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2862,6 +3336,8 @@ A directory's entries in the tree's order, with the ignored names marked.
 
 Every file under a root, relative and breadth-first, for quick open.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2886,6 +3362,8 @@ Every file under a root, relative and breadth-first, for quick open.
 
 Rename a file or folder in place on the service's machine, never over anything.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2905,6 +3383,8 @@ Rename a file or folder in place on the service's machine, never over anything.
 ### `fs.paste`
 
 Copy (or move, for a cut) files into a folder on the service's machine, never over anything.
+
+Family: `files` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2934,6 +3414,8 @@ Copy (or move, for a cut) files into a folder on the service's machine, never ov
 
 Make one folder on the service's machine, inside a root, never over anything.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -2950,6 +3432,8 @@ No fields.
 ### `fs.names`
 
 The non-directory names in a root, for the bare root-name links.
+
+Family: `files` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2973,6 +3457,8 @@ The non-directory names in a root, for the bare root-name links.
 ### `fs.dirs`
 
 A folder's subfolders on the service's machine, anywhere: the path picker's listing.
+
+Family: `files` · Level 3
 
 *Request*, client → service, answered by one response.
 
@@ -2999,6 +3485,8 @@ A folder's subfolders on the service's machine, anywhere: the path picker's list
 
 Make one folder on the service's machine under any folder that is there: the picker's New folder.
 
+Family: `files` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -3019,6 +3507,8 @@ Make one folder on the service's machine under any folder that is there: the pic
 
 Restart the service: now, or once no session is busy; or call a waiting restart off.
 
+Family: `internal` · Level 3
+
 *Request*, client → service, answered by one response.
 
 **Request fields**
@@ -3034,6 +3524,8 @@ No fields.
 ### `service.status`
 
 What the service is running.
+
+Family: `core` · Level 0
 
 *Request*, client → service, answered by one response.
 
@@ -3066,6 +3558,8 @@ No fields.
 ### `cli.check`
 
 The service's claude CLI: where it is, where it might be, and a path's verdict.
+
+Family: `internal` · Level 3
 
 *Request*, client → service, answered by one response.
 

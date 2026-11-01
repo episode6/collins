@@ -128,6 +128,26 @@ ENUMERATIONS = (
     ),
 )
 
+# The refusal sentences a client matches as they stand: a server sends these
+# exact strings for these cases, whatever else its refusals say.
+MATCHED_MSGIDS = (
+    (
+        "ALREADY_RUNNING_MSGID",
+        "`spawn` refused `refused` because the session already runs; `args.pty` names its pty, and the "
+        "client attaches to that instead.",
+    ),
+    (
+        "PTY_GONE_MSGID",
+        "A request refused `gone` because no such pty exists; `args.pty` names it. The client takes the "
+        "pty as ended.",
+    ),
+    (
+        "FOLDER_GONE_MSGID",
+        "`fs.list`, `fs.walk`, `fs.names` or `fs.dirs` refused `gone` because the folder is not there. "
+        "A file tree drops its rows.",
+    ),
+)
+
 FRAME_TAGS = (
     ("TAG_OUTPUT", "pty output, service to client; `stream` is the pty"),
     ("TAG_INPUT", "pty input, client to service; `stream` is the pty"),
@@ -279,6 +299,7 @@ def _peer(sender: str) -> str:
 
 def message_section(entry: p.MessageType) -> list[str]:
     lines = [f"### `{entry.name}`", "", entry.summary, ""]
+    lines.extend([f"Family: `{entry.family}` · Level {entry.level}", ""])
     if entry.name in p.OPTIONAL_TYPES:
         lines.extend([f"*Optional for another client.* {p.OPTIONAL_TYPES[entry.name]}", ""])
     if entry.request is not None:
@@ -335,6 +356,69 @@ def sections(source_path: str) -> list[tuple[str, list[str]]]:
             if match and current is not None and match.group(1) in p.TYPES:
                 current.append(match.group(1))
     return out
+
+
+def _members(types: list[str]) -> str:
+    return ", ".join(_code(name) for name in types) or "None of its own."
+
+
+def _conformance_entry(heading: str, entry: p.Conformance, types: list[str]) -> list[str]:
+    lines = [f"### {heading}", "", entry.summary, "", f"**Message types:** {_members(types)}", ""]
+    if entry.state_keys:
+        lines.extend([f"**State keys:** {_members(list(entry.state_keys))}", ""])
+    if entry.status_fields:
+        lines.extend([f"**`service.status` fields:** {_members(list(entry.status_fields))}", ""])
+    if entry.session_fields:
+        lines.extend([f"**`session` fields:** {_members(list(entry.session_fields))}", ""])
+    if entry.item_fields:
+        lines.extend([f"**`item` fields:** {_members(list(entry.item_fields))}", ""])
+    if entry.notes:
+        lines.append("**Also:**")
+        lines.append("")
+        lines.extend(f"- {note}" for note in entry.notes)
+        lines.append("")
+    return lines
+
+
+def conformance_section() -> list[str]:
+    """What a server must serve: the levels and the families with their
+    members, which come from each type's `family` and `level`."""
+    lines = [
+        "## Conformance",
+        "",
+        "What a server must serve to be a server of this API; the rules are in "
+        "[Implementing a server](./index#implementing-a-server). The levels build on each other. A "
+        "family is optional at any level: a server serves one by listing its name in `caps`, and "
+        "answers a type it doesn't serve `unknown`. Each message type below names its family and level.",
+        "",
+        "Every state key, and every field of `service.status`, `session` and `item`, belongs to one level "
+        "or family. One that belongs to a family is emitted, read and written only by a server that lists "
+        "the family. A client reads a key it never received as empty and a field it never received as "
+        "unknown. Of `service.status`, only `version` and `protocol` are required.",
+        "",
+    ]
+    core = [entry for entry in p.TYPES.values() if entry.family == p.FAMILY_CORE]
+    for level, entry in p.CONFORMANCE_LEVELS.items():
+        types = [kind.name for kind in core if kind.level == level]
+        lines.extend(_conformance_entry(f"Level {level}: {entry.title}", entry, types))
+    for family, entry in p.CONFORMANCE_FAMILIES.items():
+        types = [kind.name for kind in p.TYPES.values() if kind.family == family]
+        lines.extend(_conformance_entry(f"Family `{family}`: {entry.title}", entry, types))
+    lines.extend(
+        [
+            "### Refusal sentences a client matches",
+            "",
+            "A client reads almost nothing from a refusal but its code. These three `msgid`s are the "
+            "exceptions: send them exactly.",
+            "",
+            "| Name | Sentence | When |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for name, meaning in MATCHED_MSGIDS:
+        lines.append(f"| `{name}` | {_code(getattr(p, name))} | {meaning} |")
+    lines.append("")
+    return lines
 
 
 def git_builders_section() -> list[str]:
@@ -428,6 +512,7 @@ def render(source_path: str) -> str:
         lines.append(f"- `{name}`: {meaning}  ")
         lines.append("  " + ", ".join(_code(v) for v in ordered))
     lines.append("")
+    lines.extend(conformance_section())
     lines.append("## Message types")
     lines.append("")
     lines.append(

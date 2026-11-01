@@ -75,6 +75,18 @@ it, D13), so an upgraded client keeps talking to a service with running
 agents. Both sides call `negotiate` with their own and the peer's numbers
 and arrive at the same answer; None is the mismatch dialog of §3.10.
 
+Conformance
+-----------
+
+Every type has a `family` and a `level`: `FAMILY_CORE` at level 0 (the wire),
+1 (sessions and terminals) or 2 (the store), or a cap's name at `LEVEL_FAMILY`.
+A server states the families it serves in `caps` and answers a type outside
+them `unknown`, promptly and with nothing changed. `OPTIONAL_TYPES` says what a
+client may leave out; `family` says what a server may leave out, and
+`CONFORMANCE_LEVELS` and `CONFORMANCE_FAMILIES` what each covers inside a
+message. A newer client of an older service sees no family it did not already
+know, which is acceptable while no release has shipped this table as stable.
+
 Error codes
 -----------
 
@@ -413,12 +425,52 @@ MIN_PROTOCOL = 1
 # ships behind a new name here; a peer uses it only when the other lists it.
 CAP_LOCAL = "local"  # the service offers the local-extras proof (§3.2)
 CAP_DEBUG = "debug"  # the service runs with COLLINS_DEBUG_API=1 and serves debug.* (D27)
-CAP_GIT = "git"  # git over the API: git.*, fs.trash, git-changed, GET /api/blob?kind=git (PR-2.1)
+CAP_GIT = "git"  # git over the API: git.*, git-changed, GET /api/blob?kind=git (PR-2.1)
 # Files over the API: fs.read, fs.write, fs.watch / fs.unwatch, file-changed (PR-2.3); fs.stat,
 # fs.list, fs.walk, a directory's fs.watch and dir-changed (PR-2.4); fs.rename, fs.paste,
-# fs.mkdir (PR-2.5), on the same cap: no release shipped an earlier set alone.
+# fs.mkdir (PR-2.5), on the same cap: no release shipped an earlier set alone. Every fs.* is
+# here, fs.trash and the path picker's fs.dirs and fs.newdir included.
 CAP_FILES = "files"
-CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG, CAP_GIT, CAP_FILES})
+# The rest of the families (server-side spec D1): a server lists what it
+# serves, and answers every type of a family it does not list `unknown`.
+CAP_PRS = "prs"  # pr.*, pr, pr-status, prs.restore, GET /api/blob?kind=pr
+CAP_SANDBOX = "sandbox"  # sandbox.*, the sandbox event, spawn's sandbox fields
+CAP_TOOLS = "tools"  # tool, tool-reply, diff.*, kind=file and kind=remote blobs, PUT /api/upload
+CAP_JOBS = "jobs"  # job.start, job.cancel, job
+CAP_USAGE = "usage"  # usage.get, models.*, icon.save, kind=icon blobs
+CAP_BACKGROUND = "background"  # close's background mode, store.forward, the item's background fields
+CAP_SHELLS = "shells"  # spawn's shell kind, panel.*, clear
+CAP_COMPOSER = "composer"  # cut, cut.cancel, draft.restore, send, switch, mention, composer
+CAP_INTERNAL = "internal"  # what the Collins service keeps for its own window
+CAPABILITIES = frozenset(
+    {
+        CAP_LOCAL,
+        CAP_DEBUG,
+        CAP_GIT,
+        CAP_FILES,
+        CAP_PRS,
+        CAP_SANDBOX,
+        CAP_TOOLS,
+        CAP_JOBS,
+        CAP_USAGE,
+        CAP_BACKGROUND,
+        CAP_SHELLS,
+        CAP_COMPOSER,
+        CAP_INTERNAL,
+    }
+)
+
+# A message type's `family`: one of the caps above, or this for the types every
+# server serves at its level. `local` names no family: its request is core.
+FAMILY_CORE = "core"
+# A `MessageType.level` for the types of a family behind a cap. The core's are
+# 0 (the wire), 1 (sessions and terminals) and 2 (the store).
+LEVEL_FAMILY = 3
+
+# What a server calls itself in its hello reply (`implementation`): a name to
+# log and show, on which no client may change its behaviour.
+IMPLEMENTATION = "collins-service"
+IMPLEMENTATION_MAX = 64
 
 # The client's second connection (D26): a hello carrying ``channel: "sync"``
 # opens the channel `Link.call` blocks on; the primary (the default) carries
@@ -534,6 +586,11 @@ ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
 # (PR-2.4): the tree drops the folder's rows on it, and only on it — a
 # ``gone`` for a lost connection leaves them as they were.
 FOLDER_GONE_MSGID = "The folder is not there"
+
+# A request naming a pty refused ``gone`` because no such pty exists (its args
+# name the `pty`): a client takes the pty as ended, and only on this, since a
+# ``gone`` for a lost connection says nothing about the pty.
+PTY_GONE_MSGID = "no such pty"
 
 # Which peer may send each binary tag.
 FRAME_SENDERS: Mapping[int, frozenset[str]] = {
@@ -1037,12 +1094,16 @@ class Shape:
 @dataclass(frozen=True)
 class MessageType:
     """A message type: as a request (always client -> service), as an event
-    (either way), or both (`state.set`, `seen`)."""
+    (either way), or both (`state.set`, `seen`). `family` and `level` say who
+    must serve it: `FAMILY_CORE` at level 0, 1 or 2, or a cap's name at
+    `LEVEL_FAMILY`, served only by a server that lists that cap."""
 
     name: str
     summary: str
     request: Shape | None = None
     event: Shape | None = None
+    family: str = field(kw_only=True)
+    level: int = field(kw_only=True)
 
 
 def _request(fields=None, reply=None, one_of=()) -> Shape:
@@ -1058,6 +1119,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "hello",
         "The client introduces itself; the service answers with its own facts.",
+        family=FAMILY_CORE, level=0,
         request=_request(
             {
                 "protocol": _req(_i(0, 65535)),
@@ -1075,6 +1137,9 @@ _TABLE: tuple[MessageType, ...] = (
                 "version": _req(_s(VERSION_MAX, low=1)),
                 "service_id": _req(_ID),
                 "host": _HOST,
+                # The server's product name, for a log line and a settings
+                # row. Nothing may be gated on it (D2).
+                "implementation": _s(IMPLEMENTATION_MAX),
                 "caps": Field(K_LIST, high=CAPS_MAX, item=Field(K_STR, high=64, pattern=_CAP_RE)),
                 "local_proof": Field(
                     K_OBJ,
@@ -1089,17 +1154,20 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "local",
         "The client proves it shares the service's filesystem and uid.",
+        family=FAMILY_CORE, level=0,
         request=_request({"proof": _req(Field(K_STR, high=2 * LOCAL_PROOF_MAX, pattern=_HEX_RE))}),
     ),
     MessageType(
         "subscribe",
         "Send the snapshot as events, then answer, then keep sending events.",
+        family=FAMILY_CORE, level=0,
         request=_request(reply={"items": _COUNT, "ptys": _COUNT}),
     ),
     # -- terminals (§3.3)
     MessageType(
         "attach",
         "Show a pty: a redraw, then live output.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS)},
             reply={
@@ -1117,41 +1185,51 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "detach",
         "Stop showing a pty; it keeps running.",
+        family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY)}),
     ),
     MessageType(
         "resize",
         "The client's grid for a pty changed.",
+        family=FAMILY_CORE, level=1,
         event=_event(CLIENT, {"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS)}),
     ),
     MessageType(
         "focus",
         "A client's view of a pty gained or lost focus.",
+        family=FAMILY_CORE, level=1,
         event=_event(CLIENT, {"pty": _req(_PTY), "focused": _req(_BOOL)}),
     ),
     MessageType(
         "focus.terminal",
         "The session asks its active client to put the keyboard in the terminal.",
+        family=CAP_INTERNAL, level=3,
         event=_event(SERVICE, {"pty": _req(_PTY)}),
     ),
     MessageType(
         "theme",
         "The client's terminal colours or scheme changed.",
+        family=FAMILY_CORE, level=1,
         event=_event(CLIENT, {"term": _req(_TERM)}),
     ),
     MessageType(
         "ack",
         "The client has fed this much of a pty's live output to its terminal (flow control).",
+        family=FAMILY_CORE, level=1,
         event=_event(CLIENT, {"pty": _req(_PTY), "offset": _req(_i(0, U64_MAX))}),
     ),
     MessageType(
         "spawn",
         "Start a session or a panel shell in a new pty.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {
                 "kind": _req(Field(K_STR, choices=frozenset({"agent", "shell"}), high=8)),
                 "cwd": _req(_PATH),
                 "session": _ID,
+                # Which CLI the agent runs. Claude Code is the only one: an
+                # id a service does not know reads as that.
+                "provider": _SHORT,
                 "prompt": _TEXT,
                 "model": _s(MODEL_MAX),
                 "effort": _SHORT,
@@ -1200,6 +1278,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "panel.key",
         "File a shell's panel history under a new key, or under none; name the session it belongs to.",
+        family=CAP_SHELLS, level=3,
         # `handle`: the session the shell is a panel of, for one opened
         # before that session was spawned (a new-chat screen's shell), so
         # its history is re-filed when the session resolves.
@@ -1208,6 +1287,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "panel.history",
         "Write a session's panel history: each shell's scrollback, from its pty's model or as text.",
+        family=CAP_SHELLS, level=3,
         request=_request(
             {
                 "key": _req(_ID),
@@ -1238,6 +1318,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pty.info",
         "A pty's process facts: its child, its shell, the foreground, the shell's cwd, its plan.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {"pty": _req(_PTY)},
             reply={
@@ -1262,11 +1343,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pty.capture",
         "A pty's text, scrollback and screen, from the service's model.",
+        family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY)}, reply={"text": _req(_TEXT)}),
     ),
     MessageType(
         "prompt",
         "Type text into the agent's box and submit it.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {
                 "pty": _req(_PTY),
@@ -1285,6 +1368,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "switch",
         "Post a model and/or effort switch to the agent.",
+        family=CAP_COMPOSER, level=3,
         request=_request(
             {
                 "pty": _req(_PTY),
@@ -1299,6 +1383,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "write",
         "Type raw keystrokes into the agent's pty.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {
                 "pty": _req(_PTY),
@@ -1313,6 +1398,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "send",
         "The composer's send: submit its draft, now or once a cut has settled.",
+        family=CAP_COMPOSER, level=3,
         request=_request(
             {"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1)), "composer_open": _BOOL},
             # Whether it went now (the composer empties) or waits on a cut
@@ -1323,6 +1409,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "mention",
         "Type a file's mention token into the agent's box.",
+        family=CAP_COMPOSER, level=3,
         request=_request(
             {
                 "pty": _req(_PTY),
@@ -1335,6 +1422,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "cut",
         "Begin the composer's open-cut; `cut` events say what it found.",
+        family=CAP_COMPOSER, level=3,
         request=_request({"pty": _req(_PTY)}, reply={"handle": _req(_ID)}),
         event=_event(
             SERVICE,
@@ -1351,11 +1439,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "cut.cancel",
         "Call a cut off: the composer closed, or the box holds its text again.",
+        family=CAP_COMPOSER, level=3,
         request=_request({"pty": _req(_PTY), "handle": _ID}),
     ),
     MessageType(
         "draft.restore",
         "A closing composer's draft goes back into the agent's box, in pieces.",
+        family=CAP_COMPOSER, level=3,
         request=_request(
             {"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))},
             reply={"restored": _req(_BOOL)},
@@ -1363,17 +1453,21 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "clear",
-        "Erase the agent's box; wipe a shell's screen and scrollback.",
+        "Wipe a shell's screen and scrollback. On an agent pty Collins' service erases the input box; no "
+        "client sends that and it is not promised.",
+        family=CAP_SHELLS, level=3,
         request=_request({"pty": _req(_PTY)}),
     ),
     MessageType(
         "paint",
         "Insert text into a pty's output stream (rule 2).",
+        family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
     ),
     MessageType(
         "close",
         "End a pty's session: the graceful exit, the /bg handoff, or force.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {
                 "pty": _req(_PTY),
@@ -1400,22 +1494,26 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "close.nudge",
         "Feed the exit keystroke again to a CLI parked on a screen.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY)}),
     ),
     MessageType(
         "close.end",
         "The page is gone: the close poll stops.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY)}),
     ),
     # -- the session on the service (§3.19, PR-1.12a)
     MessageType(
         "session",
         "An agent session's facts, whole on attach and as changed fields after.",
+        family=FAMILY_CORE, level=1,
         event=_event(SERVICE, _SESSION_FIELDS),
     ),
     MessageType(
         "composer",
         "The session asks the active client's composer for something.",
+        family=CAP_COMPOSER, level=3,
         event=_event(
             SERVICE,
             {
@@ -1428,6 +1526,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "shells",
         "The session says something about the panel shells beside it.",
+        family=CAP_INTERNAL, level=3,
         event=_event(
             SERVICE,
             {"pty": _req(_PTY), "what": _req(Field(K_STR, choices=frozenset({"stale"}), high=16))},
@@ -1436,31 +1535,37 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "resolver.arm",
         "A client mapped the tab: the transcript resolver's background budget starts over.",
+        family=FAMILY_CORE, level=1,
         request=_request({"pty": _req(_PTY)}),
     ),
     MessageType(
         "transcript.update",
         "Re-read the transcript now; with `discover`, ask the branch which PR it has.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY), "discover": _BOOL}),
     ),
     MessageType(
         "transcript.set",
         "Tail another transcript (or none).",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY), "path": _req(_null(_PATH))}),
     ),
     MessageType(
         "transcript.relocate",
         "Follow the session's transcript to where the CLI moved it.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY), "path": _req(_PATH)}),
     ),
     MessageType(
         "prs.restore",
         "Re-adopt the pull requests saved for the session.",
+        family=CAP_PRS, level=3,
         request=_request({"pty": _req(_PTY), "records": _req(_PR_RECORDS)}),
     ),
     MessageType(
         "cwd.settle",
         "Whether the agent has moved, as the editor rooted at `root` should see it.",
+        family=CAP_INTERNAL, level=3,
         request=_request(
             {
                 "pty": _req(_PTY),
@@ -1478,11 +1583,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "shells.follow",
         "Whether the shells beside a new chat are owed the offer to follow its worktree.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY), "armed": _req(_BOOL)}),
     ),
     MessageType(
         "finish.witness",
         "What the transcript says right now, for the finish ledger.",
+        family=CAP_INTERNAL, level=3,
         request=_request(
             {"pty": _req(_PTY)},
             reply={
@@ -1494,11 +1601,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "baseline.absorb",
         "Fold what runs under a pristine fresh spawn into its plumbing baseline.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY)}, reply={"capturing": _req(_BOOL)}),
     ),
     MessageType(
         "baseline.cmdlines",
         "The cmdlines running directly below the session's agent right now.",
+        family=CAP_INTERNAL, level=3,
         request=_request(
             {"pty": _req(_PTY)},
             reply={"cmdlines": _req(Field(K_LIST, high=1000, item=_s(ARG_TEXT_MAX)))},
@@ -1507,12 +1616,14 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "restart.worktreeless",
         "Type the new-session command again with the worktree dropped.",
+        family=CAP_INTERNAL, level=3,
         request=_request({"pty": _req(_PTY)}),
     ),
     # -- the e2e probe (D27): served only with COLLINS_DEBUG_API=1
     MessageType(
         "debug.session.get",
         "An attribute of a session, JSON-encoded (a method answers `callable`).",
+        family=CAP_DEBUG, level=3,
         request=_request(
             {"pty": _req(_PTY), "name": _req(_DEBUG_NAME)},
             reply={"value": _null(_JSON), "callable": _BOOL},
@@ -1521,11 +1632,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "debug.session.set",
         "Set an attribute of a session.",
+        family=CAP_DEBUG, level=3,
         request=_request({"pty": _req(_PTY), "name": _req(_DEBUG_NAME), "value": _req(_null(_JSON))}),
     ),
     MessageType(
         "debug.session.call",
         "Call a method of a session with JSON arguments; its result JSON-encoded.",
+        family=CAP_DEBUG, level=3,
         request=_request(
             {"pty": _req(_PTY), "name": _req(_DEBUG_NAME), "args": _DEBUG_ARGS, "kwargs": _DEBUG_KWARGS},
             reply={"value": _null(_JSON)},
@@ -1534,6 +1647,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "debug.screen",
         "A pty's screen model, as the checks read it.",
+        family=CAP_DEBUG, level=3,
         request=_request(
             {"pty": _req(_PTY)},
             reply={
@@ -1548,6 +1662,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "debug.pty",
         "A pty's process facts, as the checks read them.",
+        family=CAP_DEBUG, level=3,
         request=_request(
             {"pty": _req(_PTY)},
             reply={
@@ -1561,11 +1676,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "debug.local",
         "Set whether the service treats the asking client as local (a check's stand-in for ssh).",
+        family=CAP_DEBUG, level=3,
         request=_request({"local": _req(_BOOL)}),
     ),
     MessageType(
         "debug.sandbox",
         "Call a method of the service's sandbox host, its live grants, or the core.",
+        family=CAP_DEBUG, level=3,
         request=_request(
             {
                 "target": _req(Field(K_STR, choices=frozenset({"host", "grants", "core"}), high=8)),
@@ -1580,18 +1697,21 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "state.set",
         "Write a [shared state key](#state-keys) (request), or a key changed (event).",
+        family=FAMILY_CORE, level=1,
         request=_request({**_STATE_FIELDS, "value": _req(_null(_JSON))}),
         event=_event(SERVICE, {**_STATE_FIELDS, "value": _req(_null(_JSON))}),
     ),
     MessageType(
         "state.get",
         "Read a [shared state key](#state-keys).",
+        family=FAMILY_CORE, level=1,
         request=_request(_STATE_FIELDS, reply={"value": _req(_null(_JSON))}),
     ),
     # -- the store (§3.15)
     MessageType(
         "item",
         "A session row appeared, changed or went away.",
+        family=FAMILY_CORE, level=1,
         event=_event(
             SERVICE,
             {
@@ -1635,6 +1755,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "rows",
         "The sidebar's rows after a refresh: their order, groups and counts.",
+        family=FAMILY_CORE, level=1,
         event=_event(
             SERVICE,
             {
@@ -1655,61 +1776,73 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "put-away",
         "A session was archived: whatever it still asked of the user goes with it.",
+        family=FAMILY_CORE, level=2,
         event=_event(SERVICE, {"session": _req(_ID)}),
     ),
     MessageType(
         "forgotten",
         "A session's transcript went (the archive sweep): what a client kept for it goes too.",
+        family=FAMILY_CORE, level=2,
         event=_event(SERVICE, {"session": _req(_ID)}),
     ),
     MessageType(
         "store.lookup",
         "Send one session's item, archived or not (a session the client was never sent).",
+        family=FAMILY_CORE, level=2,
         request=_request({"session": _req(_ID)}, reply={"found": _req(_BOOL)}),
     ),
     MessageType(
         "store.page-archived",
         "Send the sessions kept out of sight as items, and keep them current.",
+        family=FAMILY_CORE, level=2,
         request=_request(reply={"items": _COUNT}),
     ),
     MessageType(
         "store.refresh",
         "Rescan the transcripts.",
+        family=FAMILY_CORE, level=2,
         request=_request({"force": _BOOL}),
     ),
     MessageType(
         "store.show-archived",
         "Draw the rows kept out of sight (Show archived sessions).",
+        family=FAMILY_CORE, level=2,
         request=_request({"show": _req(_BOOL)}),
     ),
     MessageType(
         "store.rename",
         "Name a session; an empty name clears the manual one.",
+        family=FAMILY_CORE, level=2,
         request=_request({"session": _req(_ID), "name": _req(_NAME)}),
     ),
     MessageType(
         "store.regenerate-name",
         "Title a session again with the title model, over a manual name.",
+        family=FAMILY_CORE, level=2,
         request=_request({"session": _req(_ID)}),
     ),
     MessageType(
         "store.favorite",
         "Add sessions to the favorites, or take them out.",
+        family=FAMILY_CORE, level=2,
         request=_request({"sessions": _req(_SESSIONS), "favorite": _req(_BOOL)}),
     ),
     MessageType(
         "store.archive",
         "Archive sessions, or restore them.",
+        family=FAMILY_CORE, level=2,
         request=_request({"sessions": _req(_SESSIONS), "archived": _req(_BOOL)}),
     ),
     MessageType(
         "store.archive-project",
         "Archive a whole project, or restore it.",
+        family=FAMILY_CORE, level=2,
         request=_request({"project": _req(_PROJECT), "archived": _req(_BOOL)}),
     ),
     MessageType(
         "store.trash",
         "Move sessions' transcripts to the trash; the ones that failed, with why.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {"sessions": _req(_SESSIONS)},
             reply={"errors": Field(K_MAP, high=ROWS_MAX, key=_ID_RE, item=_s(ARG_TEXT_MAX))},
@@ -1718,41 +1851,49 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "store.delete",
         "Delete a session's transcript for good; why it failed, when it did.",
+        family=FAMILY_CORE, level=2,
         request=_request({"session": _req(_ID)}, reply={"error": _s(ARG_TEXT_MAX)}),
     ),
     MessageType(
         "store.forward",
         "A session continued under a new id (a /bg fork): carry its records over.",
+        family=CAP_BACKGROUND, level=3,
         request=_request({"session": _req(_ID), "to": _req(_ID)}),
     ),
     MessageType(
         "store.add-project",
         "Put a folder in the sidebar before a session has run there.",
+        family=FAMILY_CORE, level=2,
         request=_request({"cwd": _req(_PATH)}),
     ),
     MessageType(
         "store.keep-projects",
         "Keep projects in the sidebar after their sessions go.",
+        family=FAMILY_CORE, level=2,
         request=_request({"projects": _req(Field(K_LIST, low=1, high=ROWS_MAX, item=_PROJECT))}),
     ),
     MessageType(
         "store.forget-project",
         "Drop a kept project from the sidebar.",
+        family=FAMILY_CORE, level=2,
         request=_request({"project": _req(_PROJECT)}),
     ),
     MessageType(
         "store.move-project",
         "Move a project in the sidebar order, before another or to the end.",
+        family=FAMILY_CORE, level=2,
         request=_request({"project": _req(_PROJECT), "before": _null(_PROJECT)}),
     ),
     MessageType(
         "store.forget",
         "A session's transcript went: its panel history, records and box go too.",
+        family=FAMILY_CORE, level=2,
         request=_request({"session": _req(_ID)}),
     ),
     MessageType(
         "store.flags",
         "What the person did at a client's screen, for a session's row: its status, unread off.",
+        family=FAMILY_CORE, level=1,
         request=_request(
             {
                 "session": _req(_ID),
@@ -1768,6 +1909,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "store.transcript-tail",
         "The links in the tail of a session's transcript, for finishing a wrapped link.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {"session": _req(_ID)},
             reply={
@@ -1780,6 +1922,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "store.transcript-export",
         "A session's transcript rendered as Markdown, for the client to save to a file of its own.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {"session": _req(_ID)},
             reply={
@@ -1794,11 +1937,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "trust.check",
         "Whether the CLI trusts a folder already, and the folder a trust is recorded on.",
+        family=FAMILY_CORE, level=2,
         request=_request({"path": _req(_PATH)}, reply={"trusted": _req(_BOOL), "root": _PATH}),
     ),
     MessageType(
         "trust.grant",
         "Record the CLI's folder trust: on the folder's root, or on a launch directory.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {
                 "path": _req(_PATH),
@@ -1810,6 +1955,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pty",
         "A pty appeared or changed (a row of the pty table).",
+        family=FAMILY_CORE, level=1,
         event=_event(
             SERVICE,
             {
@@ -1835,6 +1981,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pty-exited",
         "A pty's child exited; status is null when it is unknown (a keeper crash).",
+        family=FAMILY_CORE, level=1,
         event=_event(
             SERVICE,
             {
@@ -1849,6 +1996,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr",
         "A session's linked pull requests, as prstatus records.",
+        family=CAP_PRS, level=3,
         event=_event(
             SERVICE,
             {
@@ -1863,16 +2011,19 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr-status",
         "A pull request's fetched status changed (the fetch cache's entry, by URL).",
+        family=CAP_PRS, level=3,
         event=_event(SERVICE, {"url": _req(Field(K_URL)), "status": _req(Field(K_JSON_OBJECT))}),
     ),
     MessageType(
         "pr.set",
         "Replace a session's saved pull requests.",
+        family=CAP_PRS, level=3,
         request=_request({"session": _req(_ID), "prs": _req(_PR_RECORDS)}),
     ),
     MessageType(
         "pr.fetch",
         "Fetch pull requests' statuses again (dropping what is cached, when asked).",
+        family=CAP_PRS, level=3,
         request=_request(
             {
                 "urls": _req(Field(K_LIST, low=1, high=PRS_MAX, item=Field(K_URL))),
@@ -1883,6 +2034,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.sweep",
         "The sidebar's sweep: fetch and discover the pull requests of sessions.",
+        family=CAP_PRS, level=3,
         request=_request(
             {"targets": _req(Field(K_LIST, low=1, high=ROWS_MAX, item=_SWEEP_TARGET))},
             reply={"results": Field(K_MAP, high=ROWS_MAX, key=_ID_RE, item=_PR_RECORDS)},
@@ -1891,6 +2043,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.detail",
         "A pull request's page: everything gh says about it.",
+        family=CAP_PRS, level=3,
         request=_request(
             {"url": _req(Field(K_URL))},
             reply={"detail": Field(K_JSON_OBJECT)},
@@ -1899,6 +2052,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.threads",
         "A pull request's review threads.",
+        family=CAP_PRS, level=3,
         request=_request(
             {"url": _req(Field(K_URL))},
             reply={"threads": Field(K_LIST, high=1000, item=Field(K_JSON_OBJECT))},
@@ -1907,6 +2061,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.blob",
         "Name the blob URL of one file of a repository at a commit (an image the Files view shows).",
+        family=CAP_PRS, level=3,
         request=_request(
             {
                 "repository": _req(_s(NAME_MAX, low=1)),
@@ -1921,6 +2076,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.action",
         "Run one of a pull request's actions through gh (practions.perform).",
+        family=CAP_PRS, level=3,
         request=_request(
             {"pr": _req(_PR_RECORD), "key": _req(_s(SHORT_MAX, low=1))},
             reply=_PR_ERROR,
@@ -1929,6 +2085,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.comment",
         "Comment on a pull request.",
+        family=CAP_PRS, level=3,
         request=_request(
             {"pr": _req(_PR_RECORD), "body": _req(_s(TEXT_MAX, low=1))}, reply=_PR_ERROR
         ),
@@ -1936,6 +2093,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.review",
         "Review a pull request: approve, or request changes.",
+        family=CAP_PRS, level=3,
         request=_request(
             {"pr": _req(_PR_RECORD), "verdict": _req(_s(SHORT_MAX, low=1)), "body": _TEXT},
             reply=_PR_ERROR,
@@ -1944,6 +2102,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "pr.thread",
         "Reply in a pull request's review thread, or resolve it.",
+        family=CAP_PRS, level=3,
         request=_request(
             {
                 "pr": _req(_PR_RECORD),
@@ -1959,6 +2118,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "notify",
         "A notification record, its body as msgid and args.",
+        family=FAMILY_CORE, level=2,
         event=_event(
             SERVICE,
             {
@@ -1980,6 +2140,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "notify.post",
         "Add a row to the notification history (the service mints it).",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {
                 "kind": _req(Field(K_STR, choices=POST_KINDS, high=SHORT_MAX)),
@@ -1999,6 +2160,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "notify.remove",
         "Drop rows from the notification history.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {"ids": _req(Field(K_LIST, low=1, high=SEEN_MAX, item=_ID))},
             reply={"removed": _COUNT},
@@ -2007,11 +2169,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "notify.clear",
         "Drop every row of the notification history but the finished runs'.",
+        family=FAMILY_CORE, level=2,
         request=_request(reply={"removed": _COUNT}),
     ),
     MessageType(
         "notify.green",
         "A finished run's row: raise it (unread) or take it down.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             {"session": _req(_ID), "on": _req(_BOOL), "title": _NAME, "project": _NAME},
             reply={"changed": _req(_BOOL)},
@@ -2020,11 +2184,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "notify.rekey",
         "File a placeholder's rows under the session it resolved to.",
+        family=FAMILY_CORE, level=2,
         request=_request({"session": _req(_ID), "to": _req(_ID)}, reply={"moved": _COUNT}),
     ),
     MessageType(
         "notify.test",
         "Run a notify command as given, whether or not a client is attached.",
+        family=FAMILY_CORE, level=2,
         request=_request(
             # The text in Preferences' box, not the saved setting: judged
             # `invalid` when empty or when shlex cannot split it.
@@ -2042,6 +2208,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "seen",
         "Notifications or a session were seen: a client says so, the service tells the rest.",
+        family=FAMILY_CORE, level=2,
         request=_request(_SEEN, one_of=("ids", "session", "all")),
         event=_event(SERVICE, _SEEN, one_of=("ids", "session", "all")),
     ),
@@ -2049,6 +2216,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "job.start",
         "Start a long-running operation; its progress and outcome arrive as job events.",
+        family=CAP_JOBS, level=3,
         request=_request(
             {
                 "kind": _req(Field(K_STR, choices=JOB_KINDS, high=SHORT_MAX)),
@@ -2060,11 +2228,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "job.cancel",
         "End a job early.",
+        family=CAP_JOBS, level=3,
         request=_request({"job": _req(_ID)}),
     ),
     MessageType(
         "job",
         "A job's progress, or how it ended.",
+        family=CAP_JOBS, level=3,
         event=_event(
             SERVICE,
             {
@@ -2081,6 +2251,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "usage.get",
         "The plan's usage, as the usage panel shows it, or why there is none.",
+        family=CAP_USAGE, level=3,
         request=_request(
             reply={
                 "snapshot": Field(K_JSON_OBJECT),
@@ -2092,6 +2263,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "models.get",
         "The model catalog: the service's cache, fetched again when asked.",
+        family=CAP_USAGE, level=3,
         request=_request(
             {"fetch": _BOOL, "refresh": _BOOL},
             reply={
@@ -2105,6 +2277,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "models.defaults",
         "The CLI's default model for a directory, and its effort for a model.",
+        family=CAP_USAGE, level=3,
         request=_request(
             {"cwd": _PATH, "model": _s(MODEL_MAX)},
             reply={"model": _s(MODEL_MAX), "effort": _SHORT},
@@ -2113,6 +2286,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "icon.save",
         "Write a generated project icon into the project.",
+        family=CAP_USAGE, level=3,
         request=_request(
             {"cwd": _req(_PATH), "svg": _req(_s(TEXT_MAX, low=1))},
             reply={"path": _PATH},
@@ -2122,6 +2296,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "tool",
         "A UI-bound tool call for the session's active client.",
+        family=CAP_TOOLS, level=3,
         event=_event(
             SERVICE,
             {
@@ -2140,27 +2315,32 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "tool-reply",
         "The active client's answer to a tool call.",
+        family=CAP_TOOLS, level=3,
         event=_event(CLIENT, {"call": _req(_ID), "ok": _req(_BOOL), "text": _req(_TEXT)}),
     ),
     MessageType(
         "diff.notes",
         "A session's notes and highlights on its diff, whole.",
+        family=CAP_TOOLS, level=3,
         event=_event(SERVICE, _MARKS, one_of=("handle", "session")),
     ),
     MessageType(
         "diff.set-notes",
         "Write a session's notes and highlights on its diff, whole.",
+        family=CAP_TOOLS, level=3,
         request=_request(_MARKS, one_of=("handle", "session")),
     ),
     # -- sandboxed sessions (§3.9)
     MessageType(
         "sandbox.plan",
         "The plan a sandboxed session's box was launched with.",
+        family=CAP_SANDBOX, level=3,
         request=_request(_SANDBOX_TARGET, reply={"plan": _req(Field(K_JSON_OBJECT))}),
     ),
     MessageType(
         "sandbox.grants",
         "What the Sandboxed chip draws: grants, defaults, tools, staleness.",
+        family=CAP_SANDBOX, level=3,
         request=_request(
             _SANDBOX_TARGET,
             reply={
@@ -2181,6 +2361,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "sandbox.allow",
         "Allow a directory to a session's box, or make it a project default.",
+        family=CAP_SANDBOX, level=3,
         request=_request(
             {
                 **_SANDBOX_TARGET,
@@ -2196,6 +2377,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "sandbox.revoke",
         "Take a directory back from a session's box, or from the project defaults.",
+        family=CAP_SANDBOX, level=3,
         request=_request(
             {
                 **_SANDBOX_TARGET,
@@ -2208,6 +2390,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "sandbox.tools",
         "Set which session tools a sandboxed session is offered, or reset them.",
+        family=CAP_SANDBOX, level=3,
         request=_request(
             {
                 **_SANDBOX_TARGET,
@@ -2221,11 +2404,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "sandbox.restart",
         "Exit a sandboxed session and resume it with the current plan.",
+        family=CAP_SANDBOX, level=3,
         request=_request(_SANDBOX_TARGET),
     ),
     MessageType(
         "sandbox.derive",
         "A sibling's plan, derived from a box's launched one for its directory.",
+        family=CAP_SANDBOX, level=3,
         request=_request(
             {**_SANDBOX_TARGET, "cwd": _req(_PATH)},
             reply={"plan": _PATH, "box": _s(ID_MAX), "reason": _s(ARG_TEXT_MAX)},
@@ -2234,16 +2419,19 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "sandbox.drop",
         "A derived plan and its box, let go of: nothing will launch from them.",
+        family=CAP_SANDBOX, level=3,
         request=_request({**_SANDBOX_TARGET, "plan": _PATH}),
     ),
     MessageType(
         "sandbox.forget",
         "A session's transcript went: its box, and what it was allowed, go too.",
+        family=CAP_SANDBOX, level=3,
         request=_request(_SANDBOX_TARGET),
     ),
     MessageType(
         "sandbox",
         "A sandboxed session's grants or plan changed; a delivery for the toast; the probe's verdict.",
+        family=CAP_SANDBOX, level=3,
         event=_event(
             SERVICE,
             {
@@ -2266,6 +2454,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "git.run",
         "Run one of the [git builders](#git-builders), by name and keyword args, on the service's git.",
+        family=CAP_GIT, level=3,
         request=_request(
             {
                 "cwd": _req(_PATH),
@@ -2298,6 +2487,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "git.info",
         "Everything gitinfo reads off a repository's .git, at once (the client's per-cwd mirror).",
+        family=CAP_GIT, level=3,
         request=_request(
             {
                 "cwd": _req(_PATH),
@@ -2334,6 +2524,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "git.sizes",
         "The size on disk of repository paths (the read's too-large gate for untracked and unmerged files).",
+        family=CAP_GIT, level=3,
         request=_request(
             {"cwd": _req(_PATH), "paths": _req(_REPO_PATHS)},
             reply={"sizes": _req(Field(K_MAP, high=REPO_PATHS_MAX, item=_null(_i(0, SIZE_MAX))))},
@@ -2342,6 +2533,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "git.watch",
         "Watch a tree for this client: the page's directory monitors and its 2 s tick, on the service.",
+        family=CAP_GIT, level=3,
         request=_request(
             {
                 "cwd": _req(_PATH),
@@ -2363,11 +2555,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "git.unwatch",
         "Stop one watch of this client's, by its handle.",
+        family=CAP_GIT, level=3,
         request=_request({"handle": _req(_s(64, low=1))}),
     ),
     MessageType(
         "git-changed",
         "A watched working tree moved: the three signatures, each a short digest.",
+        family=CAP_GIT, level=3,
         event=_event(
             SERVICE,
             {"cwd": _req(_PATH), "tree": _req(_s(64)), "refs": _req(_s(64)), "state": _req(_null(_s(64)))},
@@ -2376,6 +2570,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "git.plan",
         "Carry a gitpatch plan out on the service, refused stale when its keys moved.",
+        family=CAP_GIT, level=3,
         request=_request(
             {
                 "cwd": _req(_PATH),
@@ -2405,6 +2600,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.trash",
         "Move files to the trash on the service's machine.",
+        family=CAP_FILES, level=3,
         request=_request(
             {"paths": _req(Field(K_LIST, low=1, high=REPO_PATHS_MAX, item=_PATH))},
             reply={
@@ -2417,6 +2613,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.read",
         "A file's text off the service's machine, with the mtime the save that follows expects.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 "path": _req(_PATH),
@@ -2441,6 +2638,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.write",
         "Write a file's text on the service's machine, refused stale when its mtime moved.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 "path": _req(_PATH),
@@ -2464,6 +2662,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.watch",
         "Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the service.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 "path": _req(_PATH),
@@ -2485,11 +2684,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.unwatch",
         "Stop a watch of this client's, by its handle.",
+        family=CAP_FILES, level=3,
         request=_request({"handle": _req(_HANDLE)}),
     ),
     MessageType(
         "file-changed",
         "A watched file moved: its stat now (null when gone), debounced 300 ms on the service.",
+        family=CAP_FILES, level=3,
         event=_event(
             SERVICE,
             {
@@ -2504,12 +2705,14 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "dir-changed",
         "Something changed in a watched directory, debounced 300 ms on the service: list it again.",
+        family=CAP_FILES, level=3,
         event=_event(SERVICE, {"handle": _req(_HANDLE), "path": _req(_PATH)}),
     ),
     # -- the tree, quick open and roots (§3.23, PR-2.4)
     MessageType(
         "fs.stat",
         "What is at a path on the service's machine, and whether it is inside a root.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 # `~`-led paths are the service's home's (PR-3.0 item 4).
@@ -2533,6 +2736,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.list",
         "A directory's entries in the tree's order, with the ignored names marked.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 "path": _req(_PATH),
@@ -2555,6 +2759,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.walk",
         "Every file under a root, relative and breadth-first, for quick open.",
+        family=CAP_FILES, level=3,
         request=_request(
             {"root": _req(_PATH), "hidden": _req(_BOOL)},
             reply={
@@ -2569,6 +2774,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.rename",
         "Rename a file or folder in place on the service's machine, never over anything.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 "path": _req(_PATH),
@@ -2590,6 +2796,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.paste",
         "Copy (or move, for a cut) files into a folder on the service's machine, never over anything.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 "entries": _req(Field(K_LIST, low=1, high=FS_PASTE_MAX, item=_PATH)),
@@ -2613,11 +2820,13 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.mkdir",
         "Make one folder on the service's machine, inside a root, never over anything.",
+        family=CAP_FILES, level=3,
         request=_request({"path": _req(_PATH), "root": _req(_PATH)}),
     ),
     MessageType(
         "fs.names",
         "The non-directory names in a root, for the bare root-name links.",
+        family=CAP_FILES, level=3,
         request=_request(
             {"root": _req(_PATH)},
             reply={
@@ -2635,6 +2844,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.dirs",
         "A folder's subfolders on the service's machine, anywhere: the path picker's listing.",
+        family=CAP_FILES, level=3,
         request=_request(
             {
                 # `~`-led paths are the service's home's, as `fs.stat`'s.
@@ -2658,6 +2868,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "fs.newdir",
         "Make one folder on the service's machine under any folder that is there: the picker's New folder.",
+        family=CAP_FILES, level=3,
         request=_request(
             {"path": _req(_HOME_PATH)},
             # The folder made: `~` expanded and normalised.
@@ -2668,6 +2879,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "service.restart",
         "Restart the service: now, or once no session is busy; or call a waiting restart off.",
+        family=CAP_INTERNAL, level=3,
         request=_request(
             {"when": _req(Field(K_STR, choices=frozenset({"now", "idle", "cancel"}), high=8))},
         ),
@@ -2675,6 +2887,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "service.status",
         "What the service is running.",
+        family=FAMILY_CORE, level=0,
         request=_request(
             reply={
                 "version": _req(_s(VERSION_MAX, low=1)),
@@ -2726,6 +2939,7 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "cli.check",
         "The service's claude CLI: where it is, where it might be, and a path's verdict.",
+        family=CAP_INTERNAL, level=3,
         request=_request(
             # A path as the user typed it (unexpanded: "~/.local/bin/claude"
             # is the usual answer), judged on the service's machine.
@@ -3016,6 +3230,254 @@ OPTIONAL_TYPES: Mapping[str, str] = {
     "baseline.absorb": "No Collins client sends this; only the test suite does.",
     "baseline.cmdlines": "No Collins client sends this; only the test suite does.",
     "sandbox.forget": "No Collins client sends this. `store.forget` already does it.",
+}
+
+# What a server must serve: `OPTIONAL_TYPES` above is the client's reading of
+# the table, and these are the server's. Each type's `family` and `level` name
+# whole messages; what a level or a family covers inside a message (a field, a
+# mode, a state key, a blob kind) is here, and the reference prints it.
+SPAWN_CORE_FIELDS: tuple[str, ...] = (
+    "kind",
+    "cwd",
+    "session",
+    "prompt",
+    "model",
+    "effort",
+    "permission_mode",
+    "cols",
+    "rows",
+    "provider",
+)
+SPAWN_SANDBOX_FIELDS: tuple[str, ...] = ("sandbox", "sandbox_box", "sandbox_plan")
+
+
+def _codes(names: tuple[str, ...]) -> str:
+    return ", ".join(f"`{name}`" for name in names)
+
+
+@dataclass(frozen=True)
+class Conformance:
+    """One level or family: its name, what serving it gives a client, what
+    it covers beyond the message types that name it, and the state keys and
+    the fields of `service.status`, `session` and `item` that are its own.
+    Every key and field is one level's or one family's."""
+
+    title: str
+    summary: str
+    notes: tuple[str, ...] = ()
+    state_keys: tuple[str, ...] = ()
+    status_fields: tuple[str, ...] = ()
+    session_fields: tuple[str, ...] = ()
+    item_fields: tuple[str, ...] = ()
+
+
+CONFORMANCE_LEVELS: Mapping[int, Conformance] = {
+    0: Conformance(
+        "The wire",
+        "Enough for a client to connect and show an empty list.",
+        (
+            "`subscribe`'s snapshot may be empty: no `item` and no `pty`, then a `rows` with an empty list.",
+            "`service.status` needs only `version` and `protocol`.",
+            "A server with no local proof leaves `local_proof` out of its hello and refuses `local` "
+            "`refused`. The client then stays remote, which is correct.",
+        ),
+        status_fields=("version", "protocol", "ptys", "busy", "clients", "started", "pid", "cli", "home"),
+    ),
+    1: Conformance(
+        "Sessions and terminals",
+        "Enough to run a Claude Code session in a terminal, with its list row, whether it is busy or "
+        "unread, its model and effort, a prompt typed into it, and closing it.",
+        (
+            f"`spawn`: `kind: \"agent\"` with {_codes(SPAWN_CORE_FIELDS[1:])}, which every server accepts. "
+            "An unknown `provider` reads as Claude.",
+            "`spawn`: a field whose value asks for nothing (an empty `add_dirs`, a false `worktree` with a "
+            "`worktree_name` beside it, a false `sandbox`) is accepted and ignored.",
+            "`spawn`: a server refuses `refused`, with a `msgid` saying why, only a value that asks for a "
+            "feature it lacks: `sandbox: true`, `sandbox_box` or `sandbox_plan` without `sandbox`; `history` "
+            "or `ordinal` without `shells`; `worktree: true`, a non-empty `add_dirs`, `fork`, "
+            "`continue_recent` or another optional field when it can't honour them.",
+            "`close`: the modes `exit` and `kill`.",
+            "`store.flags`: `status` and `unread`.",
+            "`state.set`: as an event, the `settings` key, with the server's defaults; a setting left out "
+            "reads as the client's default. As a request, a server may refuse every write `refused`.",
+            "`state.get`: answers every key the server emits `state.set` for, and refuses any other `gone`.",
+            "`resolver.arm`: answer `ok`. A server with no resolver ignores it.",
+            "`item`: `project`, `cli_title`, `provider`, `state` and `syncing` are optional, and a missing "
+            "one reads as absent.",
+            "The input frames, `resize`, `focus`, `theme` and `ack` are honoured.",
+            "`service.status`: a Level 1 server should send `cli` and `home`. A client reads a missing `cli` "
+            "as unknown, and without `home` it can't abbreviate paths or start a path picker at home.",
+        ),
+        state_keys=("settings", "service_id"),
+        session_fields=(
+            "pty",
+            "handle",
+            "session",
+            "cwd",
+            "agent_cwd",
+            "pid",
+            "takes_prompt",
+            "agent_running",
+            "running_command",
+            "busy",
+            "finished",
+            "model",
+            "effort",
+            "permission_mode",
+            "transcript_path",
+            "landed",
+            "reset",
+        ),
+        item_fields=(
+            "session",
+            "path",
+            "cwd",
+            "resume_cwd",
+            "display_name",
+            "subtitle",
+            "preview",
+            "mtime",
+            "created",
+            "size",
+            "status",
+            "busy",
+            "unread",
+            "running",
+            "removed",
+            "project",
+            "cli_title",
+            "provider",
+            "state",
+            "syncing",
+        ),
+    ),
+    2: Conformance(
+        "The store",
+        "A list a person can organise: names, favorites, archives, projects, trash, the transcript's "
+        "links and export, folder trust and the notification history. Levels 1 and 2 together are the "
+        "*sessions* profile, the one to aim for first.",
+        state_keys=(
+            "names",
+            "generated_names",
+            "cli_titles",
+            "emojis",
+            "favorites",
+            "archived",
+            "archived_at",
+            "archived_projects",
+            "project_order",
+            "virtual_projects",
+            "project_worktree",
+            "session_drafts",
+            "new_chat_drafts",
+            "expanded_groups",
+            "notifications",
+        ),
+        item_fields=("favorite",),
+    ),
+}
+
+CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
+    CAP_GIT: Conformance(
+        "Git",
+        "The git page and everything else that asks about a repository.",
+        ("`GET /api/blob?kind=git`.", "The [git builders](#git-builders), each with git's own semantics."),
+    ),
+    CAP_FILES: Conformance(
+        "Files",
+        "The editor's files, the file tree, quick open and the path picker.",
+        session_fields=("touched_files",),
+    ),
+    CAP_PRS: Conformance(
+        "Pull requests",
+        "What a session's pull requests are and every action on one.",
+        ("`GET /api/blob?kind=pr`.",),
+        state_keys=("session_prs",),
+        status_fields=("gh",),
+        session_fields=("prs",),
+    ),
+    CAP_SANDBOX: Conformance(
+        "Sandboxed sessions",
+        "Sessions in a filesystem sandbox, and the grants that widen one.",
+        (
+            f"`spawn`: the fields {_codes(SPAWN_SANDBOX_FIELDS)}.",
+            "`pty`: the fields `sandboxed` and `box`.",
+            "`pty.info`: the field `plan`.",
+        ),
+        state_keys=(
+            "project_sandbox",
+            "sandboxed_sessions",
+            "sandbox_grants",
+            "sandbox_project_grants",
+            "sandbox_tools",
+        ),
+        status_fields=("sandbox", "live"),
+        session_fields=("sandboxed", "sandbox_box", "sandbox_plan_path", "defaults_owed", "can_restart"),
+    ),
+    CAP_TOOLS: Conformance(
+        "Session tools",
+        "The tools a running agent calls that need a screen, the marks on a diff, and files handed "
+        "between a client and a session.",
+        ("`GET /api/blob?kind=file` and `kind=remote`.", "`PUT /api/upload`."),
+        state_keys=("session_attachments", "diff_notes", "pending_diffs"),
+        session_fields=("attachments",),
+    ),
+    CAP_JOBS: Conformance(
+        "Long-running operations",
+        "Work that outlasts a request, such as a clone, a worktree's trash or restore, a login repair or an "
+        "icon's generation. `JOB_KINDS` lists them all.",
+    ),
+    CAP_USAGE: Conformance(
+        "Token use",
+        "The usage panel, the model catalog, the CLI's defaults and project icons.",
+        ("`GET /api/blob?kind=icon`.",),
+    ),
+    CAP_BACKGROUND: Conformance(
+        "Background agents",
+        "Handing a session to the CLI's background agents and following it there.",
+        ("`close`: the mode `background`.",),
+        state_keys=("session_forwards", "pending_detaches"),
+        item_fields=("background", "backgrounding", "can_background", "forward"),
+    ),
+    CAP_SHELLS: Conformance(
+        "Panel shells",
+        "Plain shells beside a session, and their history.",
+        ("`spawn`: `kind: \"shell\"`.",),
+    ),
+    CAP_COMPOSER: Conformance(
+        "The composer",
+        "Lifting the text out of the CLI's input box and putting it back, switching the model or effort, "
+        "and mentioning a file.",
+        session_fields=("entered", "foreign_paste", "prompt_block"),
+    ),
+    CAP_INTERNAL: Conformance(
+        "The Collins service's own",
+        "What the Collins service does for its own window's timing and its own test suite. Another "
+        "server need not serve it.",
+        state_keys=("process_baselines", "resume_on_start", "ptys", "pty_next_id", "inflight_copies"),
+        status_fields=("keeper", "keeper_mismatch", "keeper_unread", "keeper_held", "unkept"),
+        session_fields=(
+            "fork",
+            "forked",
+            "provider",
+            "options",
+            "continue_recent",
+            "resolver_cwd",
+            "initial_command",
+            "worktree_launch",
+            "new_chat_prompt",
+            "shells_follow_armed",
+            "closing",
+            "unstarted",
+            "lookup_empty",
+            "ledger_armed",
+        ),
+    ),
+    CAP_DEBUG: Conformance(
+        "The debug probe",
+        "Collins' own test probe, served only with the service's debug API on. No other client or server "
+        "should rely on it.",
+    ),
 }
 
 # Names a message's own fields can't take: the envelope's. A response is told
