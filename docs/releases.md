@@ -69,7 +69,10 @@ downloads of each version, see the
   service still running from before this version lists none of the names**, and
   a package upgrade restarts nothing, so the first window after upgrading hides
   nearly everything: its banner says why and has a *Restart service* button,
-  and `systemctl --user restart collins-service.service` does the same.
+  and `systemctl --user restart collins-service.service` does the same. Open
+  tabs get their panels back when it restarts, except that a session saved with
+  a git page or a docked composer alongside its shells gets its shells back only
+  after the tab is closed and reopened.
 - **A server that doesn't answer no longer stops the window.** A refused first
   subscribe opens the window under its Reconnecting banner instead of ending
   the launch, and the tab's two-second tick no longer waits on the service, so a
