@@ -2636,14 +2636,16 @@ class App(Adw.Application):
             # write over the quit's list.
             return
         self._open_tabs_frozen = False
-        window = self._main_window()
-        entries = self.state.get_open_tabs()
-        if window is not None and entries:
-            window.reopen_open_tabs(entries)
-        self.persist_open_tabs()
         owed, self._launch_owed = getattr(self, "_launch_owed", None), None
         if owed is not None and not owed.closed_for_good:
-            self._show_welcome_work(owed)  # what a refused first subscribe held back
+            # What a refused first subscribe held back: the launch itself.
+            self._launch_work(owed)
+        else:
+            window = self._main_window()
+            entries = self.state.get_open_tabs()
+            if window is not None and entries:
+                window.reopen_open_tabs(entries)
+        self.persist_open_tabs()
 
     # -- the device's open tabs (§3.21) -------------------------------------------
 
@@ -3241,34 +3243,34 @@ class App(Adw.Application):
             window = self._new_window()
             if self._connection is not None and self._connection.state != "connected":
                 # A first subscribe that was refused (spec D6): nothing is
-                # known yet, neither the open tabs nor whether the welcome
-                # was seen. Both wait for the reconnect (`_on_connected`).
+                # known yet, neither the open tabs nor the settings the launch
+                # reads. It all waits for the reconnect (`_on_connected`).
                 self._launch_owed = window
-                window.present()
-                return
-            # Fresh launch: the tabs this device had open on this service
-            # come back, attached where the service still runs them, else
-            # resumed (open_tabs, §3.21); with none recorded, the session
-            # that was active, when the setting asks for it. Extra windows
-            # (Ctrl+Shift+N) start empty.
-            window.reopen_tabs()
-            if self.state.get_setting("caffeine_on_launch"):
-                self.set_caffeine_enabled(
-                    True, duration=self.state.get_setting("caffeine_launch_timer") or ""
-                )
-            # Once per install, and only on a launch: an extra window is not a
-            # first impression, and neither is one opened from a notification.
-            # The welcome comes first — what runs Claude on the user's behalf,
-            # and the agent CLI's location when a launch can't find it, which
-            # blocks until answered (there is no app without it). The rest
-            # of the launch's welcome-work takes its turn after — immediately
-            # on a launch that owes no welcome.
-            # _after_welcome only builds the closure; nothing in it runs
-            # until the dialog is answered (or at once, when none shows).
-            self._show_welcome_work(window)
+            else:
+                self._launch_work(window)
         window.present()
 
-    def _show_welcome_work(self, window: MainWindow) -> None:
+    def _launch_work(self, window: MainWindow) -> None:
+        """What a launch's first window does once the mirrors are filled: at
+        once on a launch that connected, on the reconnect otherwise."""
+        # The tabs this device had open on this service come back, attached
+        # where the service still runs them, else resumed (open_tabs, §3.21);
+        # with none recorded, the session that was active, when the setting
+        # asks for it. Extra windows (Ctrl+Shift+N) start empty.
+        window.reopen_tabs()
+        if self.state.get_setting("caffeine_on_launch"):
+            self.set_caffeine_enabled(
+                True, duration=self.state.get_setting("caffeine_launch_timer") or ""
+            )
+        # Once per install, and only on a launch: an extra window is not a
+        # first impression, and neither is one opened from a notification.
+        # The welcome comes first — what runs Claude on the user's behalf,
+        # and the agent CLI's location when a launch can't find it, which
+        # blocks until answered (there is no app without it). The rest
+        # of the launch's welcome-work takes its turn after — immediately
+        # on a launch that owes no welcome.
+        # _after_welcome only builds the closure; nothing in it runs
+        # until the dialog is answered (or at once, when none shows).
         welcome.maybe_show(window, self.state, self.store, then=self._after_welcome(window))
 
     def _after_welcome(self, window: MainWindow):

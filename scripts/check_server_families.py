@@ -146,10 +146,20 @@ while True:
     # where the check says it must not, since a dialog over the window is what
     # every other assertion here would then be reading.
     dismissed = "false" if family in ("prs", "all") else "true"
+    SERVICE_ID = "0123456789abcdef0123456789abcdef"
     with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
         fh.write(
-            '{"settings": {"welcome_seen": true, "gh_welcome_dismissed": %s, "title_model": "none"}}' % dismissed
+            '{"service_id": "%s", "settings": {"welcome_seen": true, "gh_welcome_dismissed": %s,'
+            ' "title_model": "none"}}' % (SERVICE_ID, dismissed)
         )
+    if family == "refused-subscribe":
+        # A launch with something to do once it connects: the session that was
+        # active, by the setting, with no `open_tabs` recorded.
+        with open(f"{E2E}/config/collins/ui-state.json", "w", encoding="utf-8") as fh:
+            fh.write(
+                '{"device": {"settings": {"restore_last_session": true}},'
+                ' "services": {"%s": {"last_active_session": "%s"}}}' % (SERVICE_ID, SID)
+            )
 
     sys.path.insert(0, REPO)
     import gi
@@ -457,6 +467,9 @@ while True:
                     wait_until(lambda: session_row(win) is not None and header_row(win) is not None, 20.0),
                 )
                 check("the banner comes down", wait_until(lambda: not win.reconnect_banner.get_revealed()))
+                # The launch it held back, whole (the review of PR 646).
+                check("the launch's last session comes back", wait_until(lambda: win._page_for(SID) is not None))
+                check("…and Caffeine on launch", app.caffeine_enabled)
             drive(win)
         except Exception:
             import traceback
