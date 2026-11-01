@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from collins import connections, uistate
+from collins import connections, sshremote, uistate
 
 ID_A = "a" * 32
 ID_B = "b" * 32
@@ -98,6 +98,66 @@ def test_rows_are_validated_and_bad_ones_dropped(tmp_path):
     assert got[0].target == "me@box" and got[0].remote_app_id == ""
     assert got[1].remote_app_id == "com.x.Y" and got[1].parsed_target().port == 2222
     assert connections.clean("nope") == [] and connections.clean(None) == []
+
+
+def test_a_row_carries_its_discovery_command():
+    row = {"id": ID_A, "name": "box", "kind": "ssh", "target": "h", "command": "clinic-server --socket"}
+    connection = connections.from_record(row)
+    assert connection.command == "clinic-server --socket"
+    assert connection.discovery_command == "clinic-server --socket"
+    assert connections.from_record(connection.to_record()) == connection
+    assert connection.to_record()["command"] == "clinic-server --socket"
+
+
+def test_a_row_without_a_command_is_the_default_and_stays_without_one():
+    connection = connections.from_record({"id": ID_A, "name": "box", "kind": "ssh", "target": "h"})
+    assert connection.command == "" and connection.discovery_command == sshremote.REMOTE_COMMAND
+    assert "command" not in connection.to_record()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "x" * 513, "a\nb", "a\0b", "a\rb", "a\x1bb", "a‮b", "-l env", "", "   ",
+        None, 3, ["clinic"], {"a": 1}, True,
+    ],
+)
+def test_a_command_that_does_not_fit_costs_only_itself(command):
+    """Rule 5: the row stays and the default is used, never the bad value."""
+    row = {"id": ID_A, "name": "box", "kind": "ssh", "target": "me@box", "command": command}
+    connection = connections.from_record(row)
+    assert connection is not None and connection.target == "me@box"
+    assert connection.command == "" and connection.discovery_command == sshremote.REMOTE_COMMAND
+    assert "command" not in connection.to_record()
+
+
+def test_the_longest_command_is_taken():
+    row = {"id": ID_A, "name": "box", "kind": "ssh", "target": "h", "command": "x" * 512}
+    assert connections.from_record(row).command == "x" * 512
+
+
+def test_a_command_survives_a_rename(tmp_path):
+    store = connections.Connections(_ui(tmp_path))
+    added = store.add(connections.new_ssh("box", "me@box", command="clinic-server"))
+    assert store.rename(added.id, "renamed").command == "clinic-server"
+    assert store.get(added.id).command == "clinic-server"
+
+
+def test_add_refuses_a_command_it_would_lose(tmp_path):
+    store = connections.Connections(_ui(tmp_path))
+    bad = connections.Connection(id=ID_A, name="box", kind="ssh", target="h", command="a\nb")
+    with pytest.raises(ValueError):
+        store.add(bad)
+    assert store.all() == []
+
+
+def test_new_ssh_takes_a_command():
+    assert connections.new_ssh("box", "h").command == ""
+    assert connections.new_ssh("box", "h", command="  ").command == ""
+    assert connections.new_ssh("box", "h", command=" clinic --x ").command == "clinic --x"
+    for bad in ("a\nb", "x" * 513, "-l env"):
+        with pytest.raises(ValueError, match="command"):
+            connections.new_ssh("box", "h", command=bad)
 
 
 def test_the_list_is_bounded(tmp_path):

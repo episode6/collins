@@ -386,4 +386,58 @@ def test_make_forward_builds_the_connections_forward():
 )
 def test_every_failure_code_has_its_word(failure):
     plain = sshremote.PrintSocketResult(ok=False, code=1, detail="why", failure=failure)
-    assert sshforward._failure_text(plain, "box", 10.0)
+    assert sshforward._failure_text(plain, "box", 10.0, "collins-service")
+
+
+def test_a_connections_app_id_stays_off_its_own_command():
+    connection = connections.Connection(
+        id="a" * 32, name="box", kind="ssh", target="me@box",
+        remote_app_id="com.x.Y", command="clinic-server --socket",
+    )
+    run = FakeRun(stdout=b"/run/c/api.sock\n")
+    sshforward.print_socket(connection, run=run)
+    assert run.calls[0][0][-1] == sshremote.remote_command("clinic-server --socket")
+
+
+def test_print_socket_runs_the_connections_command():
+    connection = connections.new_ssh("box", "me@box", command="clinic-server --socket")
+    run = FakeRun(stdout=b"/run/c/api.sock\n")
+    assert sshforward.print_socket(connection, run=run).path == "/run/c/api.sock"
+    assert run.calls[0][0][-1] == sshremote.remote_command("clinic-server --socket")
+    # None: the documented default.
+    run = FakeRun(stdout=b"/run/c/api.sock\n")
+    sshforward.print_socket(CONNECTION, run=run)
+    assert run.calls[0][0][-1] == sshremote.remote_command(sshremote.REMOTE_COMMAND)
+
+
+@pytest.mark.parametrize(
+    ("run", "words"),
+    [
+        (FakeRun(returncode=1, stderr=b"boom\n"), "clinic-server failed on"),
+        (FakeRun(stdout=b"relative\n"), "clinic-server on"),
+        (FakeRun(returncode=127, stderr=b"sh: clinic-server: not found\n"), "clinic-server is not on"),
+    ],
+)
+def test_the_words_name_the_program_that_ran(run, words):
+    """A server's own command never reads as collins-service having failed."""
+    connection = connections.new_ssh("box", "me@box", command="/opt/clinic-server --socket")
+    text = sshforward.print_socket(connection, run=run).text
+    assert words in text and "collins-service" not in text
+
+
+@pytest.mark.parametrize(
+    ("run", "words"),
+    [
+        (FakeRun(returncode=1, stderr=b"boom\n"), "collins-service failed on"),
+        (FakeRun(stdout=b"relative\n"), "collins-service on"),
+        (FakeRun(returncode=127, stderr=b"sh: collins-service: not found\n"), "collins-service is not on"),
+    ],
+)
+def test_the_default_commands_words_are_what_they_were(run, words):
+    assert words in sshforward.print_socket(CONNECTION, run=run).text
+
+
+def test_a_command_with_braces_is_not_formatted_as_text():
+    connection = connections.new_ssh("box", "me@box", command="{oops} --x")
+    text = sshforward.print_socket(connection, run=FakeRun(returncode=1, stderr=b"{why}\n")).text
+    assert "{oops} failed on" in text and "{why}" in text

@@ -1,13 +1,16 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """The ssh runs (collins.sshremote) with a fake `subprocess.run` and `Popen`:
 the two argv, the failures as codes, the local socket unlinked first (and a
-non-socket refused), the pid file and its sweep, the remote command under a
-real bash, and that the module stays one vendorable file."""
+non-socket refused), the pid file and its sweep, the checks on a recorded pid
+with and without /proc (a fake `ps`), a discovery command through the wrapper
+under real shells, the remote command under a real bash, and that the module
+stays one vendorable file."""
 
 import ast
 import errno
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -500,6 +503,433 @@ def test_parse_target_refuses_anything_else(text):
     assert sshremote.parse_target(text) is None
 
 
+# ---- the checks on a recorded pid, on any POSIX system ---------------------------------------
+
+
+LOCAL = "/run/user/1/collins/remote/a.sock"
+FORWARD_ARGS = f"ssh -o BatchMode=yes -N -L {LOCAL}:/home/c/api.sock me@box"
+
+
+@pytest.fixture
+def no_proc(tmp_path, monkeypatch):
+    """A system with no /proc, as a Mac is."""
+    monkeypatch.setattr(sshremote, "PROC_DIR", str(tmp_path / "no-proc"))
+
+
+def _fake_ps(tmp_path, monkeypatch, body: str) -> Path:
+    """`sshremote.PS` is a script with *body*; it records its arguments."""
+    script = tmp_path / "ps"
+    script.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/ps.argv"\n{body}\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(sshremote, "PS", str(script))
+    return tmp_path / "ps.argv"
+
+
+def _prints(tmp_path, monkeypatch, text: str) -> None:
+    out = tmp_path / "ps.out"
+    out.write_text(text)
+    _fake_ps(tmp_path, monkeypatch, f'cat "{out}"')
+
+
+def _kernel_without_pidfd(monkeypatch) -> None:
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
+
+
+@pytest.mark.usefixtures("no_proc")
+@pytest.mark.parametrize(
+    "args", [FORWARD_ARGS, f"/usr/bin/ssh -N -L {LOCAL}:/r h", f"ssh -L {LOCAL}:/r -N h"]
+)
+def test_without_proc_ps_recognises_the_forward(tmp_path, monkeypatch, args):
+    _prints(tmp_path, monkeypatch, args + "\n")
+    assert sshremote.is_our_forward(4242, LOCAL)
+    assert (tmp_path / "ps.argv").read_text().split() == ["-o", "args=", "-p", "4242"]
+
+
+@pytest.mark.usefixtures("no_proc")
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "\n\n",
+        f"vim {FORWARD_ARGS}\n",  # names it, but is something else
+        f"/opt/ssh-wrapper -N -L {LOCAL}:/r h\n",
+        f"sshd: -N -L {LOCAL}:/r\n",
+        f"ssh: {LOCAL}:/r [mux] -N -L\n",
+        f"ssh -L {LOCAL}:/r h\n",  # no -N
+        f"ssh -N {LOCAL}:/r h\n",  # no -L
+        f"ssh -N -L {LOCAL} h\n",  # the socket with no colon
+        f"ssh -N -L {LOCAL}.old:/r h\n",  # another socket that begins the same
+        f"ssh -N -L /prefix{LOCAL}:/r h\n",  # one that ends the same
+        "ssh -N -L /run/user/1/other.sock:/r h\n",
+        f"ssh -N -D {LOCAL}:/r -L /other.sock:/r h\n",  # the path is not -L's
+        f"ssh -N -L\n{LOCAL}:/r\n",  # two lines: not one process's answer
+        f"{FORWARD_ARGS}\n{FORWARD_ARGS}\n",  # a ps that ignored -p
+        "[ssh] <defunct>\n",  # a zombie, procps
+        "(ssh)\n",  # a zombie, BSD
+        "\ufffd\ufffd garbage\n",
+        "ssh -N -L " + "x" * sshremote.PID_FILE_MAX + f" -L {LOCAL}:/r h\n",  # past the bound
+    ],
+)
+def test_a_ps_answer_that_is_not_the_forwards_own_is_not_ours(tmp_path, monkeypatch, output):
+    _prints(tmp_path, monkeypatch, output)
+    assert not sshremote.is_our_forward(4242, LOCAL)
+
+
+@pytest.mark.usefixtures("no_proc")
+def test_ps_is_asked_for_a_width_a_path_fits_in(tmp_path, monkeypatch):
+    """Its width is undefined on a pipe, and COLUMNS is POSIX's override."""
+    monkeypatch.setenv("COLUMNS", "20")
+    seen = tmp_path / "columns"
+    _fake_ps(tmp_path, monkeypatch, f'echo "$COLUMNS" > "{seen}"; echo "{FORWARD_ARGS}"')
+    assert sshremote.is_our_forward(4242, LOCAL)
+    assert seen.read_text().strip() == str(sshremote.PID_FILE_MAX)
+
+
+@pytest.mark.usefixtures("no_proc")
+def test_a_line_cut_inside_the_socket_is_not_ours(tmp_path, monkeypatch):
+    _prints(tmp_path, monkeypatch, f"ssh -N -L {LOCAL[:-3]}\n")
+    assert not sshremote.is_our_forward(4242, LOCAL)
+
+
+@pytest.mark.usefixtures("no_proc")
+def test_a_ps_that_fails_or_hangs_or_is_missing_is_not_ours(tmp_path, monkeypatch):
+    _fake_ps(tmp_path, monkeypatch, f"echo '{FORWARD_ARGS}'; exit 1")
+    assert not sshremote.is_our_forward(4242, LOCAL)  # the words do not count on a failure
+    _fake_ps(tmp_path, monkeypatch, f"echo '{FORWARD_ARGS}'; exec sleep 30")
+    monkeypatch.setattr(sshremote, "PS_TIMEOUT_S", 0.2)
+    started = time.monotonic()
+    assert not sshremote.is_our_forward(4242, LOCAL)
+    assert time.monotonic() - started < 5
+    monkeypatch.setattr(sshremote, "PS", str(tmp_path / "no-such-ps"))
+    assert not sshremote.is_our_forward(4242, LOCAL)
+
+
+@pytest.mark.parametrize("pid", [0, -1, -4242])
+def test_a_pid_that_names_a_group_is_nothing(tmp_path, monkeypatch, pid):
+    """To `kill` these are process groups, and ps would read them as options."""
+    argv = _fake_ps(tmp_path, monkeypatch, f"echo '{FORWARD_ARGS}'")
+    monkeypatch.setattr(sshremote, "PROC_DIR", str(tmp_path / "no-proc"))
+    killed = []
+    monkeypatch.setattr(os, "kill", lambda *a: killed.append(a))
+    assert not sshremote.pid_alive(pid) and not sshremote.is_our_forward(pid, LOCAL)
+    assert killed == [] and not argv.exists()
+
+
+def test_proc_is_read_first_and_ps_is_not_run_when_it_answers(tmp_path, monkeypatch):
+    argv = _fake_ps(tmp_path, monkeypatch, f"echo '{FORWARD_ARGS}'")
+    proc = tmp_path / "proc"
+    (proc / "77").mkdir(parents=True)
+    (proc / "77" / "cmdline").write_bytes(FORWARD_ARGS.replace(" ", "\0").encode() + b"\0")
+    (proc / "78").mkdir()
+    (proc / "78" / "cmdline").write_bytes(b"")  # a zombie's, on Linux: it exists, and says nothing
+    monkeypatch.setattr(sshremote, "PROC_DIR", str(proc))
+    assert sshremote.is_our_forward(77, LOCAL)
+    assert not sshremote.is_our_forward(78, LOCAL)
+    assert not argv.exists()
+    assert sshremote.is_our_forward(79, LOCAL)  # no such entry: ps answers
+    assert argv.exists()
+
+
+def test_a_proc_entry_that_says_another_program_is_not_ours(tmp_path, monkeypatch):
+    proc = tmp_path / "proc"
+    (proc / "77").mkdir(parents=True)
+    (proc / "77" / "cmdline").write_bytes(f"vim\0-N\0-L\0{LOCAL}:/r\0".encode())
+    monkeypatch.setattr(sshremote, "PROC_DIR", str(proc))
+    assert not sshremote.is_our_forward(77, LOCAL)
+
+
+def test_pid_alive_reads_no_proc(monkeypatch):
+    """A Mac has none: this process is alive and a reaped child is not,
+    with `/proc` out of the question."""
+    child = subprocess.Popen(["true"])
+    child.wait()
+
+    def no_files(*_a, **_k):
+        raise AssertionError("pid_alive opened a file")
+
+    monkeypatch.setattr("builtins.open", no_files)
+    assert sshremote.pid_alive(os.getpid())
+    assert not sshremote.pid_alive(child.pid)
+    assert not sshremote.pid_alive(2**70)  # past what kill takes: nothing, not a crash
+
+
+def test_pid_alive_counts_another_users_process(monkeypatch):
+    def refused(_pid, _sig):
+        raise PermissionError(errno.EPERM, "not yours")
+
+    monkeypatch.setattr(os, "kill", refused)
+    assert sshremote.pid_alive(4242)
+
+
+def _sleeper() -> subprocess.Popen:
+    """A real process to aim signals at, not an ssh by any reading."""
+    return subprocess.Popen(["sleep", "300"], stdin=subprocess.DEVNULL)
+
+
+@pytest.mark.usefixtures("no_proc")
+@pytest.mark.parametrize("output", ["", "sleep 300\n", f"vim {FORWARD_ARGS}\n", "\n"])
+def test_a_bad_ps_parse_signals_nothing(tmp_path, monkeypatch, output):
+    """The road a Mac takes (no pidfd, no /proc): whatever `ps` says that is
+    not the forward's own line leaves the process running."""
+    _kernel_without_pidfd(monkeypatch)
+    _prints(tmp_path, monkeypatch, output)
+    child = _sleeper()
+    try:
+        assert sshremote._signal_forward(child.pid, LOCAL, signal.SIGTERM) is False
+        time.sleep(0.1)
+        assert child.poll() is None
+    finally:
+        child.kill()
+        child.wait()
+
+
+@pytest.mark.usefixtures("no_proc")
+def test_a_stale_forward_is_ended_without_proc(tmp_path, monkeypatch):
+    """The whole of `end_stale_forward` on a system with neither /proc nor
+    pidfd: the client is gone, `ps` says the pid is still the forward, so it
+    is signalled, and the pid file goes."""
+    _kernel_without_pidfd(monkeypatch)
+    local = str(tmp_path / "a.sock")
+    _prints(tmp_path, monkeypatch, f"ssh -N -L {local}:/r h\n")
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    child = _sleeper()
+    reaper = threading.Thread(target=child.wait, daemon=True)
+    reaper.start()
+    try:
+        with open(sshremote.pid_path(local), "w") as fh:
+            json.dump({"ssh": child.pid, "client": gone.pid, "socket": local}, fh)
+        assert sshremote.end_stale_forward(local) == child.pid
+        reaper.join(5)
+        assert child.returncode == -signal.SIGTERM
+        assert not os.path.exists(sshremote.pid_path(local))
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+@pytest.mark.usefixtures("no_proc")
+def test_a_reused_pid_is_left_alone_without_proc(tmp_path, monkeypatch):
+    _kernel_without_pidfd(monkeypatch)
+    local = str(tmp_path / "a.sock")
+    _prints(tmp_path, monkeypatch, f"ssh -N -L {tmp_path}/other.sock:/r h\n")
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    child = _sleeper()
+    try:
+        with open(sshremote.pid_path(local), "w") as fh:
+            json.dump({"ssh": child.pid, "client": gone.pid, "socket": local}, fh)
+        assert sshremote.end_stale_forward(local) is None
+        time.sleep(0.1)
+        assert child.poll() is None
+    finally:
+        child.kill()
+        child.wait()
+
+
+def _named_ssh(local: str, body: str) -> subprocess.Popen:
+    """A real child whose command line reads as the forward's (bash's
+    `exec -a` names it ssh)."""
+    return subprocess.Popen(
+        ["bash", "-c", f'exec -a ssh bash -c "{body}" x -N -L {local}:/remote/api.sock'],
+        stdin=subprocess.DEVNULL,
+    )
+
+
+@pytest.mark.skipif(shutil.which("ps") is None or shutil.which("bash") is None, reason="needs ps and bash")
+@pytest.mark.usefixtures("no_proc")
+def test_the_real_ps_reads_a_real_forward(tmp_path, monkeypatch):
+    # A narrow COLUMNS in the environment, and a path past 80 columns: `ps`
+    # cuts its line to a width, and a cut path would never be recognised.
+    monkeypatch.setenv("COLUMNS", "20")
+    directory = tmp_path / ("d" * 60)
+    directory.mkdir()
+    local = str(directory / "a.sock")
+    child = _named_ssh(local, "sleep 300; true")
+    try:
+        time.sleep(0.3)
+        assert sshremote.is_our_forward(child.pid, local)
+        assert not sshremote.is_our_forward(child.pid, str(tmp_path / "b.sock"))
+        assert not sshremote.is_our_forward(os.getpid(), local)
+    finally:
+        child.kill()
+        child.wait()
+    assert not sshremote.is_our_forward(child.pid, local)  # reaped: ps prints nothing
+
+
+@pytest.mark.skipif(shutil.which("ps") is None or shutil.which("bash") is None, reason="needs ps and bash")
+@pytest.mark.parametrize("with_proc", [True, False])
+def test_a_zombie_forward_is_there_but_is_not_ours(tmp_path, monkeypatch, with_proc):
+    """`end_stale_forward`'s wait ends on a child this process has not
+    reaped: signal 0 still finds it, and neither /proc nor ps calls it ssh."""
+    if not with_proc:
+        monkeypatch.setattr(sshremote, "PROC_DIR", str(tmp_path / "no-proc"))
+    local = str(tmp_path / "a.sock")
+    child = _named_ssh(local, "exit 0")
+    try:
+        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)  # dead, not reaped
+        assert sshremote.pid_alive(child.pid)
+        assert not sshremote.is_our_forward(child.pid, local)
+    finally:
+        child.wait()
+
+
+# ---- a discovery command ------------------------------------------------------------------
+
+
+def test_print_socket_argv_takes_another_command():
+    argv = sshremote.print_socket_argv(TARGET, command="clinic-server --socket-path")
+    assert argv[-1] == sshremote.remote_command("clinic-server --socket-path")
+    assert '"$SHELL" -lc "exec clinic-server --socket-path"; rc=$?; ' in argv[-1]
+    assert "collins-service" not in argv[-1]
+    # The rest of the run is what it was: only the command differs.
+    assert argv[:-1] == sshremote.print_socket_argv(TARGET)[:-1]
+    # The default is the documented command, byte for byte.
+    assert sshremote.print_socket_argv(TARGET) == sshremote.print_socket_argv(
+        TARGET, command=sshremote.REMOTE_COMMAND
+    )
+
+
+def test_a_remote_app_id_goes_on_the_default_command_alone():
+    """A custom command runs verbatim: another server does not know the flag,
+    and a command ending in `#` or `;` would swallow or misroute it."""
+    argv = sshremote.print_socket_argv(TARGET, "com.x.Y", "clinic-server")
+    assert argv[-1] == sshremote.remote_command("clinic-server")
+    assert "--app-id" not in argv[-1] and "com.x.Y" not in argv[-1]
+    default = sshremote.print_socket_argv(TARGET, "com.x.Y")
+    assert default[-1] == sshremote.remote_command(f"{sshremote.REMOTE_COMMAND} --app-id com.x.Y")
+    # Written into the command, it is the command's own.
+    own = sshremote.print_socket_argv(TARGET, command="clinic-server --app-id com.x.Y")
+    assert own[-1] == sshremote.remote_command("clinic-server --app-id com.x.Y")
+
+
+def test_a_bad_app_id_is_refused_whatever_the_command():
+    with pytest.raises(ValueError):
+        sshremote.print_socket_argv(TARGET, "x;reboot", "clinic-server")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "", "   ", "a\0b", "a\nb", "a\rb", "a\x1bb", "a\tb", "a\x7fb", "x" * 513, None, 3, ["a"],
+        "a‮b", "a‍b", "﻿clinic",  # Unicode format characters: shown back to a person
+        "-l env", "  -l env", "--x", "'-l' env", '"-l" env',  # exec would read it as its own option
+    ],
+)
+def test_a_command_that_does_not_fit_is_refused(command):
+    assert not sshremote.valid_command(command)
+    with pytest.raises(ValueError):
+        sshremote.print_socket_argv(TARGET, command=command)
+
+
+@pytest.mark.parametrize(
+    "command", ["x", "x" * 512, "/opt/é/x --flag 'a b' \"c\" $HOME", "env A=1 x -l", "x-y --z"]
+)
+def test_a_command_that_fits_is_taken(command):
+    assert sshremote.valid_command(command)
+    assert sshremote.print_socket_argv(TARGET, command=command)
+
+
+def test_print_socket_runs_the_command_it_is_given():
+    run = FakeRun(stdout=b"/run/clinic/api.sock\n")
+    result = sshremote.print_socket(TARGET, run=run, command="clinic-server")
+    assert result.ok and result.path == "/run/clinic/api.sock"
+    assert run.calls[0][0] == sshremote.print_socket_argv(TARGET, command="clinic-server")
+
+
+@pytest.mark.parametrize(
+    ("command", "program"),
+    [
+        ("collins-service --print-socket", "collins-service"),
+        ("/opt/clinic/bin/clinic-server --x", "clinic-server"),
+        ("'/opt/my apps/clinic' --x", "clinic"),
+        ('"unbalanced --x', '"unbalanced'),
+        ("''", ""),
+    ],
+)
+def test_command_program_is_what_a_shell_would_name(command, program):
+    assert sshremote.command_program(command) == program
+
+
+@pytest.mark.parametrize(
+    ("command", "stderr", "failure"),
+    [
+        ("clinic-server", b"bash: line 1: clinic-server: command not found\n", sshremote.NOT_ON_PATH),
+        ("/opt/x/clinic-server", b"sh: 1: exec: /opt/x/clinic-server: not found\n", sshremote.NOT_ON_PATH),
+        ("clinic-server", b"sh: 1: /usr/bin/zsh: not found\n", sshremote.NO_SHELL),
+        # A word about the default program says nothing about this one's.
+        ("clinic-server", b"collins-service: not found\n", sshremote.NO_SHELL),
+        ("''", b"sh: 1: exec: : not found\n", sshremote.NO_SHELL),
+        # A short name inside another word is not the program being named.
+        ("x --print", b"sh: 1: exec: /usr/bin/zsh: not found\n", sshremote.NO_SHELL),
+        ("clinic", b"sh: 1: exec: clinic-server: not found\n", sshremote.NO_SHELL),
+        ("clinic", b"sh: 1: exec: /opt/clinic.sh: not found\n", sshremote.NO_SHELL),
+        ("x --print", b"sh: 1: exec: x: not found\n", sshremote.NOT_ON_PATH),
+        ("c++ --x", b"bash: exec: c++: not found\n", sshremote.NOT_ON_PATH),
+        ("clinic", b"zsh:1: command not found: clinic\n", sshremote.NOT_ON_PATH),
+        ("clinic", b"fish: Unknown command: clinic\n", sshremote.NOT_ON_PATH),
+    ],
+)
+def test_exit_127_is_read_against_the_commands_own_program(command, stderr, failure):
+    run = FakeRun(returncode=127, stderr=stderr)
+    assert sshremote.print_socket(TARGET, run=run, command=command).failure == failure
+
+
+# Every character the wrapper's layers would read for themselves, in the
+# positions a person would plausibly write them.
+AWKWARD = (
+    """--a 'single quoted' "double quoted" back\\\\slash \\$dollar \\`tick\\` it\\'s bang! """
+    """'$HOME' "$HOME" $HOME"""
+)
+AWKWARD_ARGS = [
+    "--a", "single quoted", "double quoted", "back\\slash", "$dollar", "`tick`",
+    "it's", "bang!", "$HOME", "{home}", "{home}",
+]
+
+
+@pytest.mark.parametrize("command", [AWKWARD, "x", "$(printf a)", "a\\", "!", "'", '"'])
+def test_the_wrapper_keeps_its_promises_whatever_the_command_holds(command):
+    """The outer layer goes through the user's own shell of any family: only
+    its two single quotes, no history mark, no doubled backslash (fish reads
+    that inside single quotes)."""
+    wrapper = sshremote.remote_command(command)
+    assert wrapper.count("'") == 2 and wrapper.startswith("sh -c '") and wrapper.endswith("'")
+    assert "!" not in wrapper and "\\\\" not in wrapper and "\n" not in wrapper
+
+
+@pytest.mark.parametrize("outer", ["bash", "dash", "zsh", "fish", "tcsh", "mksh"])
+@pytest.mark.parametrize("login", ["bash", "dash", "zsh"])
+def test_a_command_reaches_the_login_shell_as_written(tmp_path, outer, login):
+    """The whole road but ssh: *outer* (the login shell, as sshd runs it with
+    -c) runs the wrapper, which runs *login* as $SHELL, which reads the command.
+    Quotes group, `$HOME` expands there and only there, nothing is lost."""
+    outer_path, login_path = shutil.which(outer), shutil.which(login)
+    if outer_path is None or login_path is None:
+        pytest.skip(f"needs {outer} and {login}")
+    home = tmp_path / "home"
+    home.mkdir()
+    program = tmp_path / "clinic-server"
+    program.write_text(
+        '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$REPORT"\necho /run/c/api.sock\n'
+    )
+    program.chmod(0o755)
+    report = tmp_path / "report"
+    env = {
+        "HOME": str(home), "SHELL": login_path, "PATH": "/usr/bin:/bin", "LANG": "C",
+        "REPORT": str(report),
+    }
+    completed = subprocess.run(
+        [outer_path, "-c", sshremote.remote_command(f"{program} {AWKWARD}")],
+        env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=20, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert sshremote.last_line(completed.stdout) == "/run/c/api.sock"
+    expected = [arg.format(home=home) if arg == "{home}" else arg for arg in AWKWARD_ARGS]
+    assert report.read_text().splitlines() == expected
+
+
 # ---- what makes it vendorable --------------------------------------------------------------
 
 
@@ -526,6 +956,9 @@ def test_it_runs_as_one_file_copied_out_of_the_tree(tmp_path):
         "t = s.parse_target('me@host:2222')\n"
         "assert s.print_socket_argv(t)[0] == 'ssh'\n"
         "assert '-N' in s.forward_argv(t, '/run/a.sock', '/run/b.sock')\n"
+        "assert 'other --flag' in s.print_socket_argv(t, command='other --flag')[-1]\n"
+        "assert s.pid_alive(__import__('os').getpid())\n"
+        "assert not s.is_our_forward(__import__('os').getpid(), '/run/a.sock')\n"
         "assert not any(m == 'collins' or m.startswith('collins.') for m in sys.modules)\n"
     )
     completed = subprocess.run(

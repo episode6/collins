@@ -242,14 +242,19 @@ blank), the
 window's "Reconnecting" banner meanwhile; a protocol mismatch is its own
 state. **Remote** (§3.24, D2, D10): `collins/connections.py` (GTK-free) is
 the reader and validator of `ui-state.json`'s `connections` list and
-`last_connection` (`[user@]host[:port]`, bounded, a bad row dropped;
+`last_connection` (`[user@]host[:port]`, bounded, a bad row dropped; an
+optional discovery `command`, a bad one dropped alone;
 `LOCAL` is the one local connection, never stored), and
 `collins/sshremote.py` (stdlib only and MIT, so another client can vendor
 it: no Collins import and no user-facing text, a failure is a code) the two
-ssh runs — `ssh TARGET collins-service --print-socket` (10 s; exit 255 is
+ssh runs — `ssh TARGET collins-service --print-socket`, or the connection's
+`command` in its place, verbatim (one program and its arguments under the
+wrapper's `exec`; `--app-id` goes on the default alone) (10 s; exit 255 is
 "could not connect", its stderr's last line the detail) and the `-N -L`
 child holding the forward of the Unix socket (unlinked first; only ever a
-socket), with the target's grammar and the pid files. `collins/sshforward.py`
+socket), with the target's grammar and the pid files, whose checks are POSIX
+(signal 0; `/proc/<pid>/cmdline`, else `ps`; an unreadable answer is "not
+ours", nothing signalled). `collins/sshforward.py`
 (GTK-free, GPL) is Collins' side of them: the socket's place at
 `<runtime dir>/collins/remote/<app id>/<id>.sock`, the words the dialog and
 the banner show, and `RemoteTransport`, the
