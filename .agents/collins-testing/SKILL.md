@@ -352,9 +352,12 @@ a green row) or off a tab (`session-resolved` from a probed
 then until nothing is pending) or `wait_until(predicate)`. Never loosen
 the assertion; wait for it. **Never `call` from the link's own I/O thread**
 (`SocketLink.call` raises there): a blocking `call` is for the main thread
-or a worker thread, never a callback the link's thread runs. A check that must observe a transient (the
-clone dialog's box locked before the fast fake clone finishes) keeps a
-bare pending-pump for that step.
+or a worker thread, never a callback the link's thread runs. A check that must observe a transient reads
+it with nothing pumped where the code sets it in the call (the clone dialog's
+box, locked inside `_start_clone`): even a bare pending-pump can land a fast
+fake clone's finish first, which failed half the first attempts on a fast
+runner. A verdict or anything else that arrives as a reply is waited for on
+the verdict itself: a fixed wait reads the old word on a slow one.
 
 Copy `scripts/check_new_chat.py`'s preamble rather than retyping it. The
 essentials, all of which are read at import time somewhere in `collins`:
