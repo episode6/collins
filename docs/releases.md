@@ -78,6 +78,11 @@ downloads of each version, see the
   the launch, a refused one on a reconnect keeps the banner up and tries again
   instead of sitting on an empty sidebar, and the tab's two-second tick no longer
   waits on the service, so a slow answer can't freeze the window.
+- **Fixed: a tab could stay convinced its agent wasn't running.** A window that
+  attached in the instant the CLI was starting could be told the agent wasn't
+  there and never hear otherwise, so the tab refused the composer and drops until
+  it was reopened. What a client is told on attaching and what it hears afterwards
+  are now one series, and a wrong reading is corrected within two seconds.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another

@@ -166,7 +166,10 @@ keystrokes and polls. `ServiceCore.sessions` holds one per live agent pty,
 built by `spawn` and hosted by `service/hosting.py`'s `SessionRecord` (its
 host, its two ports `service/ports.py` over the pty and screen model, the
 cut sinks, and the facts it pushes as `session` events: whole on `attach`,
-changed fields after). `service/tracking.py`'s `ServiceActivity` is the
+changed fields after, and one series: a snapshot refreshes what a poll also
+sends through the road that records it and reports what was recorded, never a
+second read, or the poll could never correct the client it told otherwise).
+`service/tracking.py`'s `ServiceActivity` is the
 busy / finish tracker (fed by the filter's `Progress` events, every pty's
 output, the input frames and a `/proc` poll; `service/finish.py` judges a
 finish edge against the transcript); it sets `busy` and a counted finish's

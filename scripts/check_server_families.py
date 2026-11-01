@@ -202,7 +202,7 @@ while True:
     from gi.repository import Gio, GLib, Gtk
 
     from collins import apilink, blobcache, checkouts, claudemodels, gitinfo, i18n, modelcatalog
-    from collins import proctree, remoteicons, sandboxstatus
+    from collins import remoteicons, sandboxstatus
     from collins import prefs as prefs_mod
     from collins import remotefiles, trust
     from collins.api import protocol
@@ -638,49 +638,17 @@ while True:
             check("not read as a pre-family service", not apilink.predates_families())
             check("no banner", wait_until(lambda: not banner.get_revealed()), banner.get_title())
         session = win.store.get_session(SID)
-        opened_at = time.monotonic()
         win.open_session(session)
         page = win._page_for(SID)
         tab = page.get_child()
-        heard: list = []  # every word on the process facts that reached this tab, and when
-        real_apply = tab.session.apply
-
-        def apply_heard(event: dict) -> set:
-            if "agent_running" in event or "running_command" in event:
-                heard.append(
-                    (round(time.monotonic() - opened_at, 2), event.get("agent_running"), event.get("running_command"))
-                )
-            return real_apply(event)
-
-        tab.session.apply = apply_heard
         toasts: list = []
         tab.connect("toast", lambda _tab, text: toasts.append(text))
         check("a tab opens", wait_until(lambda: tab.pty_id is not None), tab.pty_id)
         check("the agent comes up at its box", wait_until(lambda: tab.takes_prompt(), 20.0))
-        # Read off the process table on a poll, so it can come a beat after the
-        # box does; the composer's open asks for it.
-        started = time.monotonic()
-        running = wait_until(tab._agent_is_running, 8.0)
-        waited = time.monotonic() - started
-        detail = ""
-        print(f"  ..  running after {waited:.2f}s: {running}")
-        if not running:
-            # What the service itself believes, against what reached this tab.
-            pids = tab.probe_call("candidate_pids") or []
-            detail = (
-                f"after {waited:.1f}s; service says agent_is_running={tab.probe_call('agent_is_running')} "
-                f"candidates={[(pid, proctree.process_cmdline(pid), proctree.process_cwd(pid)) for pid in pids]} "
-                f"sent={tab.probe_call('host._sent.get', 'agent_running')} "
-                f"sent_cmd={tab.probe_call('host._sent.get', 'running_command')} "
-                f"poll={tab.probe('activity._process_poll')} "
-                f"cli={tab.probe('provider.cli')}; "
-                f"mirror says running_command={tab.session.running_command} "
-                f"takes_prompt={tab.session.takes_prompt} pid={tab.session.pid} "
-                f"pty={tab.pty_id} exited={tab.session.exited} agent_running={tab.session.agent_running} "
-                f"loop_pending={GLib.MainContext.default().pending()} "
-                f"heard(t, agent, cmd)={heard} since_open={time.monotonic() - opened_at:.2f}"
-            )
-        check("…and it reads as running", running, detail)
+        # Read off the process table, so it can come a poll after the box does
+        # (a read inside an exec's window, corrected for everyone: ruling 34).
+        # The composer's open asks for it.
+        check("…and it reads as running", wait_until(tab._agent_is_running, 8.0))
         # A cwd tick has passed for the runs it is about: `cwd.settle` and
         # `git.info` go out on the tab's map and on each 2 s tick.
         e2e_service.settle(2300 if family in ("git", "internal", "all", "none") else 300)

@@ -1020,7 +1020,18 @@ The `Session` is the service's (spec §3.19). The pieces:
   cut, and the **facts** a client reads synchronously off its tab, sent
   as a `session` event: whole on `attach` (`snapshot`) and as the fields
   that changed after (`refresh_facts`, on the output settle — 50 ms after
-  a burst, `output_arrived` — and the 2 s process poll; D28). The
+  a burst, `output_arrived` — and the 2 s process poll; D28). The two
+  are **one series** (ruling 34): `_send_changed` sends only what differs
+  from `_sent`, so `snapshot` reads nothing a poll or a settle also sends a
+  second time. `_refresh_tracked` reads the box, launch, sandbox and
+  process facts once, through `_send_changed`, and the snapshot reports
+  `_sent`, the transcript facts too as the last landing recorded them. A
+  client told a word `_sent` does not hold is never corrected: a CLI that
+  execs on its way up has an empty cmdline for a third of a millisecond,
+  which `process_cmdline` reads as no process, and `agent_running` stuck on
+  False that way once made a tab refuse its composer. A new fact in one of
+  those readers joins the series by itself; one read anywhere else in
+  `snapshot` is the bug again. The
   identity (`session`, `fork`, `options`, `cwd`, `agent_cwd`, `pid`), the
   box reads (`takes_prompt`, `entered`, `prompt_block` as a msgid,
   `unstarted`, `foreign_paste`, `agent_running`, `running_command`), the
