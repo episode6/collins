@@ -202,12 +202,13 @@ while True:
     from gi.repository import Gio, GLib, Gtk
 
     from collins import apilink, blobcache, checkouts, claudemodels, gitinfo, i18n, modelcatalog
-    from collins import remoteicons, sandboxstatus
+    from collins import proctree, remoteicons, sandboxstatus
     from collins import prefs as prefs_mod
     from collins import remotefiles, trust
     from collins.api import protocol
     from collins.api.client import ProtocolMismatch
     from collins.app import App
+    from collins.connection import ConnectionManager
     from collins.prefs import PreferencesDialog
     from collins.prstatus import PullRequest
     from collins.sidebar import SessionRow
@@ -402,6 +403,7 @@ while True:
             check("not local: Continue last session stays", "win.continue-session" in new_menu, new_menu)
             check("not local: Open folder stays", "win.add-project" in add_menu, add_menu)
             win.lookup_action("new-session-provider").activate(GLib.Variant("s", "claude"))
+            wait_until(lambda: win.get_visible_dialog() is not None)
             dialog = win.get_visible_dialog()
             entry = dialog.get_extra_child() if dialog is not None else None
             check("New session asks for a typed path", isinstance(entry, Gtk.Entry), dialog)
@@ -423,9 +425,17 @@ while True:
                 check("…in that folder", typed_tab._cwd == PROJECT, typed_tab._cwd)
                 typed_tab._new_chat.emit("send-requested", "a typed folder's prompt", False, False, "", "")
                 check("Send reaches spawn, in that folder", wait_until(lambda: shim_said("a typed folder's prompt"), 20.0))
-                check("…where the service says it landed", typed_tab.session.cwd == PROJECT, typed_tab.session.cwd)
+                check(
+                    "…where the service says it landed",
+                    wait_until(lambda: typed_tab.session.cwd == PROJECT),
+                    typed_tab.session.cwd,
+                )
                 win._graceful_close(page)
-                check("…and that tab closes", wait_until(lambda: win.tab_view.get_page(typed_tab) is None, 15.0))
+                def tab_gone() -> bool:
+                    pages = range(win.tab_view.get_n_pages())
+                    return all(win.tab_view.get_nth_page(i).get_child() is not typed_tab for i in pages)
+
+                check("…and that tab closes", wait_until(tab_gone, 15.0))
             apilink.current().local = True
             win.apply_families()
         elif cap == protocol.CAP_PRS:
@@ -446,7 +456,7 @@ while True:
             check("the gallery does not open", not tab.attachments_open())
             texture = _a_texture()
             check("a dropped image is refused", tab._drop_texture(texture) is False)
-            check("…with a toast", any("dropped files" in text for text in toasts), toasts)
+            check("…with a toast", wait_until(lambda: any("dropped files" in text for text in toasts)), toasts)
             with _raises(ValueError):
                 blobcache.fetch(blobcache.file_url("/x"), ".png")
         elif cap == protocol.CAP_JOBS:
@@ -489,18 +499,20 @@ while True:
             check("the effort menu types /effort", wait_until(lambda: shim_said("/effort low")))
             wait_until(box_is_empty)
             tab.session.write_text("half")
-            wait_until(lambda: not tab.takes_prompt())
+            wait_until(lambda: not box_is_empty())
             tab._on_composer_send(None, "a second one")
             check("a box that holds text is said in a toast", wait_until(lambda: bool(toasts)), toasts)
             check("…and nothing was typed", not shim_said("a second one"))
             tab.session.write_text("\x7f\x7f\x7f\x7f")
-            wait_until(lambda: tab.takes_prompt())
+            wait_until(box_is_empty)
+            wait_until(tab.takes_prompt)  # the composer's open reads the mirror's word
             tab.open_composer()
             wait_until(lambda: tab.composer_open())
             tab._composer.set_text("a draft")
             tab.close_composer()
             check("a closed draft stays in the stash", tab._composer_stash == "a draft", tab._composer_stash)
-            check("…not in the box", tab.takes_prompt() and not shim_said("a draft"))
+            e2e_service.settle(150)
+            check("…not in the box", box_is_empty() and not shim_said("a draft"))
             tab._stash_draft("")
         elif cap == protocol.CAP_INTERNAL:
             before = protocol.PROTOCOL + 1
@@ -542,8 +554,22 @@ while True:
     App.set_caffeine_enabled = set_caffeine_enabled
 
     os.environ.pop("COLLINS_KEEPER", None)
+    banner_read: list = []
     if family == "refused-subscribe":
         e2e_service.start_service(stubs={"refuse_subscribe": 1})
+        # The reconnect's first backoff is a second, which a window built on a
+        # loaded runner can outlast: it would be connected, and the banner down,
+        # before anybody read it. So the retry waits for the read, on the
+        # manager's own timer.
+        real_retry = ConnectionManager._retry
+
+        def retry_after_the_read(manager) -> bool:
+            if not banner_read:
+                manager._pending = manager._schedule(100, manager._retry)
+                return False
+            return real_retry(manager)
+
+        ConnectionManager._retry = retry_after_the_read
     elif family in ("legacy", "upgrade"):
         service = e2e_service.start_service(stubs={"caps_drop": dropped, "legacy_hello": True})
     else:
@@ -556,8 +582,9 @@ while True:
         if family == "refused-subscribe":
             if win is None:
                 return GLib.SOURCE_CONTINUE
-            check("the window opens under the Reconnecting banner", win.reconnect_banner.get_revealed())
+            check("the window opens under the Reconnecting banner", wait_until(win.reconnect_banner.get_revealed))
             check("…with no dialog over it", win.get_visible_dialog() is None, win.get_visible_dialog())
+            banner_read.append(True)
         elif win is None or session_row(win) is None or header_row(win) is None:
             return GLib.SOURCE_CONTINUE
         try:
@@ -571,7 +598,7 @@ while True:
                 check("the launch's last session comes back", wait_until(lambda: win._page_for(SID) is not None))
                 # Asked, not granted: with no session manager (CI's container)
                 # `inhibit` answers 0, and Caffeine rightly reads as off.
-                check("…and it asks for Caffeine on launch", caffeine_asked == [True], caffeine_asked)
+                check("…and it asks for Caffeine on launch", wait_until(lambda: caffeine_asked == [True]), caffeine_asked)
             drive(win)
         except Exception:
             import traceback
@@ -608,16 +635,49 @@ while True:
             check("not read as a pre-family service", not apilink.predates_families())
             check("no banner", wait_until(lambda: not banner.get_revealed()), banner.get_title())
         session = win.store.get_session(SID)
+        opened_at = time.monotonic()
         win.open_session(session)
         page = win._page_for(SID)
         tab = page.get_child()
+        heard: list = []  # every word on the process facts that reached this tab, and when
+        real_apply = tab.session.apply
+
+        def apply_heard(event: dict) -> set:
+            if "agent_running" in event or "running_command" in event:
+                heard.append(
+                    (round(time.monotonic() - opened_at, 2), event.get("agent_running"), event.get("running_command"))
+                )
+            return real_apply(event)
+
+        tab.session.apply = apply_heard
         toasts: list = []
         tab.connect("toast", lambda _tab, text: toasts.append(text))
         check("a tab opens", wait_until(lambda: tab.pty_id is not None), tab.pty_id)
         check("the agent comes up at its box", wait_until(lambda: tab.takes_prompt(), 20.0))
         # Read off the process table on a poll, so it can come a beat after the
         # box does; the composer's open asks for it.
-        check("…and it reads as running", wait_until(tab._agent_is_running, 8.0))
+        started = time.monotonic()
+        running = wait_until(tab._agent_is_running, 8.0)
+        waited = time.monotonic() - started
+        detail = ""
+        print(f"  ..  running after {waited:.2f}s: {running}")
+        if not running:
+            # What the service itself believes, against what reached this tab.
+            pids = tab.probe_call("candidate_pids") or []
+            detail = (
+                f"after {waited:.1f}s; service says agent_is_running={tab.probe_call('agent_is_running')} "
+                f"candidates={[(pid, proctree.process_cmdline(pid), proctree.process_cwd(pid)) for pid in pids]} "
+                f"sent={tab.probe_call('host._sent.get', 'agent_running')} "
+                f"sent_cmd={tab.probe_call('host._sent.get', 'running_command')} "
+                f"poll={tab.probe('activity._process_poll')} "
+                f"cli={tab.probe('provider.cli')}; "
+                f"mirror says running_command={tab.session.running_command} "
+                f"takes_prompt={tab.session.takes_prompt} pid={tab.session.pid} "
+                f"pty={tab.pty_id} exited={tab.session.exited} agent_running={tab.session.agent_running} "
+                f"loop_pending={GLib.MainContext.default().pending()} "
+                f"heard(t, agent, cmd)={heard} since_open={time.monotonic() - opened_at:.2f}"
+            )
+        check("…and it reads as running", running, detail)
         # A cwd tick has passed for the runs it is about: `cwd.settle` and
         # `git.info` go out on the tab's map and on each 2 s tick.
         e2e_service.settle(2300 if family in ("git", "internal", "all", "none") else 300)
@@ -631,7 +691,9 @@ while True:
                 if cap in dropped:
                     check(f"{cap}: no {label}", not shows(context))
                 elif label not in gone:
-                    check(f"{cap}: {label} shows", shows(context))
+                    # A mirror's word, some of them (the branch off `git.info`, the
+                    # row's button off its `item`), so it is waited for.
+                    check(f"{cap}: {label} shows", wait_until(lambda shows=shows: shows(context)))
 
         if family == "upgrade":
             # The normal upgrade: nobody touched the dock, and the restart
@@ -667,6 +729,7 @@ while True:
 
         if family == "legacy":
             win._on_banner_button(banner)
+            wait_until(lambda: win.get_visible_dialog() is not None)
             dialog = win.get_visible_dialog()
             check("the button asks with the blast radius", dialog is not None, dialog)
             if dialog is not None:
@@ -704,7 +767,7 @@ while True:
             win.apply_families()
             check("the next hello that lists a family takes the banner down", not banner.get_revealed())
             for label, shows in built_down.items():
-                check(f"…and {label} comes back", shows())
+                check(f"…and {label} comes back", wait_until(shows))
             e2e_service.settle(450)  # past the beat a record's return would wait
             check(
                 "a dock the person changed keeps its record",
