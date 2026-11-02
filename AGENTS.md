@@ -218,8 +218,10 @@ table edit; `tests/test_api_reference.py` fails on a stale copy or an
 unlisted name, and pins
 the MIT files — the four pages (`index.md`, `messages.md`, `terminal.md`
 and `sessions.md`, the session-facts contract with its appendix on Claude
-Code's observable behaviour, written clean-room from the spec and never
-from the service's code), the generator, `protocol.py`,
+Code's observable behaviour, written from the spec and from Claude Code
+as observed before its author read any service module, its later
+corrections made after the author had read six of them for the fixes
+riding its PR, as its header's record of sources says), the generator, `protocol.py`,
 `sshremote.py` and every file of `tests/fixtures/streams/` (the SPDX tag
 on `scenarios.py`, the directory's `LICENSE` for the data files, which
 cannot carry one; the user's relicensing decision of 2026-11-01, the

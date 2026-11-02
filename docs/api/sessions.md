@@ -24,14 +24,13 @@ reviews of the page on its pull request (Claude's, and the Opus 5.5 review
 and its verification), which quote and cite the service's code and
 measured the service against the page: every number this page gives for
 Collins' own reading that is not the spec's comes from them and is
-labelled as Collins'. Not read for the page: any module of the service or
-of the data layer. After the page's text and its first corrections were
-committed, its author read six modules of the service (tracking,
+labelled as Collins'. The page's text and its first corrections were
+written before its author had read any module of the service or of the
+data layer. The author then read six modules of the service (tracking,
 activity, core, session, hosting, finish) and the process-tree helper to
-make the four service fixes the spec's decisions ordered; the corrections
-made after that (the verification's items and the decisions on them) were
-written from those decisions and the reviews, and compared by word runs
-against those modules as well. Not run: the Collins service. The text was
+make the four service fixes, and the corrections committed after that
+were written with those modules read. Not run: the Collins service. The
+text was
 compared by runs of five or more words against the spec's reading of the
 service, the GPL modules' docstrings and comments, the author's memory
 notes and the repository's skills, and the runs that were prose were
@@ -262,9 +261,9 @@ side:
   2 seconds, and holds a sighting for 5 seconds).
 - **The submit itself**: nothing need be drawn for a moment after a
   carriage return, so a typed carriage return is taken as a sign on its
-  own (Collins: 2 seconds). Measured on the Collins service, `busy` rose
-  2 ms after a typed carriage return and within 0.4 seconds of a `prompt`
-  request, which makes no such mark.
+  own (Collins: 2 seconds). Measured on the Collins service against a
+  stand-in CLI, `busy` rose 2 ms after a typed carriage return and within
+  0.4 seconds of a `prompt` request, which makes no such mark.
 - **A background agent** reports no progress (its environment is
   scrubbed) and runs under the daemon rather than on the pty, so the
   process table says nothing; its spinner is still painted into a pty
@@ -282,8 +281,8 @@ clear can end the signs' hold while a live child still stands. The hold
 on a fall keeps such a quiet from counting as a finish, and the rise that
 follows the next sighting is not held, so a client of Collins can see
 `busy` dip after a turn that left a child running (dips of 37 to 883 ms
-were measured on the service under the hold; before it, falls of 22 to
-300 ms, each then a false finish). And a session
+were measured on the service against a stand-in CLI under the hold;
+before it, falls of 22 to 300 ms, each then a false finish). And a session
 going busy again withdraws a finish not yet counted, since the pause was
 a tool call's.
 
@@ -427,12 +426,9 @@ it, and the only mark it carries is `claude` in its command line (a
 wrapper that starts it, such as a sandbox launcher, names it too), so
 the agent is found by descent from the pty's child and by name. The CLI
 changes its own directory when it enters a worktree, while the shell's
-stays put, so `agent_cwd` is the agent process's directory and not the
-pty's. Nor is the CLI always the process a pty's foreground group is
-headed by: `claude attach` and the daemon's `claude bg-pty-host` run the
-CLI under a wrapper of their own, and the wrapper stays where it started
-while the CLI moves, so the directory a reading wants is the CLI
-process's own, wherever in the group it sits. Whether a command runs is readable from the
+stays put, so `agent_cwd` is the agent process's own directory: not the
+pty's, and not that of a wrapper the agent may run under (the appendix's
+[agents](#k-claude-agents-json) entry names two). Whether a command runs is readable from the
 terminal itself: while nothing runs, the terminal's foreground group is
 the shell itself, so `running_command` needs no process walk. Collins
 polls every 2 seconds, which is what the refresh property asks, and
@@ -442,8 +438,8 @@ The process table can be misread for an instant, which is why the last
 two properties exist. Between the moment a process replaces its program
 and the moment the new program's arguments are in place, its command line
 reads as empty: Collins measured the gap at about 0.3 ms and never over
-1 ms over three hundred launches of the CLI, when it fixed its own
-snapshot, and a reading taken inside it finds no
+1 ms over three hundred launches, when it fixed its own snapshot, and a
+reading taken inside it finds no
 process named `claude` on the pty. A finished process not yet reaped
 reads the same way, so the command line alone does not tell a starting
 agent from a dead one. The re-read bounds the damage to one
@@ -973,7 +969,11 @@ milliseconds), `name` and `status` (`idle` or `busy`). On 2.1.316 the
 array lists interactive sessions too (`kind: "interactive"`); a background
 agent's element (`kind: "background"`) also carries an `id`, which is what
 `attach` takes (an element on earlier versions carried a `state` too, not
-seen on 2.1.316). `--all` includes completed ones. The listing is how a
+seen on 2.1.316). `--all` includes completed ones. A background agent
+runs under a wrapper process of the daemon's, `claude bg-pty-host`, and
+`claude attach` is itself a wrapper in the pty it is typed into, the
+agent its child; a wrapper keeps the directory it started in while the
+agent moves into a worktree (seen on 2.1.226). The listing is how a
 server tells a session that has become a background agent from one that
 has not, and, apart from the agent's spinner, the only busy reading a
 server has for one, since the daemon scrubs its agents' environment and
