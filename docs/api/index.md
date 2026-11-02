@@ -35,7 +35,8 @@ and treat anything unexpected as absent, as the Collins client does. A second
 implementation of the service changes nothing about this: nothing is stable
 yet, and both projects are still testing. These pages, the reference and,
 once it is published, the conformance kit are kept current with the service
-by the unit suite's gates, so what they say is what `main` does on the day.
+by the CI gates, so what they say is what `main` does on the day (the
+[session facts](./sessions) page, until the kit, by review alone).
 :::
 
 ## Finding the service
@@ -311,14 +312,16 @@ The sequence the Collins window follows, which any client can:
    `takes_prompt` says the CLI's input box is empty and would take a
    prompt; `busy` and `finished` are the service's reading of the agent's
    activity; `model`, `effort` and `permission_mode` are read off the
-   transcript, null while unknown; `landed`, `reset`, `finished` and
-   `forked` each mark something happening: sent true every time it does, and
-   never false. `landed` comes with every read of the transcript, so expect
+   transcript, null while unknown; `landed`, `reset` and `finished` each
+   mark something happening: sent true every time it does, and never
+   false, and `forked` names the id a fork resolved to. `landed` comes
+   with every read of the transcript, so expect
    it often, even from an idle session. What each fact means, what every
    server must guarantee of it and what any reading of it off Claude Code
    contends with is the [session facts](./sessions) page. Requests a
    client makes of a session name its pty: `prompt` to type a prompt in
-   (refused when the box is not empty, so nothing lands mid-sentence),
+   (with `when_empty`, refused when the box is not empty, so nothing lands
+   mid-sentence),
    `switch` for the model or effort, `write` and `send` for raw text,
    `cut` to lift the box's text out, `close` with a mode (`exit` for the
    graceful exit, `background` for the `/bg` handoff, `kill` to force it).

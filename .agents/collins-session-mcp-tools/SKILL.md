@@ -155,7 +155,7 @@ import it. It holds:
   one). After any edit to the table run the script and commit the page:
   `tests/test_api_reference.py` fails on a stale copy. The same test pins
   the SPDX tag on exactly the MIT files (the pages: `index.md`,
-  `messages.md` and `sessions.md`, the session-facts contract and its
+  `messages.md`, `terminal.md` and `sessions.md`, the session-facts contract and its
   appendix on Claude Code, written from the spec and never from the
   service's code; the generator; `protocol.py` and `sshremote.py`): a new
   module under `collins/api/` is GPL, and nothing

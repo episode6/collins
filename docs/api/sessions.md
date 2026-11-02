@@ -3,12 +3,13 @@ SPDX-License-Identifier: MIT
 Copyright (c) 2026 episode6, Inc.
 
 This document is licensed MIT, not GPL-3.0 like the rest of Collins: see the
-License section of index.md. It is written from the behaviour the Collins
-service shows on the wire and from Claude Code as its users observe it, not
-from Collins' source: nothing here is a copy or a paraphrase of code in
-collins/service/ or of any other GPL-licensed file, in words or in
-structure (an informative paragraph states the constraints a reading must
-honour and why, never the steps of Collins' own reading).
+License section of index.md. It is written from Claude Code as its users
+observe it (its files, its screen, its strings) and from the design
+sections of the server-side API spec, not from Collins' source: nothing
+here is a copy or a paraphrase of code in collins/service/ or of any other
+GPL-licensed file, in words or in structure (an informative paragraph
+states the constraints a reading must honour and why, never the steps of
+Collins' own reading).
 
 Record of sources. Read for this page: the server-side API spec's design
 sections (its required properties, its brief for this page and its
@@ -18,15 +19,20 @@ the sidebar, the terminal tab, testing, the GPL notices and pull requests;
 the author's memory notes on the CLI; real transcripts, read only; the
 strings of the installed CLI and its --help; the recorded 2.1.288 terminal
 streams under tests/fixtures/streams/; and a headless probe of 2.1.316 on
-a bare pty in a throwaway home. Not read: any module of the service or of
-the data layer. The text was compared by word n-grams against the spec's
-reading of the service and against those modules' docstrings and comments
-and reworded wherever a run of words was shared.
+a bare pty in a throwaway home (three short prompts in all). Not read: any
+module of the service or of the data layer. Not run: the Collins service;
+where a sentence gives a number for Collins' own reading, the number is
+the spec's or a reviewer's measurement, as the sentence says. The text was
+compared by runs of five or more words against the spec's reading of the
+service, the GPL modules' docstrings and comments, the author's memory
+notes and the repository's skills, and the runs that were prose were
+reworded (2026-11-01); the runs that remain are field names, glyph lists
+and commonplace phrases.
 -->
 
 # Session facts
 
-A Level 1 server of [the service API](./index#implementing-a-server) runs a
+A Level 1 server of [the service API](./index#implementing-a-server) hosts a
 Claude Code session on a pty and tells its clients what is going on in it:
 the `session` event's fields, and the `item` fields of the session's list
 row. This page is the contract behind those fields. The
@@ -47,12 +53,12 @@ the facts off these events, never the other way round.
 
 ::: warning Stability
 What [the specification](./index) says of stability holds here. The facts
-below are what the Collins service does on `main` on the day; none of them
+below are what the Collins service on `main` does on the day; none of them
 is declared stable yet, and the ones that lean on Claude Code's own
 behaviour lean on behaviour nobody has promised to keep (the appendix says
 so of each). This page lives in the Collins repository for now and may move
 to a shared repository once it settles; every link between the MIT pages is
-relative, so a move is a copy.
+relative, so moving them is copying them.
 :::
 
 ## What a session is
@@ -60,7 +66,7 @@ relative, so a move is a copy.
 A **session** is one Claude Code conversation: a process the server started
 on a pty it owns, and the transcript file that process writes. The server
 starts it in answer to a `spawn {kind: "agent"}` request and assembles the
-command itself: no client sends a command line. Collins runs the user's
+command itself; a client never sends one. Collins runs the user's
 login shell on the pty and types the `claude` command there, newline and
 all, as a person would; a server may do that or run the CLI
 directly, and the facts below are defined so that either works. Everything
@@ -71,7 +77,7 @@ which.
 
 The session's **id** is the one Claude Code mints: the file name of its
 transcript, less the `.jsonl` suffix. Until the CLI writes that file, which
-it does once the first prompt is submitted, the session has no id, so a
+happens at the first submit, the session has no id, so a
 fresh spawn is known by the `handle` the spawn reply names until the server
 binds it to an id (`session` below). A resumed session has its id from the
 start.
@@ -79,7 +85,7 @@ start.
 ## Reading the facts
 
 The `session` event is sent whole to a client when it attaches to the pty,
-and after that with only the fields that moved. A field a client has never
+and after that with only the fields that changed. A field a client has never
 received is unknown to it, not false; the message reference marks which
 fields a server may leave out, and the Level 1
 [conformance](./messages#level-1-sessions-and-terminals) list says which
@@ -87,8 +93,8 @@ ones every server sends. A nullable field is null while the fact is not
 known yet (`model` before the first reply, `session` before the id is
 bound), and absent when the server does not read it at all.
 
-One property is **required of every fact**: an attach's snapshot and the
-`session` events that follow are **one series**. A client that attaches
+One property is **required of every fact**: an attach's snapshot and every
+`session` event after it form **a single series**. A client that attaches
 holds, after its snapshot, exactly what a client attached all along holds
 after the events, and every later event is a change from that. So a
 server must not read a fact once to fill the snapshot and again, apart,
@@ -103,10 +109,13 @@ really moves. A server that reads a fact once per period, keeps what it
 last sent, sends the difference, and fills the snapshot from what it
 last sent, has it.
 
-Four fields are **one-shots**: `landed`, `reset`, `finished` and `forked`
-are sent as `true` each time the thing happens and never as `false`. A
-client acts on each arrival and keeps no state for them. `forked` belongs
-to the `internal` family and is not described here.
+Three fields are **one-shots**: `landed`, `reset` and `finished` are sent
+as `true` each time the thing happens and never as `false`. A client acts
+on each arrival and keeps no state for them. Two arrive without a new
+event: an attach's snapshot is itself a read of the transcript, so it can
+carry `landed: true`, and the first bind of a fresh spawn sends `reset`
+(below). `forked`, of the `internal` family and not described here, is of
+the same kind but carries an id rather than `true`.
 
 Fields outside the Level 1 core belong to families and are described with
 them in the reference: the sandbox chip's five fields to `sandbox`, `prs`
@@ -119,25 +128,30 @@ sends none of those fields.
 
 ### `takes_prompt`
 
-**Meaning.** Text typed into the pty now goes into the CLI's input box,
-which is empty, and a carriage return at the end of it submits exactly that
-text: nothing is appended to text already in the box, and no menu, dialog
-or permission prompt takes the keys instead. It is what the `prompt`
-request checks before it types, and what a client reads before it offers a
-"send" of its own.
+**Meaning.** Text typed into the pty now lands in the CLI's box, which is
+empty, and a carriage return after it submits exactly that text: nothing is
+appended to text already in the box, and no menu, dialog or permission
+prompt takes the keys instead. It is what a `prompt` request sent with
+`when_empty` re-checks before it types (and is refused on when the box
+holds text), and what a client reads before it offers a "send" of its own.
 
 It is **not** "the agent is idle". Claude Code empties its box as soon as a
-prompt is submitted and keeps it empty, and typeable, for the whole of the
+prompt is submitted and keeps it empty, and typeable, throughout the
 reply that follows: a prompt typed then is queued by the CLI behind the
 turn. A client that wants "working or not" reads `busy`.
 
 **Required.**
 
-- `false` while no agent runs on the pty (`agent_running` false, or no
-  child at all).
+- `false` while no agent runs on the pty, by the server's own
+  `agent_running` reading (the last one it sent, so that the two facts
+  agree; unknown reads as `false`) and not by the pty merely having a
+  child: a shell the agent left behind draws a prompt of its own, whatever
+  it looks like, and a prompt typed then lands in the shell.
 - never `true` while the box holds text, a stand-in for a paste included.
 - may be `true` while the agent is streaming a reply, since the box is
   empty then; a server is not required to read it `false` mid-turn.
+- re-read when `agent_running` flips, not only when the screen settles,
+  so the two never disagree for longer than a poll.
 - read from the server's own model of the screen, never from a client's
   terminal (the rule of [the terminal contract](./terminal#the-screen-model-of-record-normative)), so that every client
   of one pty reads the same answer.
@@ -145,22 +159,31 @@ turn. A client that wants "working or not" reads `busy`.
 **What a reading contends with** (informative). The CLI draws its box
 with cursor movement and partial repaints, so the byte stream never says
 "the box is empty"; the answer is only on the screen, which is why the
-required properties put it on the server's screen model. Three facts of
-the appendix's [input box](#c-the-input-box) entry pin an empty box:
-the prompt row opens with `❯` (U+276F) and a no-break space (U+00A0),
-the cursor rests right after them, and the rest of the row holds nothing
-but the CLI's hint. The no-break space is what tells the box from the
-CLI's menus and dialogs, which use `❯` with an ordinary space, so a
-reading that ignores the space answers `true` under a permission prompt.
-The hint is text, so a reading needs a way to tell it from typed text:
-it is drawn dim, which means the screen model has to keep each cell's
-rendering and not only its character, and what "dim" looks like depends
-on the colours the active client sent, which is why its fixed opening
-`Try "` is the sturdier tell and Collins accepts either. Typed text
-reaches the cursor's row (the box wraps onto continuation rows and the
-cursor stays at the end of the text), so the cursor's row is enough to
-read. Collins re-reads it whenever the pty's output settles, and the
-field follows the screen within about 50 ms.
+required properties put it on the server's screen model. The appendix's
+[input box](#c-the-input-box) entry gives the marks of an empty box at
+rest: the prompt mark with a no-break space after it, the cursor right
+after them, and nothing else on the row but the CLI's hint. What fools a
+reading is the reason each mark is needed. A permission prompt or a menu
+draws the same mark with an ordinary space, so a reading that ignores the
+space answers `true` under a permission prompt. A cursor sent back to the
+box's start over typed text (Ctrl+A does it) sits where an empty box's
+cursor sits, so the cursor alone proves nothing and the remainder of the
+row has to be read as well. A shell whose prompt happens to draw the same
+mark and space (a shell left behind by an exited agent can) shows every
+mark with no agent there, which is why the first property reads the
+process table and not the screen. The hint is text in that remainder, so a
+reading needs a way to tell it from typed text: it is drawn dim, which
+means the screen model keeps each cell's rendering and not only its
+character, and what dim looks like depends on the colours the active
+client sent. The hint comes in two kinds (the entry says which), and only
+the kind shown at startup has a fixed opening a reading can match, so the
+dim rendering is the general tell and the opening recognises one kind: a
+reading that trusts the opening alone answers `false` on every resting
+session that shows the other kind. Typed text reaches the cursor's row
+(the box wraps onto continuation rows and the cursor stays at the end of
+the text), so the cursor's row is enough to read. Collins re-reads it
+whenever the pty's output settles, and the field follows the screen within
+about 50 ms.
 
 ### `busy`
 
@@ -176,98 +199,131 @@ it beyond that; the edge that matters for notifications is `finished`.
 - `false` within 10 seconds of the agent's turn ending with no further
   activity: no output, no progress report, no live sub-process of the
   agent's.
-- never flaps more than once per second: a reading that changes is held
-  for at least a second before it changes back.
+- `false` within 10 seconds of the agent's process leaving the pty
+  (`running_command` falling), whatever its last progress report said: a
+  CLI killed mid-turn, or one that exited on its own, ends busy.
+- never flaps more than once per second. A server meets it by reporting a
+  fall only once it has stood for a second, a rise inside that second
+  cancelling the unreported fall silently; a rise is never held, so the
+  3-second bound is untouched.
 - sent on the `session` event for the pty, and mirrored as the `item`
   field `busy` on every row that stands for the session.
 
 **What a reading contends with** (informative). No single sign of work
-meets the three bounds, which is why Collins reads several and lets each
-hold for a while of its own, busy ending only when every one has lapsed.
-What each sign can and cannot say:
+meets the three bounds, which is why a reading takes several, each held
+for a while of its own. What each sign can and cannot say, from the CLI's
+side:
 
 - **The CLI's progress report** (the appendix's
   [progress](#f-progress-reports-and-the-two-environment-variables)
   entry) is the earliest sign and the only one the CLI gives on purpose:
   it starts within half a second of the submit and clears at the turn's
-  end. But it also clears briefly between tool calls and while a
-  permission prompt waits, so a clear cannot end busy at once or the
-  field flaps on every tool call, past the once-a-second bound; a clear
-  needs a grace (Collins waits 3 seconds for the next report). And it is
-  absent for a person who turned it off and for a background agent,
-  whose environment the daemon scrubs.
+  end. What it does between the two is the version's: the 2.1.288
+  recordings hold it through a permission prompt and two tool calls,
+  seven turns of 2.1.261 held it through tool loops and permission
+  prompts with a flutter of clears in each turn's first seconds, and
+  2.1.220 cleared it while a permission prompt waited. So a clear cannot
+  end busy at once, or the field flaps on a version that beats, past the
+  once-a-second bound; a clear needs a grace (Collins waits 3 seconds for
+  the next report). And it is absent for a person who turned it off and
+  for a background agent, whose environment the daemon scrubs.
 - **Output on the pty** is a sign of a reply, but a weak one: the CLI
-  repaints while idle, and what a server types echoes back, so output
-  has to be held for a short window only (Collins: 2 seconds, and the
+  repaints while idle, a resize or a focus report makes it repaint, a
+  clear is followed by trailing repaints, and what a server types echoes
+  back; so output has to be held for a short window only (Collins: 2 seconds, and the
   server's own writes discounted for a quarter of a second after each
   key) and cannot be the sole sign, since a long tool run prints nothing
   for minutes. Collins stretches the window to a minute while a progress
-  report stands, for exactly that case.
+  report stands, for exactly that case, and ends it when the CLI leaves
+  the pty.
 - **The spinner column** (the appendix's [spinner](#e-the-spinner-column)
   entry) moves through every tool loop, but one repaint moves it too, so
   it counts only as a streak (Collins samples it every 350 ms and counts
-  1.4 seconds of motion). A still column says nothing.
+  two changes at most 1.4 seconds apart). A still column says nothing.
 - **The process table**: a running tool is a live descendant of the
   agent. The CLI keeps long-lived children from its start (its MCP
   servers), so only descendants beyond that set are a sign, and the set
-  has to be learnt after the spawn (Collins reads it 5 seconds in, and
-  polls every 2 seconds).
-- **The submit itself**: nothing is drawn for up to a second after a
-  carriage return, so the 3-second bound needs the submit to count as a
-  sign on its own (Collins: 2 seconds).
-- **A background agent** gives none of the above; the daemon's own
-  listing (the appendix's [agents](#k-claude-agents-json) entry) is the
-  only reading, polled every 3 seconds.
+  has to be learnt before the first turn (Collins gathers it over the
+  session's life before the first submit and freezes it there, polls every
+  2 seconds, and holds a sighting for 5 seconds).
+- **The submit itself**: nothing need be drawn for a moment after a
+  carriage return, so a typed carriage return is taken as a sign on its
+  own (Collins: 2 seconds). Measured, the first output follows a submit
+  within 0.4 seconds, and `busy` rose 2 ms after a typed carriage return
+  and within 0.4 seconds of a `prompt` request, which makes no such mark.
+- **A background agent** reports no progress (its environment is
+  scrubbed) and runs under the daemon rather than on the pty, so the
+  process table says nothing; its spinner is still painted into a pty
+  attached to it, and the daemon's own listing (the appendix's
+  [agents](#k-claude-agents-json) entry) carries a busy word of its own,
+  which Collins polls every 3 seconds.
+- **A fresh spawn** paints a welcome that animates, and the progress
+  report can blip during it, before any prompt; a reading holds the
+  signs off until the first submit, or it reads busy with no turn.
 
-Two consequences hold any such combination together: a sign that lapses
-never ends busy while another still stands, so the readings cannot
-contradict each other; and a session going busy again withdraws a finish
-not yet counted, since the pause was a tool call's.
+Two things hold any such combination together. A sign that lapses should
+not end busy while another still stands, or the readings contradict each
+other; Collins keeps one deadline, set by the latest sign, so a lapsed
+clear can end the signs' hold while a live child still stands, and the
+fall hold the required properties ask for is what keeps that from
+reaching a client (falls of 22 to 300 ms were measured before it). And a
+session
+going busy again withdraws a finish not yet counted, since the pause was
+a tool call's.
 
 ### `finished`
 
 **Meaning.** A turn ended that a person has not seen yet: the moment to
-notify. One-shot, sent `true` once per turn.
+notify. One-shot.
 
 **Required.**
 
-- sent at most once per turn. A repaint, a resize, a scroll or an
-  interrupted turn does not produce a second one; a turn that produced no
-  reply produces none.
+- sent at most once per turn for a session bound to its transcript,
+  deduplicated against the transcript: a repaint, a resize, a scroll or an
+  interrupted turn does not count twice. What counts is a turn the
+  transcript confirms, by its stamp moving or, when the confirmation's
+  wait runs out, by the file having grown; so a submit the model did not
+  answer and a local slash command count.
+- before the session is bound there is no transcript to judge by, and a
+  fall of `busy` is reported as a finish.
 - sent only after `busy` has fallen for the session.
 - accompanied by `unread: true` on the `item` of every row that stands for
-  the session, unless the row is being looked at: a client says so with
-  `store.flags {unread: false}`, and a server that has heard that for the
-  row since the turn began leaves `unread` alone. A row whose chain is
-  still busy, or whose status is `background`, is left alone too.
+  the session, except a row whose chain is still busy, one that is
+  backgrounding, and one whose status is `background`. The server keeps no
+  notion of a row being looked at: the client showing the session clears
+  the flag with `store.flags {unread: false}` once it is set, so a client
+  may see its own row's `unread` flip `true` and then `false`.
 - accompanied by a `notify {kind: "finished"}` event where the server
   serves Level 2.
 
 **What a reading contends with** (informative). Every fall of `busy` is
-not a finish: the CLI repaints while idle, and a repaint is a short burst
-of output, so a server that notified on the busy edge alone would flag
-rows unread for nothing. The transcript is the ground truth, and the
-appendix's [records](#b-the-records) entry gives the marks a turn leaves
-in it: a `turn_duration` record and at least one assistant record on the
-main chain. So a finish is a fall of `busy` that the transcript confirms
-with a turn it has not confirmed before, which is also what makes the
-once-per-turn property hold through repaints, resizes and scrolls. Two
-timing facts shape the confirmation: the CLI writes those records as the
-turn closes, a moment after the screen goes quiet, so a fall of `busy`
-has to wait for the transcript's next landing rather than be judged
-against a stale file (Collins gives it 4 seconds); and only the CLI
-writes to the file, so a file that grew while the fall waited is a turn
-even when its records could not be reread in time. A fall the transcript
-never confirms is dropped, and the person is not told. The finish, once
+not a finish, and the CLI's side says why. It repaints while idle, on a
+resize and on a focus report, and a repaint is a short burst of output,
+so a server that notified on the busy edge alone would flag rows unread
+for nothing. Only the CLI writes the transcript, and it writes a turn's
+records as the turn closes, a moment after the screen goes quiet, so the
+file is the ground truth and a fall of `busy` is judged against what the
+file says after that moment, not before it (Collins allows 4 seconds for
+the records to land). The appendix's [records](#b-the-records) entry
+gives the marks a turn leaves: a turn-duration record, and assistant
+records on the main chain. A turn interrupted from the keyboard leaves no
+duration record, one prompt can leave several, and one stretch of busy
+can cover two of the file's turns, so a reading compares what the file
+holds now with what it held at the last counted finish and never counts
+marks. A file that grew while the fall was being judged is a turn even
+when its new records could not be read in time, since nothing else writes
+it. A fall the file never confirms is dropped, and the person is not told.
+A session with no transcript bound yet (a fresh spawn before its first
+submit) has nothing to judge a finish by and gets none. The finish, once
 confirmed, is what sets `unread` and sends the notification.
 
 ### `model`, `effort`, `permission_mode`
 
 **Meaning.** The model the agent is answering with, the effort level it is
-running at and the permission mode in force, as the CLI reports them in its
-own records. `null` until known. A client shows them (the footer's chips)
-and offers to change them: the `switch` request types the CLI's own
-`/model` or `/effort` command into the box.
+running at and the permission mode in force, as the CLI's records report
+them. `null` until known. A client shows them (the footer's chips) and
+offers to change them: the `switch` request, where the `composer` family
+is served, types the CLI's own `/model` or `/effort` command into the box.
 
 **Required.**
 
@@ -275,16 +331,18 @@ and offers to change them: the `switch` request types the CLI's own
   configuration (the defaults a client needs for a *new* session come from
   `models.defaults`, a `usage` family request, not from here).
 - read from the transcript, so they are the CLI's word and survive a resume.
-- a `switch` request is reflected within one turn: the CLI confirms a
+- a `switch` request (where served) is reflected within one turn: the CLI confirms a
   `/model` or `/effort` it accepted with a line of its own (the appendix's
   [switches](#i-model-and-effort) entry), and a server that reads the
   confirmation reports the change then; one that does not reads the next
   reply's model and effort instead, within the turn after the switch.
 - a switch the CLI refused changes nothing.
-- the strings are the CLI's own: a model id as the record carries it
-  (`claude-opus-5-5`), an effort level as the CLI names it (`high`), a
-  permission mode as the CLI names it (`auto`, `plan`, …). A client does
-  not match them against a list of its own.
+- the strings are as the CLI writes them: a model id as the record
+  carries it (`claude-opus-5-5`), or, between a `/model` command and the
+  next reply, the name the command was given (an alias such as `opus`);
+  an effort level as the CLI names it (`high`); a permission mode as the
+  CLI names it (`auto`, `plan`, …). A client checks them against no list
+  of its own.
 
 **What a reading contends with** (informative). The three values are in
 the records the appendix's [records](#b-the-records) entry names: the
@@ -292,9 +350,9 @@ model and the effort on an assistant record (`message.model`, and the
 record's own `effort`), the permission mode on a typed prompt's record
 (`permissionMode`) and on the standalone `permission-mode` records the
 CLI writes whenever it saves its state (with each request and reply, and
-as it exits); the latest of each in the file is the current one, since
-the CLI writes them over and over, and a standalone record carries no
-timestamp, so latest means last in the file. A mode cycled at the
+as it exits); the current one is the latest of each, since the CLI
+writes them over and over, and a standalone record carries no timestamp,
+so latest means last in file order. A mode cycled at the
 keyboard between prompts reaches the file at the CLI's next save, which
 is the next prompt's at the latest, so a reading that takes the later of
 the two records is right from then on. Three things trip a
@@ -306,9 +364,10 @@ the next reply. For the within-one-turn property the appendix's
 [switches](#i-model-and-effort) entry gives the two records a local
 command leaves: the confirmation line names the effort level, so an
 effort picked in the CLI's own menu is readable from it too, while the
-model is named only in the command's argument, so a bare `/model` picked
-from the menu is known at the next reply. The tail is where all of this
-is, so a reading needs only the end of the file on each change.
+model is named only in the command's argument, so a `/model` chosen from
+the CLI's own menu is known only when the next reply names it. The tail is
+where all of this is, so a reading needs only the end of the file on each
+change.
 
 ### `agent_cwd`, `agent_running`, `running_command`, `pid`
 
@@ -335,8 +394,7 @@ enters a worktree, and is what a client's footer and editor follow.
   A server must not report it `true` for a pty whose agent has exited and
   left only the shell.
 - `agent_cwd` is an absolute path on the server's machine, refreshed often
-  enough that a client polling every 2 seconds sees a worktree change
-  within a few seconds.
+  enough that a client hears of a worktree change within a few seconds.
 - `agent_running` is re-read at least every 2 seconds while the pty
   lives, so that a wrong reading stands for at most one period; and the
   value a snapshot carries is the value the events last carried (the
@@ -351,21 +409,23 @@ wrapper that starts it, such as a sandbox launcher, names it too), so
 the agent is found by descent from the pty's child and by name. The CLI
 changes its own directory when it enters a worktree, while the shell's
 stays put, so `agent_cwd` is the agent process's directory and not the
-pty's; and the CLI's own children (its MCP servers) may name `claude` as
-well, so the deepest such process is not necessarily the agent: Collins
-takes the deepest one's directory, which is the agent's in practice,
-since its children start where it is. Whether a command runs is readable
-from the terminal itself: the pty's foreground process group is the
-shell's own while nothing runs, so `running_command` needs no process
-walk. Collins polls every 2 seconds, which is what the refresh property
-asks, and reports a change on the next `session` event.
+pty's; and a wrapper may stand above the agent in its process group, with the agent
+as its child (`claude attach`, the daemon's `claude bg-pty-host`), the
+child being what changes directory, so the agent is the deepest process
+named `claude`, not the first. Whether a command runs is readable from the
+terminal itself: while nothing runs, the terminal's foreground group is
+the shell itself, so `running_command` needs no process walk. Collins
+polls every 2 seconds, which is what the refresh property asks, and
+reports a change on the next `session` event.
 
 The process table can be misread for an instant, which is why the last
-two properties exist. A process that execs on its way up shows an empty
-command line while the new image loads: measured at about 0.3 ms and
-never over 1 ms, but a reading that lands in that window sees no agent
-at all, and a zombie shows the same empty line, so the command line
-alone cannot tell the two apart. The re-read bounds the damage to one
+two properties exist. Between the moment a process replaces its program
+and the moment the new program's arguments are in place, its command line
+reads as empty: the gap was measured at about 0.3 ms, never over 1 ms,
+across three hundred launches, and a reading taken inside it finds no
+process named `claude` on the pty. A finished process not yet reaped
+reads the same way, so the command line alone does not tell a starting
+agent from a dead one. The re-read bounds the damage to one
 period. The one-series property is what makes the bound hold for a
 client that attaches: Collins once filled an attach's snapshot with a
 fresh read of the process facts while its change detection kept its own
@@ -384,9 +444,10 @@ until the server has found the transcript the CLI started writing (the
 **resolver**), and from then on name it; a `resumed` session has both from
 the spawn. `landed` says the server has just read the transcript and the
 facts read from it are fresh; it comes with every read, so expect it often,
-even from an idle session. `reset` says the server started over on the
-transcript (the file was replaced, truncated or moved) and a client drops
-what it derived from the old one.
+even from an idle session. `reset` says the server has just pointed the
+session at a transcript (the first bind of a fresh spawn, or a new file
+in place of the old) and a client drops what it derived from any earlier
+one. A move is not a reset: the path changes and the derived facts stand.
 
 **Required.**
 
@@ -394,40 +455,43 @@ what it derived from the old one.
   transcript's own `sessionId` field is not consulted (the appendix's
   [files](#a-the-transcript-directory-and-its-files) entry says why).
 - for a fresh spawn, bound within 10 seconds of the CLI writing the
-  transcript's first record, while a client is attached. A server may slow
+  transcript's first record, with a client attached. A server may slow
   or stop the search while no client is attached, and a client re-arms it
   with `resolver.arm` when it shows the tab again; a server with no such
   search answers `resolver.arm` `ok` and ignores it.
 - never bound to a transcript another live pty of the server's already
-  holds, nor to one that existed before the spawn (a directory often holds
-  older sessions).
+  holds, nor, for a new session, to one that existed before the spawn (a
+  directory often holds older sessions); a `continue_recent` spawn binds
+  the directory's latest existing transcript, which is its purpose.
 - once bound, the `item` for that id appears in the list (a Level 1
   server scans the transcript directory, or at least the one it just
   bound), and the pty table's row names the session.
 - `transcript_path` follows the file if the CLI moves it (Claude Code
   moves a transcript into the worktree's directory when a session enters
-  one); a move sends the new path with `reset`.
+  one); a move sends the new path and no `reset`, and a file truncated in
+  place is re-read, its facts sent as ordinary changes.
 
 **What a reading contends with** (informative). The CLI mints the id and
 writes the file only after the first submit (the appendix's
 [files](#a-the-transcript-directory-and-its-files) entry), so no server
 knows it at spawn; what it knows is the directory, from the working
 directory and the encoding rule, and that is where the file will appear.
-The directory usually holds older sessions, so a file that was there
-before the spawn is never the new one, and two fresh spawns in one
-directory would claim the same file, so a file another live pty is bound
-to is excluded as well (the required properties say both). A `claude -w`
-launch moves the session into the worktree's own directory, and a fast
-`-w` writes the transcript within a second of making the worktree, so in
-that directory "was there before" has to be judged by the file's age
-against the launch, not by its presence. Polling at 1.5 seconds meets the
-10-second bound with margin; Collins stops after 120 rounds when no
-client is attached, which is why `resolver.arm` exists, and a submit
-re-arms it since a submit is what makes the file appear. A pty a server
+That directory usually holds older sessions, and two fresh spawns in one
+directory would claim the same file: the two exclusions in the required
+properties exist for those two facts. A `claude -w` launch moves the
+session into the worktree's own directory, and the file can be there
+within a second of the worktree's creation, so in that directory a file's
+age against the launch, not its presence at spawn, says whether it is
+this session's. A `--continue` launch is the exception the properties
+carve out: its file is the directory's newest existing one. The 10-second
+bound leaves a poll of a second or two ample margin. A search costs a
+directory listing per round, which is why a server may rest it while no
+client is attached and `resolver.arm` exists; and a submit is what makes
+the file appear, so a submit is a reason to search again. A pty a server
 adopts after its own restart with no id recorded has only time to go on:
 a transcript whose first record postdates the child's start is its own.
-Once bound, the file is watched (a monitor and a poll, since a monitor
-alone misses writes on some filesystems) and every read is a `landed`.
+Once bound, the file is watched and every read is a `landed`; a monitor
+alone misses writes on some filesystems, so a poll backs it.
 
 ### `cwd`, `handle`, `pty`
 
@@ -442,7 +506,7 @@ one does not exist on the server's machine.
 
 An `item` is one row of the session list: a session the server found on
 disk, with what a client needs to draw it. The snapshot sends one per
-session; after that an `item` carries only the fields that moved, and
+session; after that an `item` carries only the fields that changed, and
 `removed` set `true` when the row goes away (the transcript was deleted,
 or the session was forgotten). The list's order and grouping is the `rows`
 event's.
@@ -451,11 +515,12 @@ event's.
 where the session began, read from the transcript; `resume_cwd` is where a
 resume should start, the last directory the transcript records, which
 differs from `cwd` for a session that entered a worktree. `project` names
-the group the row sits in, the project's root directory (a worktree's row
-sits under its repository). `display_name` is the name to show: a person's
-own name for the row if they gave one, else the CLI's title, else a title
-the server made from the first prompt. `cli_title` is the CLI's own title
-as its records carry it. `subtitle` is a one-line note under the name (in
+the group the row sits in: the project directory's name, its last path
+component (a worktree's row sits under its repository's). `display_name`
+is the name to show: a name the person gave the row if they gave one, else
+the title the CLI gave, else a title the server made from the first
+prompt, else the preview, else the head of the id. `cli_title` is the
+CLI's title as its records carry it. `subtitle` is a one-line note under the name (in
 Collins, how long ago the session was active). `preview` is the first
 prompt's text, cut short. `mtime`, `created` and `size` describe the
 transcript: its modification time, when the session began and its size in
@@ -470,21 +535,22 @@ with `store.favorite`.
 
 **Required.**
 
-- `path` is always sent: a client builds no row without it.
+- `path` is in the first `item` for a session: a client builds no row
+  without it, and the `item`s that follow carry only what changed.
 - `status` and `unread` record something a person did in a client, and
-  a client writes them with `store.flags`: `status` is the client's word
-  (`open` while a tab shows the session, `attention`, `""`; the
+  a client writes them with `store.flags`: `status` is what the client
+  says (`open` while a tab shows the session, `attention`, `""`; the
   `background` family adds `background`), stored in memory and echoed back
   to every client; `unread` is set `true` by the server on a counted
   finish and cleared by a client's `unread: false` (a client may set it
-  `true` too). `busy`, `backgrounding` and `can_background` from a client
-  are refused: those are the server's own verdicts.
+  `true` too). `busy`, `backgrounding` and `can_background` are refused
+  when a client sends them: those are the server's own verdicts.
 - `busy` on a row is `busy` of the session that stands for it (or of the
-  pty's handle while the session has no row yet), and follows the same
-  bounds.
-- `running` is `true` while the session has a live agent pty whose
-  `running_command` is `true`, and `false` once the CLI has exited, even
-  while the shell lives on.
+  pty's handle while no row stands for the session yet), and follows the
+  same bounds.
+- `running` is `true` while a live agent pty of the server's runs the
+  session and its `running_command` is `true`, and `false` after the CLI
+  exits, even while the shell lives on.
 - a row for an archived session is not in the snapshot and is not sent
   until a client asks for the archived rows (`store.page-archived`) or
   looks a session up (`store.lookup`), both Level 2; archiving a listed
@@ -499,8 +565,9 @@ many megabytes, and a list needs only what the appendix's
 records, and the title records, the interruption marker and the last
 `cwd` are the latest of their kind, so a bounded read of each end (Collins
 reads a small prefix and the last 64 KiB) builds the row without parsing
-the file. The CLI writes a stub file for a session that never got a
-prompt, which is no row. The person's names, favorites, archives and
+the file. A launch can leave a file of metadata records and no prompt
+(the appendix's [files](#a-the-transcript-directory-and-its-files) entry),
+which is no row. The person's names, favorites, archives and
 order are the server's own state, not the transcript's; `busy` and
 `unread` are the session's; `running` is the pty's. The directory is
 watched, so a row appears when the CLI writes the file, and a client can
@@ -512,15 +579,15 @@ The required properties above, gathered for a test to tick off:
 
 | Fact | Property |
 | --- | --- |
-| `takes_prompt` | false with no agent; never true while the box holds text; read from the server's screen model |
-| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end; changes at most once a second |
-| `finished` | once per turn, after `busy` fell, with `item.unread` unless the row was looked at; `notify {kind: "finished"}` at Level 2 |
+| `takes_prompt` | false unless `agent_running`; never true while the box holds text; read from the server's screen model; re-read when `agent_running` flips |
+| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end and of the CLI leaving the pty; a fall reported only once it has stood for a second |
+| `finished` | once per confirmed turn of a bound session (a fall of `busy` before the bind), after `busy` fell, with `item.unread` on every row bar a busy chain, a backgrounding row and status `background`; `notify {kind: "finished"}` at Level 2 |
 | `model`, `effort`, `permission_mode` | null until the transcript says; a `switch` reflected within one turn |
-| every fact | an attach's snapshot and the events are one series: the snapshot carries what the events last carried |
+| every fact | the snapshot and the events form a single series: the snapshot carries what the events last carried |
 | `agent_cwd`, `agent_running`, `running_command`, `pid` | by the platform's means; null or absent when unreadable; `running_command` false once the agent has exited; `agent_running` re-read at least every 2 s |
-| `session`, `transcript_path` | the file-name stem; bound within 10 s of the first record while a client is attached; never another live pty's file |
+| `session`, `transcript_path` | the file-name stem; bound within 10 s of the first record with a client attached; never another live pty's file |
 | `landed`, `reset` | one-shots, `true` only |
-| `item` | `path` always; `status` and `unread` the client's; `running` is a live pty's `running_command`; archived rows on request |
+| `item` | `path` in the first `item`; `status` and `unread` the client's; `running` follows a live pty's `running_command`; archived rows on request |
 
 ## Appendix: Claude Code as observed
 
@@ -535,12 +602,15 @@ the session carries on; a server never crashes on it, never writes anything
 to the CLI's files because of it, and never reports a fact it cannot read as
 if it could.
 
-Each entry is self-contained and names the version it was last confirmed
-on. 2.1.316 is the CLI installed when this page was written (re-checked on
-2026-11-01, headlessly: a real `claude` on a bare pty in a throwaway home,
-with no prompt sent except where an entry says so); 2.1.288 is the version
-the recorded terminal streams in Collins' test fixtures were made with. An
-entry can be removed without disturbing the others.
+Each entry stands on its own, refers to no other entry, and names the
+version it was last confirmed on; the body above links entries and names
+the CLI's glyphs and messages only by linking one, so an entry can be
+removed without disturbing the rest. 2.1.316 is the CLI installed when
+this page was written (re-checked on 2026-11-01, headlessly: a real
+`claude` on a bare pty in a throwaway home, with three short prompts sent
+in all, where an entry says so); 2.1.288 is the version the recorded
+terminal streams in Collins' test fixtures were made with; an earlier
+version is named where a fact was last seen on it.
 
 ### A. The transcript directory and its files
 
@@ -555,7 +625,7 @@ why a session's own directory is read from its transcript rather than from
 the directory's name.
 
 Inside, each session is one file named by a UUID with the suffix `.jsonl`,
-one JSON object per line, appended to as the session goes. The UUID is the
+a JSON object on each line, appended to as the session goes. The UUID is the
 session id: it is what `claude --resume` takes, and every record of the
 file carries it again as `sessionId`. The file-name stem is the id a
 server uses, because the file is the thing that exists before anything
@@ -593,23 +663,28 @@ reads:
 - **`user`** records carry the person's prompts and the tools' results.
   Each has `cwd`, `timestamp`, `uuid`, `parentUuid`, `isSidechain`,
   `gitBranch` and `version` (the CLI's version), and `message.content`,
-  which is a string or a list of parts. A typed prompt's record also
+  a string or else a list of parts. A typed prompt's record also
   carries `permissionMode` (`auto`, `plan`, …), the mode in force when it
   was typed; a tool result's record does not.
 - **`assistant`** records carry a reply, or one block of one. Each has
-  `message.model` (the model id, `claude-opus-5-5`) and a top-level
-  `effort` (`low`, `medium`, `high`, `xhigh`, …). A record the CLI makes
+  `message.model` (the model id, `claude-opus-5-5`) and, at the record's
+  top level, `effort` (`low`, `medium`, `high`, `xhigh`, …). A record the CLI makes
   up locally carries the placeholder model `<synthetic>` and is skipped.
 - **The main chain** is the records with `isSidechain` false; sub-agent
   transcripts (sidechains) live in the same file with `isSidechain` true
   and are ignored for the session's model, effort and finishes.
 - **A turn's end** is recorded as a `system` record whose `subtype` is
-  `turn_duration` (it carries a `durationMs`). Counting them counts turns.
+  `turn_duration` (it carries a `durationMs`). One typed prompt can leave
+  several (a real transcript holds 14 for one prompt) and an interrupted
+  turn leaves none, so they are compared with what was seen before, never
+  counted. A `user` record with `isMeta` true is text the CLI injected on
+  its own (a message from another session, a caveat, a reminder), not a
+  prompt the person typed, though it may carry `permissionMode`.
 - **An interrupted turn** leaves a `user` record whose text begins with
   `[Request interrupted by user` (as a string, or as the text of the first
   part of a list). A transcript whose last conversational record is one of
-  these is in the `interrupted` state until the session moves on.
-- **A local slash command** the CLI ran itself (`/model`, `/effort`,
+  these is in the `interrupted` state until the next conversational record.
+- **A local slash command**, one the CLI handled itself (`/model`, `/effort`,
   `/login`, …) is two `user` records in a row. The first's text is
   `<command-name>`, the command, `</command-name>`, then
   `<command-message>…</command-message>` and
@@ -619,11 +694,11 @@ reads:
 - **Titles and names.** An `ai-title` record (`aiTitle`) holds the title
   the CLI generated; a `custom-title` record holds one the person set; an
   `agent-name` record holds the name a background agent was given. The
-  last of any of them wins. (`custom-title` and `agent-name` were last seen
-  in a transcript on 2.1.2xx; the 2.1.316 program still carries both
-  record names.)
-- **`worktree-state`** records (`worktreeSession`) say which worktree a
-  session lived in; **`pr-link`** records (`prNumber`, `prRepository`,
+  last of any of them wins. (No transcript on hand, and they span 2.1.285
+  to 2.1.316, holds a `custom-title` or an `agent-name` record; the
+  2.1.316 program carries both record names.)
+- **`worktree-state`** records (`worktreeSession`) name the worktree a
+  session ran in; **`pr-link`** records (`prNumber`, `prRepository`,
   `prUrl`) name a pull request the session opened or was pointed at;
   a **`relocated`** record (`relocatedCwd`) notes a directory move. None of
   these is needed for the Level 1 facts; Collins reads them for its own
@@ -640,16 +715,20 @@ recorded streams).*
 At rest the input box is three rows on the screen: a full-width rule of `─` (U+2500),
 a row that opens with `❯` (U+276F) followed by a **no-break space**
 (U+00A0), and another full-width rule. The cursor rests in the third
-column of the prompt row, right after the no-break space. The CLI's other
-prompts and menus use `❯` with an ordinary space, which is what tells the
-input box from them.
+column of the prompt row, right after the no-break space. Menus and
+permission prompts use the same `❯` followed by an ordinary space, which
+is what tells the input box from them.
 
 While the box is empty the CLI draws a hint in the rest of the prompt row,
-rendered **dim** (SGR 2): one of several sentences, on 2.1.316
-`Try "edit <filepath> to..."` or `Try "fix typecheck errors"`, every one of
-them opening with `Try "`. The hint is drawn in pieces with cursor movement between
-words, so a server reads it from its screen model, not from the byte
-stream.
+rendered **dim** (SGR 2). It is of two kinds, alike only in the dim
+rendering: at startup, one of several fixed sentences, on 2.1.316
+`Try "edit <filepath> to..."` or `Try "fix typecheck errors"`, each
+opening with `Try "`; and, on a session at rest, a suggestion the CLI
+writes for that session in words of its own (`promptSuggestionEnabled`
+in `settings.json` turns that kind off when `false`). The 2.1.288
+recordings show the startup kind only. Either is drawn in pieces with
+cursor movement between words, so a server reads it from its screen
+model, not from the byte stream.
 
 The box is `columns − 4` cells wide: two for the prompt mark and the space,
 two of right margin. Text that does not fit wraps onto rows that open with
@@ -670,27 +749,28 @@ and hints; that row is not part of the box.
 
 *Confirmed on 2.1.316.*
 
-- **Keys.** Down moves to the next row of the box and is a no-op on the
-  last; Ctrl+E moves to the end of the row; Backspace deletes one character,
-  and at the box's start is a no-op. So whatever the box holds, one write
-  of Down for each row below the cursor, then Ctrl+E, then as many
-  Backspaces as there are characters, empties it. Escape is not used for
-  this: pressed twice it interrupts a running turn.
-- **A carriage return submits**, provided it arrives on its own after the
-  text (a few milliseconds later): a carriage return inside the same chunk
-  as the text is read as part of a paste and becomes a line break.
-- **Pastes.** A bracketed paste (`ESC [ 200 ~` … `ESC [ 201 ~`) of any
-  size is a paste event, and so is a plain chunk of more than 800
-  characters. A paste of **more than 800 characters, or more than two line
-  breaks** (counting `\r\n`, `\r` and `\n` each as one), is not put into
+- **Keys.** Down moves the cursor to the next row of the box and does
+  nothing on the last; Ctrl+E moves it to the row's end and Ctrl+A to the
+  box's start; Backspace deletes the character before the cursor and does
+  nothing at the box's start. A single Escape interrupts a running turn,
+  so it is no key for editing the box.
+- **A carriage return submits**, provided it arrives in a write of its own
+  after the text (Collins waits 250 ms between the two): a carriage return
+  inside the same chunk as the text is read as part of a paste and becomes
+  a line break.
+- **Pastes.** Text wrapped in the bracketed-paste markers (`ESC [ 200 ~`
+  before, `ESC [ 201 ~` after) is a paste event whatever its size, and so
+  is a plain chunk of more than 800 characters. A paste **longer than 800
+  characters, or holding three or more line breaks** (counting `\r\n`, `\r` and `\n` each as one), is not put into
   the box as text: the box shows a stand-in, `[Pasted text #1]`, or
   `[Pasted text #1 +3 lines]` when the paste had line breaks, numbered per
   CLI process; the text is kept by the CLI and sent with the prompt. A
   paste of exactly 800 characters, or of two line breaks, lands as text.
-  (The two-break allowance is the smaller of two and the terminal's rows
-  minus ten, so a terminal under 12 rows folds sooner.) Several bracketed
-  pastes in one write are separate events, each judged alone. One
-  Backspace at the end of a stand-in deletes it whole.
+  (The allowance of two breaks is the lesser of two and the terminal's
+  row count less ten; a terminal of fewer than 12 rows therefore folds at
+  fewer breaks.) Two or more bracketed pastes arriving in one write count
+  as that many events, each judged on its own. A Backspace right after a
+  stand-in removes the whole stand-in.
 - **Typing speed.** Keys written to the pty faster than a few milliseconds
   apart are read as one chunk, and a chunk over the limit above is a paste;
   a server that types on a person's behalf spaces its keys or uses a
@@ -701,9 +781,11 @@ and hints; that row is not part of the box.
 *Confirmed on 2.1.316 (one prompt sent) and 2.1.288 (the recorded streams).*
 
 While the CLI works it animates a spinner at the left edge of the screen,
-below the reply so far and above the box: a glyph from a small set
-(`✢`, `✶`, `✻`, `✽`, `✳`) redrawn several times a second, beside a
-word and the elapsed time. The terminal's title animates with it (OSC 0,
+below the reply so far and above the box: a glyph from a small set that
+varies by version (`✢`, `✶`, `✻`, `✽`, and the plain `·` and `*`, have all
+been seen in it) redrawn several times a second, beside a word and the
+elapsed time. A reading watches the column for change and matches no
+glyph. The terminal's title animates with it (OSC 0,
 alternating `◐` and `◑` ahead of the title's text). Motion in that column
 over a second or so is a sign of work; a still column is not a sign of
 idleness.
@@ -716,16 +798,21 @@ with a 12-second tool run) and 2.1.288 (the recorded streams).*
 The CLI can report its progress to the terminal with the OSC 9;4 sequence
 (`ESC ] 9 ; 4 ; <state> ; <percent> <terminator>`): state 0 clears the
 report, 1 to 4 are the terminal-progress states (1 a definite percentage,
-2 an error, 3 indeterminate, 4 paused). The CLI uses state 3 while it
+2 an error state, 3 indeterminate progress, 4 a pause). The CLI uses state 3 while it
 works and 0 when it stops, and on both versions it writes the percent
 field **empty**: `ESC ] 9 ; 4 ; 3 ; ESC \` and `ESC ] 9 ; 4 ; 0 ; ESC \`,
 so a parser must accept an empty field. Every turn reports 3 once, within
 half a second of the submitting carriage return, and 0 once as the turn
-ends (measured on a turn of one second and one of fifteen); the report is
-also cleared briefly between tool calls and while a permission prompt
-waits, and once at startup. It is the earliest and the most
-reliable sign of a turn's start and end, and the only one that comes from
-the CLI rather than from reading its screen. The setting that turns it off
+ends (measured on 2.1.316 on a turn of one second and one of fifteen),
+and the CLI clears the report once at startup. What it does between the
+two has varied by version: the 2.1.288 recordings hold state 3 straight
+through a permission prompt and two tool calls; on 2.1.261 seven turns
+held it through tool loops and permission prompts, with 0 and 3
+alternating about ten times a second in a turn's first two or three
+seconds; on 2.1.220 a permission prompt cleared it. A reading therefore
+gives a clear a grace rather than ending busy on it. It is the earliest
+and the most reliable sign of a turn's start and end, and the only one
+that comes from the CLI rather than from reading its screen. The setting that turns it off
 is `terminalProgressBarEnabled` in `~/.claude.json` (on by default), so a
 server still needs the other readings for a person who turned it off.
 
@@ -736,29 +823,35 @@ with ST, which is the form a VTE-based terminal parses:
 
 | Variable | Value | Effect |
 | --- | --- | --- |
-| `ConEmuANSI` | `ON` | The CLI emits OSC 9;4 at all. |
+| `ConEmuANSI` | `ON` | Turns the OSC 9;4 reports on. |
 | `TERM_PROGRAM` | `kitty` | The CLI terminates it with ST (`ESC \`) instead of BEL. |
 
-One report is an exception on both versions: the clear the CLI writes as
-it exits ends with BEL even under the two variables, which a server that
-parses only ST-terminated sequences misses harmlessly (the process is
-gone). A server that runs the CLI directly sets them in its environment;
-one that types the command into a shell exports them first. They are the
-[spawn environment](./terminal#the-spawn-environment-normative) of the terminal contract. They fail soft: a release that
-ignores them simply emits nothing, and the busy reading falls back to the
-screen and the process table.
+The clears the CLI writes as it exits are an exception on both versions:
+they end with BEL even under the two variables (the 2.1.288 recording of
+the fullscreen mode ends with two of them around one ST-terminated
+clear). A server that parses only ST-terminated sequences does not see
+them, so a CLI that leaves mid-turn leaves its last report standing, and
+the reading has to end busy from the process table instead (the
+`running_command` bound of `busy`). A server that runs the CLI directly
+sets the two variables in its environment; one that types the command
+into a shell exports them first. They are the
+[spawn environment](./terminal#the-spawn-environment-normative) of the
+terminal contract. A release that ignores them emits no report, and the
+other signs of the busy reading stand alone, which is this appendix's
+rule for every entry.
 
 Two side effects of the `kitty` name, both harmless to a VTE-based client,
 which ignores them: the CLI terminates its title sequences with ST as well,
 and it sends its desktop notifications as kitty's OSC 99 (on 2.1.316, "Claude
 is waiting for your input" a minute after a turn ends unattended). The CLI
-also sets the terminal's title (OSC 0 and 2) as it works and rings the bell
+also sets the terminal's title (OSC 0, OSC 2) as it works and rings the bell
 (BEL) when it wants attention; a server forwards all of these to its clients
 unchanged.
 
 ### G. Leaving a session
 
-*Confirmed on 2.1.316 (Ctrl+C Ctrl+C) and 2.1.2xx (`/bg`).*
+*Confirmed on 2.1.316 (the Ctrl+C pair); the `/bg` handoff last observed on
+2.1.226, and the 2.1.316 program still carries the command.*
 
 - **Ctrl+C twice**, within a second or two, exits the CLI cleanly: it
   writes its last records and returns to the shell. A first Ctrl+C
@@ -771,10 +864,11 @@ unchanged.
   first, whose first record carries the same `uuid` as the original's,
   which is how the two are paired (Collins keeps a chain from the old id to
   the new one and shows the pair as one row). The daemon's own id for the
-  agent, the one `claude attach <id>` takes, is read off `claude agents
-  --json` (entry K). The daemon is a separate process tree that no server
-  owns.
-- A session that was started with `-w` asks a question on exit (entry H).
+  agent, the one `claude attach <id>` takes, is in the daemon's listing
+  (`claude agents --json`). The daemon is a separate process tree that no
+  server owns.
+- A session started with `-w` that exits with changes in its worktree
+  asks whether to keep the worktree before the shell returns.
 
 ### H. Worktrees: the exit dialog and the failure line
 
@@ -793,10 +887,11 @@ unchanged.
 - **The failure line.** A `-w` launch that cannot create its worktree
   prints `Error creating worktree:` and the reason to stderr and exits
   with status 1 at once; nothing else is drawn. A server that launched
-  with `-w` watches for that line and may retype the command without the
-  flag.
+  with `-w` watches for that line and may retype the command with the
+  flag removed.
 - The CLI re-enters an existing worktree whenever its directory exists on
-  resume, and recycles an unchanged worktree for a new `-w` session.
+  resume, and hands a new `-w` session an unchanged worktree left by an
+  earlier one rather than making another.
 
 ### I. `/model` and `/effort`
 
@@ -804,18 +899,22 @@ unchanged.
 
 Typing `/model <id>` or `/effort <level>` into the box and submitting it
 changes the session's model or effort without a reply from the model. Each
-leaves the two user records of entry B: the command, then its output. The
-output line for the model is
-`Set model to <display name> and saved as your default for new sessions`
-(the display name, such as `Opus 5.5`, not the id; the id is read from the
-command's argument, or from the next reply's record), and for the effort
-`Set effort level to <level>`, possibly followed by more. A refused
-switch prints something else and changes nothing.
+leaves two `user` records: the command, then its output. The output for
+the model opens `Set model to <display name>` (the display name, such as
+`Opus 5.5`, not the id, so the id is read from the command's argument
+until the next reply's record names it) and continues either
+`and saved as your default for new sessions` or `(this session only)`; a
+`/model` that changes nothing opens `Kept model as`. The output for the
+effort opens `Set effort level to <level>` and continues
+`(saved as your default for new sessions)` or `(this session only)`,
+possibly with more after it. A switch the CLI did not accept prints
+another message and leaves both unchanged.
 
-Both commands also **write the person's defaults** into
-`~/.claude/settings.json` (entry M). A server that posts them does so on a
-person's request, never on its own, since it is changing their
-configuration.
+In the saved form the command also **writes the person's defaults** into
+`~/.claude/settings.json` (the top-level `model`; the effort under
+`modelSettings`); which form a session gets is the CLI's choice. A server
+that posts the commands does so on a person's request, never on its own,
+since it may be changing their configuration.
 
 ### J. The command line
 
@@ -852,19 +951,19 @@ Each element has `kind`, `sessionId`, `cwd`, `pid`, `startedAt` (epoch
 milliseconds), `name` and `status` (`idle` or `busy`). On 2.1.316 the
 array lists interactive sessions too (`kind: "interactive"`); a background
 agent's element (`kind: "background"`) also carries an `id`, which is what
-`attach` takes, and a `state` (last seen on 2.1.2xx). `--all` includes
-completed ones. The listing is how a server tells a session that has
-become a background agent from one that has not, and the only busy
-reading it has for one, since the
-daemon scrubs its agents' environment and they report no progress (entry
-F).
+`attach` takes (an element on earlier versions carried a `state` too, not
+seen on 2.1.316). `--all` includes completed ones. The listing is how a
+server tells a session that has become a background agent from one that
+has not, and, apart from the agent's spinner, the only busy reading a
+server has for one, since the daemon scrubs its agents' environment and
+they report no progress.
 
 ### L. Folder trust
 
 *Confirmed on 2.1.316.*
 
-The CLI asks "Do you trust the files in this folder?" before its first
-interactive session in a directory, and records the answer in
+The CLI asks `Quick safety check: Is this a project you created or one you trust?`
+before its first interactive session in a directory, and records the answer in
 `~/.claude.json` under `projects`, keyed by the directory's absolute path,
 as `hasTrustDialogAccepted: true`. The answer is inherited by
 subdirectories: a session in a directory with a trusted ancestor is not

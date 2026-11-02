@@ -299,7 +299,7 @@ def test_the_stream_fixtures_are_mit_as_a_directory():
 # The modules a new MIT page may name (spec §3.5): the two that are MIT
 # themselves. Anything else would tie the page to the Collins tree.
 NEW_PAGE_MODULES = {"collins/api/protocol.py", "collins/sshremote.py"}
-NEW_PAGES = (("docs", "api", "sessions.md"),)
+NEW_PAGES = (("docs", "api", "terminal.md"), ("docs", "api", "sessions.md"))
 
 
 def test_the_new_pages_name_no_collins_module_but_the_mit_two():

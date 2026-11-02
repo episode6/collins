@@ -100,8 +100,9 @@ downloads of each version, see the
 - **The session facts have a contract.** A new MIT page,
   [Session facts](/api/sessions), says what each field of the `session`
   event and of a list row means, what every server must guarantee of it
-  (`busy` within 3 s of a prompt and off within 10 s of a turn's end, one
-  `finished` per turn, a session bound to its transcript within 10 s, an
+  (`busy` within 3 s of a prompt and off within 10 s of a turn's end or of
+  the CLI leaving, never a fall under a second, one `finished` per
+  confirmed turn, a session bound to its transcript within 10 s, an
   attach's snapshot and the events one series, …)
   and, informatively, what a reading of it contends with, with the numbers
   the Collins service measured. Its appendix,
