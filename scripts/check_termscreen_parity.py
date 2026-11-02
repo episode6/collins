@@ -27,8 +27,14 @@ multiple of eight columns are compared with VTE's.
 
 `--write` (re)writes the goldens from this VTE instead of comparing: for a
 fixture newly recorded (see the testing skill's recording rule), or after a
-VTE upgrade whose change was judged right. `--only NAME` runs the scenarios
-whose name contains NAME.
+VTE upgrade whose change was judged right. It also writes the conformance
+kit's screens data, `conformance/data/screens/<scenario>.json` (the
+scenario's bytes with the capture text and cursor VTE showed, what the kit
+holds a server's `pty.capture` and cursor report to; server-side spec D8),
+and copies the recorded streams with their marks and goldens into
+`conformance/data/streams/` for the kit's `--replay`, so the kit's data and
+the goldens never drift (`tests/test_termscreen.py` checks they agree).
+`--only NAME` runs the scenarios whose name contains NAME.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 VTE's `get_cursor_position()` counts rows from the top of its buffer, not
@@ -272,6 +278,55 @@ def model_of(data: bytes) -> termscreen.Screen:
     return screen
 
 
+CONFORMANCE_DATA = os.path.join(ROOT, "conformance", "data")
+
+
+def write_conformance_data(written: dict, only: str) -> None:
+    """The kit's copy of the measurements (server-side spec 3.6, D8, D9):
+    one `screens/<scenario>.json` per synthetic scenario, holding the bytes
+    (base64), the capture text and the cursor VTE showed, and whether the
+    scenario ends on the alternate screen (whose capture the goldens do
+    not compare); and the recorded streams copied beside them."""
+    import base64
+    import shutil
+
+    screens_dir = os.path.join(CONFORMANCE_DATA, "screens")
+    streams_dir = os.path.join(CONFORMANCE_DATA, "streams")
+    os.makedirs(screens_dir, exist_ok=True)
+    os.makedirs(streams_dir, exist_ok=True)
+    synthetic = dict(scenarios.synthetic_scenarios())
+    goldens = {}
+    for entries in written.values():
+        goldens.update(entries)
+    count = 0
+    for name, data in synthetic.items():
+        if name not in goldens:
+            continue
+        golden = goldens[name]
+        record = {
+            "scenario": name,
+            "cols": COLS,
+            "rows": ROWS,
+            "stream": base64.b64encode(data).decode("ascii"),
+            "capture": golden["capture"],
+            "cursor": golden["cursor"],
+            "alternate": bool(model_of(data).on_alt),
+        }
+        path = os.path.join(screens_dir, name.replace("@", "__") + ".json")
+        with open(path, "w") as f:
+            json.dump(record, f, ensure_ascii=False, indent=1)
+            f.write("\n")
+        count += 1
+    if not only:
+        for old in os.listdir(screens_dir):
+            if old.endswith(".json") and old[: -len(".json")].replace("__", "@") not in synthetic:
+                os.unlink(os.path.join(screens_dir, old))
+    for session in scenarios.recorded_sessions(directory):
+        for suffix in (".bin", ".marks.json", ".golden.json"):
+            shutil.copyfile(os.path.join(directory, session + suffix), os.path.join(streams_dir, session + suffix))
+    print(f"wrote {count} screens to {os.path.relpath(screens_dir, ROOT)} and the recorded streams to {os.path.relpath(streams_dir, ROOT)}")
+
+
 # What a redraw cannot carry, by measurement (F14), by scenario name: a tab
 # cell that no longer ends on a tab stop comes back as spaces (VTE's text
 # read then shows spaces where the golden shows a tab), and a soft-wrap
@@ -409,6 +464,7 @@ if write:
         existing.update(entries)
         scenarios.dump_goldens(path, existing)
         print(f"wrote {len(entries)} goldens to {os.path.relpath(path, ROOT)}")
+    write_conformance_data(written, only)
 check("at least one scenario ran", ran > 0)
 verdict = "FAIL" if failures else "PASS"
 print(f"{verdict} termscreen parity: {ran} scenarios, {len(failures)} failures", flush=True)

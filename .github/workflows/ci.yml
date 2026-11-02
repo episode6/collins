@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-30. Full change history: git log for this file.
+# fork. Last modified: 2026-11-02. Full change history: git log for this file.
 
 name: CI
 
@@ -34,7 +34,7 @@ jobs:
       # Pinned: an unpinned `pip install ruff` changes the rule set under this
       # job on any given day. Bumping the pin is the deliberate knob.
       - run: pip install --quiet ruff==0.16.4
-      - run: ruff check collins/ tests/
+      - run: ruff check collins/ tests/ conformance/ scripts/run_conformance.py scripts/check_conformance_data.py
 
   test:
     needs: image
@@ -223,6 +223,32 @@ jobs:
           icons="$(python3 -c 'import collins, os; print(os.path.dirname(collins.__file__))')/icons"
           test -f "$icons/hicolor/scalable/actions/tab-close-symbolic.svg"
           test -f "$icons/com.episode6.Collins-panel.svg"
+
+  # The conformance kit (conformance/, MIT) against this checkout's service:
+  # the proof that the kit and the service agree, and the gate that keeps the
+  # published pages (docs/api/) honest when the service changes (server-side
+  # spec §3.6 (6), §3.9). scripts/run_conformance.py stages a scratch tree,
+  # installs the kit's fake claude as the service's `claude`, starts a
+  # keeperless service of the checkout and runs the kit against it; `prs` and
+  # `sandbox` are left out (no gh and no bubblewrap on the runner). The kit's
+  # own unit tests run first. Needs no display: the kit has no GTK, and the
+  # service never did.
+  conformance:
+    needs: image
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m unittest discover -s conformance/tests -t .
+      - run: python3 scripts/run_conformance.py --skip-family prs --skip-family sandbox --replay --json conformance-results.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: conformance-results
+          path: conformance-results.json
+          if-no-files-found: ignore
 
   # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
   # scripts/ship-release.py re-checks the same invariants at ship time.

@@ -1,0 +1,12 @@
+{
+ "scenario": "wide-overwrite",
+ "cols": 120,
+ "rows": 40,
+ "stream": "5pel5pys6KqeDRtbMUNYDQrml6XmnKzoqp4NWQ0K5pel5pys6KqeG1szRBtbMVB8DQrml6XmnKzoqp4bWzNEG1sxWHw=",
+ "capture": " X本語\nY 本語\n日 |\n日 |語",
+ "cursor": [
+  4,
+  3
+ ],
+ "alternate": false
+}

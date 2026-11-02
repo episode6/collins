@@ -1,0 +1,12 @@
+{
+ "scenario": "erase-inside-row",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s0NG0bWzVYG1swbRtbOEN4DQphYhtbNDFtG1szWBtbMG0bWzZDeQ0KG1s0Mm1hYmMbWzFLG1swbRtbMTBHeg==",
+ "capture": "        x\nab      y\n         z",
+ "cursor": [
+  10,
+  2
+ ],
+ "alternate": false
+}

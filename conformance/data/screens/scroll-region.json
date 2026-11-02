@@ -1,0 +1,12 @@
+{
+ "scenario": "scroll-region",
+ "cols": 120,
+ "rows": 40,
+ "stream": "bGluZSAxDQpsaW5lIDINCmxpbmUgMw0KbGluZSA0DQpsaW5lIDUNCmxpbmUgNg0KbGluZSA3DQpsaW5lIDgNCmxpbmUgOQ0KbGluZSAxMA0KbGluZSAxMQ0KG1szOzhyG1s4OzFIaW4NCmluDQppbg0KaW4NChtbMzsxSBtNG011cBtbchtbMTI7MUhlbmQ=",
+ "capture": "line 1\nline 2\nup\n\nline 7\ninne 8\nin\nin\nline 9\nline 10\nline 11\nend",
+ "cursor": [
+  3,
+  11
+ ],
+ "alternate": false
+}

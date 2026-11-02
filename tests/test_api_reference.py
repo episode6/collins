@@ -6,10 +6,11 @@ forgets to regenerate it fails here. The prose half, docs/api/index.md,
 names every error code and capability, and both pages stay free of the
 angle-bracket placeholders that break the VitePress build outside a code
 span. Every MIT-licensed file carries its SPDX tag (the terminal stream
-fixtures' data files, which cannot, are covered by the LICENSE file beside
-them), since the rest of the repository is GPL and a reader of any one of
-them must be able to tell; the list here, docs/api/LICENSE and
-debian/copyright move together. The terminal contract's tables parse in
+fixtures' data files and the conformance kit's, which cannot, are covered
+by the LICENSE file beside them), since the rest of the repository is GPL
+and a reader of any one of them must be able to tell; the list here,
+docs/api/LICENSE, debian/copyright and conformance/LICENSE move together
+(tests/test_conformance_data.py walks the kit's tree file by file). The terminal contract's tables parse in
 the page's own notation, so scripts/check_termstream_answers.py can hold
 every row to VTE. The session-facts page (docs/api/sessions.md) names no
 Collins module but the two MIT ones, so a move of the pages to a shared
@@ -268,11 +269,15 @@ def test_mit_files_carry_their_spdx_tag():
         assert "SPDX-License-Identifier: MIT" in head, path
     assert "MIT License" in _read("docs", "api", "LICENSE")
     license_text = _read("docs", "api", "LICENSE")
-    for name in ("terminal.md", "sessions.md", "tests/fixtures/streams/", "collins/sshremote.py"):
+    for name in ("terminal.md", "sessions.md", "tests/fixtures/streams/", "collins/sshremote.py",
+                 "conformance/"):  # fmt: skip
         assert name in license_text, name
     stanza = _read("debian", "copyright").split("Files: collins/api/protocol.py", 1)[1].split("\n\n", 1)[0]
-    for name in ("docs/api/*", "scripts/gen_api_reference.py", "tests/fixtures/streams/*", "License: Expat"):
+    for name in ("docs/api/*", "scripts/gen_api_reference.py", "tests/fixtures/streams/*", "conformance/*",
+                 "conformance/LICENSE", "License: Expat"):  # fmt: skip
         assert name in stanza, name
+    # The kit's tree is pinned file by file in tests/test_conformance_data.py.
+    assert "MIT License" in _read("conformance", "LICENSE")
 
 
 def test_the_stream_fixtures_are_mit_as_a_directory():
@@ -332,7 +337,8 @@ def test_the_sessions_page_describes_every_core_field():
 def test_no_other_source_file_claims_mit():
     """The MIT grant is exactly the files the spec names: a new module
     under collins/api/ is GPL unless this test and docs/api/LICENSE say
-    otherwise."""
+    otherwise. (conformance/ is MIT as a tree, pinned by
+    tests/test_conformance_data.py, and is not walked here.)"""
     for directory in ("collins", "scripts", "tests"):
         for root, _dirs, files in os.walk(os.path.join(ROOT, directory)):
             for name in files:

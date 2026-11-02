@@ -1,0 +1,12 @@
+{
+ "scenario": "tabs-overwrite",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YQliDRtbM0NYDQpjCWQbWzI7NEgbWzFYDQp4eHh4eHh4eHh4DQl5DQplCWYNG1sxQxtbMVANCmcJaA0bW0sNChtbNDRtaQlqG1swbQ0KawkICGw=",
+ "capture": "a  X\tb\nc   \td\nxxxxxxxxyx\ne\tf\n\ni\tj\nk     l\t",
+ "cursor": [
+  7,
+  6
+ ],
+ "alternate": false
+}

@@ -20,8 +20,8 @@ This specification, the [message reference](./messages), [the terminal
 contract](./terminal), the [session facts](./sessions) page, the script that
 generates the reference, the Python module that defines the protocol
 (`collins/api/protocol.py`), the one that connects over ssh
-(`collins/sshremote.py`) and the terminal stream fixtures the contract is
-measured against are licensed [MIT](#license). Collins itself, the
+(`collins/sshremote.py`), the terminal stream fixtures the contract is
+measured against and the conformance kit are licensed [MIT](#license). Collins itself, the
 service included, stays GPL-3.0-or-later. A program that talks to
 `collins-service` only through this API is, in the view of Collins'
 authors, an independent work: see [Interoperability](#interoperability).
@@ -33,10 +33,9 @@ release. Until it has, a message's fields can change without the protocol
 number moving. Read the version and the capabilities off the `hello` reply
 and treat anything unexpected as absent, as the Collins client does. A second
 implementation of the service changes nothing about this: nothing is stable
-yet, and both projects are still testing. These pages, the reference and,
-once it is published, the conformance kit are kept current with the service
-by the CI gates, so what they say is what `main` does on the day (the
-[session facts](./sessions) page, until the kit, by review alone).
+yet, and both projects are still testing. These pages, the reference and the
+conformance kit are kept current with the service by the CI gates, so what
+they say is what `main` does on the day.
 :::
 
 ## Finding the service
@@ -717,9 +716,24 @@ and what every server must guarantee of each fact, is the
 [session facts](./sessions) page, with an appendix of the Claude Code
 behaviour the reading rides on.
 
-**What is still to be written.** These pages specify the messages, the
-terminal and the session facts, and one thing a server needs is not published
-yet. A conformance kit will test a server against these pages.
+**The conformance kit.** A server is tested against these pages with the
+conformance kit, `conformance/` in the Collins repository
+([its README](https://github.com/episode6/collins/tree/main/conformance)): a
+client, MIT like these pages and standard-library Python, that says hello,
+reads the families you claim, and runs the checks of every level and claimed
+family, from the wire to the session facts, against a fake Claude Code it
+points your server at. Run it on the server's machine:
+
+```bash
+python3 -m conformance <socket path>      # every level and every claimed family
+python3 -m conformance <socket path> --level 1 --skip-family prs
+```
+
+Each check passes, fails with what it saw against what these pages say, or is
+skipped with the reason, and the exit status is 1 when any failed. Collins runs
+it against its own service in CI, so a failure against `collins-service` on
+`main` is a finding about the service or about these pages. The kit's README
+says what each level proves and does not.
 
 **Where this lives.** This documentation is kept in the Collins repository for
 now, and may move to a repository both projects share once it settles. Every
@@ -752,10 +766,11 @@ the session facts page and its appendix on Claude Code
 (`docs/api/sessions.md`), the reference's generator
 (`scripts/gen_api_reference.py`), the protocol module
 (`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`)
-and every file of the terminal stream fixtures (`tests/fixtures/streams/`:
+every file of the terminal stream fixtures (`tests/fixtures/streams/`:
 the synthetic scenarios and their golden, the recorded streams of a Claude
 Code session with their marks and goldens, measurements the terminal
-contract rests on) are:
+contract rests on) and every file of the conformance kit (`conformance/`)
+are:
 
 ```
 MIT License

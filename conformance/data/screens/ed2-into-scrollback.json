@@ -1,0 +1,12 @@
+{
+ "scenario": "ed2-into-scrollback",
+ "cols": 120,
+ "rows": 40,
+ "stream": "a2VwdCAxDQprZXB0IDINCmtlcHQgMw0Ka2VwdCA0DQprZXB0IDUNChtbMkphZnRlcg==",
+ "capture": "kept 1\nkept 2\nkept 3\nkept 4\nkept 5\n\n\n\n\n\nafter",
+ "cursor": [
+  5,
+  5
+ ],
+ "alternate": false
+}

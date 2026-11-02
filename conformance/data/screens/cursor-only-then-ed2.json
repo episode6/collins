@@ -1,0 +1,12 @@
+{
+ "scenario": "cursor-only-then-ed2",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YRtbMjA7MUgbWzJK",
+ "capture": "a",
+ "cursor": [
+  0,
+  19
+ ],
+ "alternate": false
+}

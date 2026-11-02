@@ -1,0 +1,12 @@
+{
+ "scenario": "alt-round-trip-then-ed2",
+ "cols": 120,
+ "rows": 40,
+ "stream": "bTANCm0xG1s/MTA0OWhhMA0KYTENCmEyG1s/MTA0OWwbWz8xMDQ5aBtbMko=",
+ "capture": "",
+ "cursor": [
+  2,
+  1
+ ],
+ "alternate": true
+}

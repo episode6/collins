@@ -1,0 +1,12 @@
+{
+ "scenario": "insert-delete",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YWJjZGVmZ2gNG1syQxtbM0ANCmFiY2RlZmdoDRtbMkMbWzNQDQobWzRoYWJjDVhZG1s0bA0Kd3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3DRtbMkA=",
+ "capture": "ab   cdefgh\nabfgh\nXYabc\n  wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+ "cursor": [
+  0,
+  3
+ ],
+ "alternate": false
+}

@@ -1,0 +1,12 @@
+{
+ "scenario": "alternate",
+ "cols": 120,
+ "rows": 40,
+ "stream": "bWFpbiB0ZXh0DQpzZWNvbmQbWz8xMDQ5aGFsdCBzY3JlZW4bWzI7Mkhtb3JlG1s/MTA0OWxiYWNr",
+ "capture": "main text\nsecondback",
+ "cursor": [
+  10,
+  1
+ ],
+ "alternate": false
+}

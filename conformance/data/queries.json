@@ -1,0 +1,50 @@
+{
+ "about": "The three tables of docs/api/terminal.md (The filtered stream) in the page's own notation, for the kit's terminal checks; tests/test_conformance_data.py holds them to the page. A placeholder in angle brackets is explained by the page's row.",
+ "vte": "0.84.0",
+ "answered": [
+  {"query": "CSI c", "reply": "CSI ?61;1;21;22;28c", "name": "DA1"},
+  {"query": "CSI 0 c", "reply": "CSI ?61;1;21;22;28c", "name": "DA1 with an explicit 0"},
+  {"query": "CSI > c", "reply": "CSI >61;<vte>;1c", "name": "DA2"},
+  {"query": "CSI > 0 c", "reply": "CSI >61;<vte>;1c", "name": "DA2 with an explicit 0"},
+  {"query": "CSI = c", "reply": "DCS !|7E565445 ST", "name": "DA3"},
+  {"query": "CSI = 0 c", "reply": "DCS !|7E565445 ST", "name": "DA3 with an explicit 0"},
+  {"query": "CSI > q", "reply": "DCS >|VTE(<vte>) ST", "name": "XTVERSION"},
+  {"query": "CSI > 0 q", "reply": "DCS >|VTE(<vte>) ST", "name": "XTVERSION with an explicit 0"},
+  {"query": "CSI 5 n", "reply": "CSI 0n", "name": "DSR 5"},
+  {"query": "CSI 6 n", "reply": "CSI <row>;<col>R", "name": "CPR"},
+  {"query": "CSI ? 6 n", "reply": "CSI ?<row>;<col>;1R", "name": "DECXCPR"},
+  {"query": "CSI ? 996 n", "reply": "CSI ?997;<scheme>n", "name": "the colour-scheme report"},
+  {"query": "CSI ? <n> $ p", "reply": "CSI ?<n>;<s>$y", "name": "DECRQM, a DEC private mode"},
+  {"query": "CSI <n> $ p", "reply": "CSI <n>;<s>$y", "name": "DECRQM, an ANSI mode"},
+  {"query": "CSI 18 t", "reply": "CSI 8;<rows>;<cols>t", "name": "the grid in cells"},
+  {"query": "CSI 14 t", "reply": "CSI 4;<height>;<width>t", "name": "the grid in pixels"},
+  {"query": "CSI 21 t", "reply": "OSC l ST", "name": "the title report"},
+  {"query": "OSC 10 ; ? ST", "reply": "OSC 10;rgb:<rrrr>/<gggg>/<bbbb> ST", "name": "the foreground"},
+  {"query": "OSC 11 ; ? ST", "reply": "OSC 11;rgb:<rrrr>/<gggg>/<bbbb> ST", "name": "the background"},
+  {"query": "OSC 12 ; ? ST", "reply": "OSC 12;rgb:<rrrr>/<gggg>/<bbbb> ST", "name": "the cursor colour"},
+  {"query": "OSC 4 ; <i> ; ? ST", "reply": "OSC 4;<i>;rgb:<rrrr>/<gggg>/<bbbb> ST", "name": "a palette entry"},
+  {"query": "DCS +q544e ST", "reply": "DCS 1+r544e=787465726D2D323536636F6C6F72 ST", "name": "XTGETTCAP for TN"},
+  {"query": "DCS $qm ST", "reply": "DCS 1$r<sgr>m ST", "name": "DECRQSS for the SGR state"}
+ ],
+ "silent": [
+  {"query": "CSI ? u", "name": "the kitty keyboard protocol's flags query"},
+  {"query": "CSI 16 t", "name": "the cell size in pixels"},
+  {"query": "CSI ? 4 m", "name": "XTQMODKEYS"},
+  {"query": "ENQ", "name": "the answerback request"},
+  {"query": "APC Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA ST", "name": "a kitty graphics query"}
+ ],
+ "passed": [
+  {"query": "CSI 1 c", "name": "DA1 with a parameter other than 0"},
+  {"query": "CSI ? 15 n", "name": "a DSR the table does not list"},
+  {"query": "CSI 11 t", "name": "a window operation the table does not list"},
+  {"query": "CSI ? $ p", "name": "DECRQM with an empty parameter"},
+  {"query": "CSI ? 65536 $ p", "name": "DECRQM with a mode over 65535"},
+  {"query": "OSC 17 ; ? ST", "name": "a colour the table does not list"},
+  {"query": "OSC 4 ; 256 ; ? ST", "name": "a palette index over 255"},
+  {"query": "OSC 10 ; #ff0000 ST OSC 10 ; ? ST", "name": "a colour the program set, then queried"},
+  {"query": "DCS $qr ST", "name": "DECRQSS for anything but m"},
+  {"query": "DCS +q436f ST", "name": "XTGETTCAP for a name other than TN"},
+  {"query": "OSC 9 ; 4 ; 1 ; 50 ST", "name": "progress, forwarded and read"},
+  {"query": "OSC 9 ; 4 ; 3 ; ST", "name": "progress with an empty percent field"}
+ ]
+}

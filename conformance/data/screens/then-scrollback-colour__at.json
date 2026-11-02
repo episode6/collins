@@ -1,0 +1,12 @@
+{
+ "scenario": "then-scrollback-colour@at",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1szMW1yZWQgMQ0KcmVkIDINCnJlZCAzDQpyZWQgNA0KcmVkIDUNCnJlZCA2DQpyZWQgNw0KcmVkIDgNCnJlZCA5DQpyZWQgMTANCnJlZCAxMQ0KcmVkIDEyDQpyZWQgMTMNCnJlZCAxNA0KcmVkIDE1DQpyZWQgMTYNCnJlZCAxNw0KcmVkIDE4DQpyZWQgMTkNCnJlZCAyMA0KcmVkIDIxDQpyZWQgMjINCnJlZCAyMw0KcmVkIDI0DQpyZWQgMjUNCnJlZCAyNg0KcmVkIDI3DQpyZWQgMjgNCnJlZCAyOQ0KcmVkIDMwDQpyZWQgMzENCnJlZCAzMg0KcmVkIDMzDQpyZWQgMzQNCnJlZCAzNQ0KcmVkIDM2DQpyZWQgMzcNCnJlZCAzOA0KcmVkIDM5DQpyZWQgNDANCnJlZCA0MQ0KcmVkIDQyDQpyZWQgNDMNCnJlZCA0NA0KcmVkIDQ1DQpyZWQgNDYNCnJlZCA0Nw0KcmVkIDQ4DQpyZWQgNDkNChtbMG0=",
+ "capture": "red 1\nred 2\nred 3\nred 4\nred 5\nred 6\nred 7\nred 8\nred 9\nred 10\nred 11\nred 12\nred 13\nred 14\nred 15\nred 16\nred 17\nred 18\nred 19\nred 20\nred 21\nred 22\nred 23\nred 24\nred 25\nred 26\nred 27\nred 28\nred 29\nred 30\nred 31\nred 32\nred 33\nred 34\nred 35\nred 36\nred 37\nred 38\nred 39\nred 40\nred 41\nred 42\nred 43\nred 44\nred 45\nred 46\nred 47\nred 48\nred 49",
+ "cursor": [
+  0,
+  39
+ ],
+ "alternate": false
+}

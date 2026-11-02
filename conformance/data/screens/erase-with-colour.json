@@ -1,0 +1,12 @@
+{
+ "scenario": "erase-with-colour",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s0MW1yZWQbW0sNChtbMG1wbGFpbiAbWzQ0bRtbNVgbWzBtfA0KG1s0Mm1hYmMbWzFLG1swbQ==",
+ "capture": "red\nplain |",
+ "cursor": [
+  3,
+  2
+ ],
+ "alternate": false
+}

@@ -1,0 +1,12 @@
+{
+ "scenario": "save-restore",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1szMW1yZWQbNxtbMG0bWzU7NUhtb3ZlZBs4c2FtZRtbMG0bW3MbWzk7OUh4G1t1eQ==",
+ "capture": "redsamey\n\n\n\n    moved\n\n\n\n        x",
+ "cursor": [
+  8,
+  0
+ ],
+ "alternate": false
+}

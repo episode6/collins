@@ -1,0 +1,12 @@
+{
+ "scenario": "then-alternate@after",
+ "cols": 120,
+ "rows": 40,
+ "stream": "bWFpbiBvbmUNCm1haW4gdHdvG1s/MTA0OWgbWzM7M0hpbiB0aGUgYWx0ZXJuYXRlG1s/MTA0OWwgYmFjaw==",
+ "capture": "main one\nmain two back",
+ "cursor": [
+  13,
+  1
+ ],
+ "alternate": false
+}

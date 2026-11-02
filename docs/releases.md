@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-01. Full change history: git log for this file.
+fork. Last modified: 2026-11-02. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -73,6 +73,18 @@ downloads of each version, see the
   tabs get their panels back when it restarts, except that a session saved with
   a git page or a docked composer alongside its shells gets its shells back only
   after the tab is closed and reopened.
+- **A conformance kit for the API.** `conformance/` in the repository (MIT,
+  standard-library Python, shipped in the source distribution) is a client
+  that holds a server of the service API to the published pages: run
+  `python3 -m conformance <socket>` against `collins-service` or a server
+  written from the spec, and it checks the wire, every query of the terminal
+  contract and every published screen scenario against VTE's reading, the
+  session facts against a fake Claude Code it points the server at (busy's
+  two roads, one finished per turn, the bind, the box), the store and each
+  claimed family, then prints pass, fail or skip per check and exits 1 on a
+  fail. Collins runs it against its own service in CI (the `conformance`
+  job), so what the pages say stays what the service does. Its README says
+  what each level proves and does not.
 - **A server that doesn't answer no longer stops the window.** A refused first
   subscribe opens the window under its Reconnecting banner instead of ending
   the launch, a refused one on a reconnect keeps the banner up and tries again

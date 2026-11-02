@@ -1,0 +1,12 @@
+{
+ "scenario": "rep-to-margin",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YRtbMjAwYnw=",
+ "capture": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|",
+ "cursor": [
+  1,
+  1
+ ],
+ "alternate": false
+}

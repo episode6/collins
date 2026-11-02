@@ -1,0 +1,12 @@
+{
+ "scenario": "scrolled-then-ed2",
+ "cols": 120,
+ "rows": 40,
+ "stream": "eAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKeAp4CngKG1sySg==",
+ "capture": "x\n x\n  x\n   x\n    x\n     x\n      x\n       x\n        x\n         x\n          x\n           x\n            x\n             x\n              x\n               x\n                x\n                 x\n                  x\n                   x\n                    x\n                     x\n                      x\n                       x\n                        x\n                         x\n                          x\n                           x\n                            x\n                             x\n                              x\n                               x\n                                x\n                                 x\n                                  x\n                                   x\n                                    x\n                                     x\n                                      x\n                                       x\n                                        x\n                                         x\n                                          x\n                                           x\n                                            x",
+ "cursor": [
+  45,
+  39
+ ],
+ "alternate": false
+}

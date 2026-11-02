@@ -1,0 +1,12 @@
+{
+ "scenario": "su-sd",
+ "cols": 120,
+ "rows": 40,
+ "stream": "czENCnMyDQpzMw0KczQNCnM1DQpzNg0KczcNCnM4DQpzOQ0KczEwDQpzMTENCnMxMg0KczEzDQpzMTQNCnMxNQ0KczE2DQpzMTcNCnMxOA0KczE5DQobWzNTG1syVGFmdGVy",
+ "capture": "s1\ns2\ns3\n\n\ns4\ns5\ns6\ns7\ns8\ns9\ns10\ns11\ns12\ns13\ns14\ns15\ns16\ns17\ns18\ns19\n\nafter",
+ "cursor": [
+  5,
+  19
+ ],
+ "alternate": false
+}

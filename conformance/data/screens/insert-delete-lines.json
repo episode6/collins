@@ -1,0 +1,12 @@
+{
+ "scenario": "insert-delete-lines",
+ "cols": 120,
+ "rows": 40,
+ "stream": "cm93IDENCnJvdyAyDQpyb3cgMw0Kcm93IDQNCnJvdyA1DQpyb3cgNg0Kcm93IDcNCnJvdyA4DQpyb3cgOQ0KG1szOzVIG1syTGluc2VydGVkG1s3OzVIG1sxTWRlbGV0ZWQbWzI7OXIbWzQ7M0gbWzJMG1ty",
+ "capture": "row 1\nrow 2\ninserted\n\n\n\nrow 3\nrow 4\ndeleted\nrow 9",
+ "cursor": [
+  0,
+  0
+ ],
+ "alternate": false
+}

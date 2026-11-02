@@ -84,6 +84,7 @@ CHECK_SECONDS = {
     "check_notify_command.py": 6.0,
     # Not yet timed on CI: 4.0 s on a dev box under the headless shell.
     "check_termstream_answers.py": 6.0,
+    "check_conformance_data.py": 12.0,
     # Not yet timed on CI: 36 to 71 s on a dev box under the headless
     # shell (153 scenarios, every drawn cell read one at a time, each
     # scenario's redraw fed to a second terminal).

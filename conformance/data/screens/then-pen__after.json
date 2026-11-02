@@ -1,0 +1,12 @@
+{
+ "scenario": "then-pen@after",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1sxOzM4OzI7MTA7MjAwOzMwOzQ4OzU7MTdtc2V0IG1vcmU=",
+ "capture": "set more",
+ "cursor": [
+  8,
+  0
+ ],
+ "alternate": false
+}

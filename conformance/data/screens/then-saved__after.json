@@ -1,0 +1,12 @@
+{
+ "scenario": "then-saved@after",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s1OzVIG1szNW0bNxtbMG0bWzE7MUhob21lGzhyZXN0b3JlZA==",
+ "capture": "home\n\n\n\n    restored",
+ "cursor": [
+  12,
+  4
+ ],
+ "alternate": false
+}

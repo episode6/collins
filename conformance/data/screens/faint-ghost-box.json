@@ -1,0 +1,12 @@
+{
+ "scenario": "faint-ghost-box",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1sybeKdr8KgG1syMm0bWzJtVHJ5ICJmaXggdGhlIHRlc3RzIhtbMG0NCuKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgBtbMTszSA==",
+ "capture": "❯ Try \"fix the tests\"\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+ "cursor": [
+  2,
+  0
+ ],
+ "alternate": false
+}

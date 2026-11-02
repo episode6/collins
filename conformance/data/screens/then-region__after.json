@@ -1,0 +1,12 @@
+{
+ "scenario": "then-region@after",
+ "cols": 120,
+ "rows": 40,
+ "stream": "cjENCnIyDQpyMw0KcjQNCnI1DQpyNg0KcjcNCnI4DQpyOQ0KcjEwDQpyMTENChtbMzs4chtbODsxSGluDQppbg0KaW4NCmluDQpkb25l",
+ "capture": "r1\nr2\nr7\nin\nin\nin\nin\ndone\nr9\nr10\nr11",
+ "cursor": [
+  4,
+  7
+ ],
+ "alternate": false
+}

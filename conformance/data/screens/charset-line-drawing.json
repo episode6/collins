@@ -1,0 +1,12 @@
+{
+ "scenario": "charset-line-drawing",
+ "cols": 120,
+ "rows": 40,
+ "stream": "GygwbHFxaxsoQiBwbGFpbiAbKTAObHFxaw8gcGxhaW4=",
+ "capture": "┌──┐ plain ┌──┐ plain",
+ "cursor": [
+  21,
+  0
+ ],
+ "alternate": false
+}

@@ -1,0 +1,12 @@
+{
+ "scenario": "then-insert@at",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YWJjZGVmDRtbNGg=",
+ "capture": "abcdef",
+ "cursor": [
+  0,
+  0
+ ],
+ "alternate": false
+}

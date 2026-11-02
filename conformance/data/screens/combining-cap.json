@@ -1,0 +1,12 @@
+{
+ "scenario": "combining-cap",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBzIHMgcyBYg==",
+ "capture": "á́́́́́́́́́b",
+ "cursor": [
+  2,
+  0
+ ],
+ "alternate": false
+}

@@ -11,8 +11,10 @@ service over ssh (collins/sshremote.py), and the terminal stream fixtures
 the terminal contract is measured against: every file under
 tests/fixtures/streams/ (the synthetic scenarios and their golden, the
 recorded streams with their marks and goldens; that directory's own LICENSE
-file says the same). Everything else in Collins is licensed
-GPL-3.0-or-later; see the LICENSE file at the repository root.
+file says the same), and the conformance kit that holds a server to this
+specification: every file under conformance/ (its own LICENSE file says the
+same). Everything else in Collins is licensed GPL-3.0-or-later; see the
+LICENSE file at the repository root.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
