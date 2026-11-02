@@ -104,21 +104,27 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--keep", action="store_true", help="leave the scratch tree behind")
     parser.add_argument("--root", default="", help="the scratch tree (default: a temporary directory)")
     own, kit_args = parser.parse_known_args(argv)
-    root = own.root or tempfile.mkdtemp(prefix="collins-conformance-run-")
-    app_id = "com.episode6.Collins.Conformance." + uuid.uuid4().hex[:8]
+    root = own.root or tempfile.mkdtemp(prefix="cc-")  # short: a socket path is bounded at 107 bytes
+    app_id = "com.episode6.Collins.Conf." + uuid.uuid4().hex[:6]
     env = stage(root, app_id)
-    # The harness sets XDG_RUNTIME_DIR to a short scratch directory of its
-    # own and spawns the service with the environment it is handed.
+    # The socket's place is computed from this process's environment and the
+    # service's alike, so the two must agree: with no runtime directory (CI's
+    # container has none) the service would fall back to a state directory
+    # under its scratch HOME while this process looked under its own. A
+    # runtime directory of the scratch tree's own, set here before the
+    # harness is imported, keeps them together; the harness then makes its
+    # short `cr-*` directory inside it and spawns the service with the
+    # environment it is handed.
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        runtime = os.path.join(root, "run")
+        os.makedirs(runtime, mode=0o700, exist_ok=True)
+        os.environ["XDG_RUNTIME_DIR"] = runtime
     os.environ["COLLINS_APP_ID"] = app_id
     sys.path.insert(0, os.path.join(REPO, "scripts"))
     sys.path.insert(0, REPO)
     import e2e_service
 
-    env["XDG_RUNTIME_DIR"] = (
-        os.environ["XDG_RUNTIME_DIR"] if e2e_service.RUNTIME_DIR else env.get("XDG_RUNTIME_DIR", "")
-    )
-    if not env["XDG_RUNTIME_DIR"]:
-        del env["XDG_RUNTIME_DIR"]
+    env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
     from collins.api import server as api_server
 
     e2e_service.start_service(env=env, app_id=app_id)
