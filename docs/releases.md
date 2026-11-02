@@ -89,6 +89,14 @@ downloads of each version, see the
   the row's unread flag and the notification were right; a client acting on
   the event could not tell a turn from a redraw. It is now sent once per
   confirmed turn, as the session-facts page requires.
+- **Fixed: a session's busy flag could blink off and on within a
+  second.** Between a turn's end and the next sign of work (a child the
+  turn left running, output arriving every two seconds) the flag fell for
+  as little as 22 ms and rose again, and each blink was a finished turn:
+  a flagged row and a notification for a turn still going. A fall now
+  stands for a second before it is reported, and a sign of work inside
+  that second cancels it silently; a turn's end reaches the row about a
+  second later than before, and a rise is never held.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's

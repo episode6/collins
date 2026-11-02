@@ -1,4 +1,5 @@
 from collins.activity import (
+    FALL_HOLD_S,
     FINISH,
     FINISH_DUPLICATE,
     ActivityTracker,
@@ -82,8 +83,44 @@ def test_goes_idle_once_output_stops():
     assert tracker.is_busy("a")  # still inside the idle window
     clock.advance(0.2)
     timers.tick()
+    assert tracker.is_busy("a")  # the window lapsed: the fall is held
+    clock.advance(FALL_HOLD_S)
+    timers.tick()
     assert not tracker.is_busy("a")
     assert changes == [("a", True), ("a", False)]
+
+
+def test_a_fall_is_held_for_a_second_and_a_mark_inside_it_cancels_silently():
+    """§5 ruling 37: the service fell for 22 ms between a turn's end and
+    a live child's next mark, a flap and a false finish. The fall stands
+    for FALL_HOLD_S before it is reported; a mark inside the hold cancels
+    it, and nobody hears either."""
+    tracker, clock, timers, changes, finished = make_finish_tracker(idle_s=2.0)
+    tracker.mark("a")
+    clock.advance(2.022)  # the window lapsed 22 ms ago
+    timers.tick()
+    assert tracker.is_busy("a") and changes == [("a", True)]
+    tracker.mark("a")  # the child left alive marks again
+    clock.advance(2.5)
+    timers.tick()
+    assert tracker.is_busy("a") and changes == [("a", True)] and finished == []
+    clock.advance(1.0)  # 3.5 s after the last mark: the fall stood a second
+    timers.tick()
+    assert changes == [("a", True), ("a", False)] and finished == ["a"]
+
+
+def test_an_armed_finishs_grace_is_held_too_and_a_resume_inside_it_takes_it_back():
+    tracker, clock, timers, changes, finished = make_finish_tracker()
+    tracker.mark("a", idle_s=60.0)
+    tracker.finish("a", grace_s=3.0)
+    clock.advance(3.5)  # the grace ran out half a second ago
+    timers.tick()
+    assert tracker.is_busy("a") and finished == []
+    tracker.resume("a")
+    tracker.mark("a", idle_s=60.0)
+    clock.advance(5.0)
+    timers.tick()
+    assert tracker.is_busy("a") and changes == [("a", True)] and finished == []
 
 
 def test_output_during_the_idle_window_keeps_it_busy():
@@ -101,7 +138,7 @@ def test_sessions_time_out_independently():
     tracker.mark("a")
     clock.advance(1.5)
     tracker.mark("b")
-    clock.advance(1.0)  # a is 2.5s stale, b only 1.0s
+    clock.advance(1.6)  # a is 3.1s stale (its fall stood a second), b only 1.6s
     timers.tick()
     assert changes == [("a", True), ("b", True), ("a", False)]
     assert tracker.busy() == {"b"}
@@ -129,7 +166,7 @@ def test_a_mark_can_carry_its_own_idle_window():
     clock.advance(8.0)
     timers.tick()
     assert tracker.is_busy("a")  # far past IDLE_S, still inside its own window
-    clock.advance(2.5)
+    clock.advance(2.5 + FALL_HOLD_S)
     timers.tick()
     assert not tracker.is_busy("a")
     assert changes == [("a", True), ("a", False)]
@@ -142,7 +179,7 @@ def test_the_latest_mark_decides_the_window():
     tracker.mark("a", idle_s=10.0)
     clock.advance(1.0)
     tracker.mark("a")
-    clock.advance(2.5)
+    clock.advance(2.5 + FALL_HOLD_S)
     timers.tick()
     assert not tracker.is_busy("a")
 
@@ -163,7 +200,7 @@ def make_finish_tracker(idle_s=2.0):
 def test_output_running_out_on_its_own_is_a_finish():
     tracker, clock, timers, changes, finished = make_finish_tracker(idle_s=2.0)
     tracker.mark("a")
-    clock.advance(2.5)
+    clock.advance(2.5 + FALL_HOLD_S)
     timers.tick()
     # The busy transition lands first, so a finish handler sees the pole
     # already down when it flags the row.
@@ -619,7 +656,7 @@ def test_a_finish_with_grace_lands_when_the_grace_runs_out():
     # Redraw marks inside the grace (the prompt box returning) don't push
     # the finish out: only a busy hint, through resume(), does.
     tracker.mark("a")
-    clock.advance(0.2)
+    clock.advance(0.2 + FALL_HOLD_S)
     timers.tick()
     assert not tracker.is_busy("a")
     assert changes == [("a", True), ("a", False)]
@@ -632,7 +669,7 @@ def test_repeated_clears_keep_the_first_grace_deadline():
     tracker.finish("a", grace_s=3.0)
     clock.advance(2.0)
     tracker.finish("a", grace_s=3.0)
-    clock.advance(1.1)
+    clock.advance(1.1 + FALL_HOLD_S)
     timers.tick()
     assert finished == ["a"]
 
