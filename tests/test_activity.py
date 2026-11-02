@@ -208,7 +208,7 @@ def test_output_running_out_on_its_own_is_a_finish():
     assert finished == ["a"]
 
 
-def test_every_falls_is_reported_before_any_finish():
+def test_every_fall_is_reported_before_any_finish():
     """§5 ruling 47: a session is tracked under two keys, and a sweep
     that handled them in turn sent the id's finish before the handle's
     `busy: false`. Both falls go out first, then the finishes, in the

@@ -142,6 +142,10 @@ downloads of each version, see the
 - **The `/bg` handoff types its command and its Return a beat apart**, as
   a prompt is typed, so the handoff submits whatever length the CLI reads
   as a paste; the Ctrl+C pair of a graceful exit still goes in one write.
+- **A refused background handoff says why.** A `close {mode:
+  "background"}` the service cannot track was refused with the gate's bare
+  code; it now carries a sentence, with the code beside it for a client
+  that reads it.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's

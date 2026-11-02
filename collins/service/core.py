@@ -158,6 +158,7 @@ from gi.repository import GLib
 from .. import (
     APP_ID,
     autodelete,
+    bgblock,
     chats,
     clisetup,
     notifycenter,
@@ -254,6 +255,17 @@ class Client(Protocol):
     def deliver(self, event: dict) -> None:
         """An event of this client's store and state subscription."""
         ...
+
+
+# What a refused `close {mode: background}` says for each of the gate's
+# codes (`bgblock.background_blocker`); the code itself rides in `args`.
+BACKGROUND_REFUSALS = {
+    bgblock.BLOCK_NOT_SESSION: "Only a session can be handed to the background",
+    bgblock.BLOCK_UNSUPPORTED: "This agent has no background handoff",
+    bgblock.BLOCK_UNREGISTERED: "The session is not registered yet; a handoff needs its id and its row",
+    bgblock.BLOCK_IN_FLIGHT: "Another handoff is still in flight",
+    bgblock.BLOCK_SANDBOXED: "A sandboxed session is never handed to the background",
+}
 
 
 class ServiceCore:
@@ -1474,6 +1486,9 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_close(self, message: protocol.Message, client: Client) -> dict:
+        """A session's close: `exit` types the agent's own exit keys and
+        `background` its handoff command, `text` typed instead when sent
+        (§5 ruling 54); `kill` and `force` end the pty."""
         pty_id = message.get("pty")
         mode = message.get("mode")
         record = self.sessions.get(pty_id)
@@ -1488,17 +1503,23 @@ class ServiceCore:
             text = message.get("text") or own or ""
             if not text:
                 return protocol.refuse(
-                    message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"
+                    message.id,
+                    protocol.ERROR_REFUSED,
+                    "This agent has no exit keystrokes; send them as text"
+                    if mode == "exit"
+                    else "This agent has no background handoff",
                 )
             record.budget_spent = False
             if mode == "background" and self.background is not None:
                 # The gate, on the service (§5: a sandboxed session is never
                 # handed to the CLI's daemon, which would respawn it outside
                 # its box): a /bg that could not be tracked is refused, and
-                # the window falls back to the graceful exit.
+                # the window falls back to the graceful exit. The refusal
+                # reads as a sentence; the gate's code rides in `args`.
                 blocker = self.background.blocker(record.session)
                 if blocker:
-                    return protocol.refuse(message.id, protocol.ERROR_REFUSED, blocker)
+                    why = BACKGROUND_REFUSALS.get(blocker, "This session cannot be handed to the background")
+                    return protocol.refuse(message.id, protocol.ERROR_REFUSED, why, {"reason": blocker})
                 # The fork watch and the pre-emptive "detached" (PR-1.12d),
                 # before the /bg is typed: the agents listed so far are noted
                 # first.

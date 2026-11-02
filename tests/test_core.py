@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 
 import inproc as loopback
 import pytest
@@ -21,6 +22,7 @@ from gi.repository import GLib
 from collins import proctree
 from collins.api import protocol
 from collins.providers import SessionOptions
+from collins.service import core as core_mod
 from collins.service.core import ServiceCore
 from collins.sessions import discover_sessions
 from collins.store import SessionStore
@@ -405,16 +407,40 @@ def test_a_graceful_close_is_the_sessions_and_a_kill_the_ptys(server, tmp_path):
     assert session.closing is True and written == [b"\x03\x03"]
     client.request({"t": "close.end", "pty": pty})
     assert session.closing is False
-    # `text` is typed instead of the server's own.
+    # `text` is typed instead of the server's own; a typed command's Return
+    # goes a beat later (§5 ruling 57).
     client.request({"t": "close", "pty": pty, "mode": "exit", "text": "/exit\r"})
-    assert session.closing is True and written == [b"\x03\x03", b"/exit\r"]
+    assert session.closing is True and written == [b"\x03\x03", b"/exit"]
+    assert pump(1, lambda: b"\r" in written[2:])
     client.request({"t": "close.end", "pty": pty})
     assert session.closing is False
-    # A server whose agent has no such keys refuses a bare close.
+    # A bare background close types the handoff command, its Return a beat
+    # later (§5 ruling 57), with no gate on a core that has no store.
+    written.clear()
+    client.request({"t": "close", "pty": pty, "mode": "background"})
+    assert session.closing is True and written == [b"/bg"]
+    assert pump(1, lambda: b"\r" in written[1:])
+    client.request({"t": "close.end", "pty": pty})
+    # A server whose agent has no such keys refuses a bare close, in words.
     session.provider.graceful_exit = lambda: None
+    session.provider.background_exit = lambda: None
     with pytest.raises(loopback.RequestRefused) as refused:
         client.request({"t": "close", "pty": pty, "mode": "exit"})
     assert refused.value.error == protocol.ERROR_REFUSED
+    assert "exit keystrokes" in refused.value.msgid
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "close", "pty": pty, "mode": "background"})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    assert "handoff" in refused.value.msgid
+    # The background gate's refusal is a sentence, the code in args.
+    session.provider.background_exit = lambda: "/bg\r"
+    server.core.background = SimpleNamespace(blocker=lambda s: "unregistered", handoff=lambda r: None)
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "close", "pty": pty, "mode": "background"})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    assert refused.value.msgid == core_mod.BACKGROUND_REFUSALS["unregistered"]
+    assert refused.value.details == {"reason": "unregistered"}
+    server.core.background = None
     session.pty.write = type(session.pty).write.__get__(session.pty)
     client.request({"t": "close", "pty": pty, "mode": "kill"})
     assert pump(3, lambda: pty not in server.core.ptys.ptys)
@@ -2518,7 +2544,8 @@ def test_a_sandboxed_sessions_background_close_is_refused(app_state, projects_di
         monkeypatch.setattr(type(session), "sandboxed", property(lambda self: True))
         with pytest.raises(loopback.RequestRefused) as refused:
             client.request({"t": "close", "pty": pty, "mode": "background", "text": "/bg\r"})
-        assert refused.value.msgid == "sandboxed"
+        assert refused.value.details == {"reason": "sandboxed"}
+        assert refused.value.msgid == core_mod.BACKGROUND_REFUSALS["sandboxed"]
         assert watches == [] and core.state.get_pending_detaches() == {}
         assert not store.get_item(ids["alpha1"]).backgrounding
         assert not core.background.pending
