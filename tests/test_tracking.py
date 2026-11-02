@@ -7,12 +7,23 @@ with the window's three exemptions; a bound session's finish is the
 judge's alone, its handle edge silent (§5 ruling 35); the background-busy
 poll's answer marks and finishes the attached session."""
 
-from collins.activity import PROGRESS_FINISH_GRACE_S, EchoGate, FinishLedger, ProgressWatch
+from collins.activity import FALL_HOLD_S, PROGRESS_FINISH_GRACE_S, EchoGate, FinishLedger, ProgressWatch
 from collins.service import termstream
 from collins.service.tracking import ServiceActivity
 
 SID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 FORK = "1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
 
 
 class Timers:
@@ -134,7 +145,7 @@ class FakeState:
         self.baselines[session_id] = set(cmdlines)
 
 
-def make(*records, store=None, state=None, settings=None):
+def make(*records, store=None, state=None, settings=None, clock=None):
     timers = Timers()
     announced = []
     activity = ServiceActivity(
@@ -146,8 +157,15 @@ def make(*records, store=None, state=None, settings=None):
         source_remove=timers.remove,
         land=lambda fn, *args: fn(*args),
         announce=announced.append,
+        **({"clock": clock} if clock is not None else {}),
     )
     return activity, timers, announced
+
+
+def sweep(activity, timers):
+    """Run the tracker's sweep once, as GLib would on its tick."""
+    _ms, fn, args = timers.due[activity.tracker._sweep]
+    fn(*args)
 
 
 # -- the verdicts' two roads ---------------------------------------------------------
@@ -207,6 +225,35 @@ def test_a_bound_sessions_finish_is_the_judges_alone():
     _ms, expire, args = timers.due[activity.judge.held[SID]]
     expire(*args)
     assert record.sent.count({"finished": True}) == 1
+    assert store.items[SID].unread is False and announced == [SID]
+
+
+def test_the_cli_leaving_closes_the_hint_and_finishes_with_the_clears_grace():
+    """§5 ruling 39: a CLI killed mid-turn under a standing progress hint
+    held busy for the hint's minute. The leaving edge closes the hint's
+    window and arms the clear's grace on both keys; the sweep finishes
+    them once the grace and the fall hold have passed, the id's through
+    the judge, so the killed turn counts and the row is flagged."""
+    store, state, clock = FakeStore(SID), FakeState(), Clock()
+    session = FakeSession("s-1", SID)
+    record = FakeRecord(session)
+    activity, timers, announced = make(record, store=store, state=state, clock=clock)
+    activity.tracker.mark("s-1", idle_s=60.0)
+    activity.tracker.mark(SID, idle_s=60.0)
+    activity.cli_left(record)
+    assert session.progress.ended == 1
+    assert activity.tracker.finish_pending(SID) and activity.tracker.finish_pending("s-1")
+    assert activity.tracker.is_busy(SID) and store.items[SID].busy is True
+    clock.advance(PROGRESS_FINISH_GRACE_S + FALL_HOLD_S + 0.1)
+    sweep(activity, timers)
+    assert not activity.tracker.busy()
+    assert store.items[SID].busy is False and store.items[SID].unread is True
+    assert announced == [SID] and record.sent.count({"finished": True}) == 1
+    # A pole already down is a no-op: a clean exit after an idle turn
+    # closes the window and flags nothing.
+    store.items[SID].unread = False
+    activity.cli_left(record)
+    assert session.progress.ended == 2 and not activity.tracker.busy()
     assert store.items[SID].unread is False and announced == [SID]
 
 

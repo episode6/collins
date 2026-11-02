@@ -267,6 +267,22 @@ class ServiceActivity:
             for key in self._keys(session):
                 self.tracker.mark(key)
 
+    def cli_left(self, record) -> None:
+        """The CLI left the pty (`ServiceCore.cli_changed`'s falling edge:
+        killed mid-turn, or exited on its own). A standing progress hint
+        kept the pole up for its 60 s window after the process was gone, so
+        `busy` outlived the agent by a minute (§5 ruling 39). The hint's
+        window closes, and the pole finishes with the clear's grace,
+        through the judge as any finish: a killed turn whose records were
+        written counts (the person should look), and a pole already down
+        is a no-op, so a clean exit after an idle turn flags nothing."""
+        session = record.session
+        progress = session.progress
+        if progress is not None:
+            progress.turn_ended()
+        for key in self._keys(session):
+            self.tracker.finish(key, grace_s=PROGRESS_FINISH_GRACE_S)
+
     def input_sent(self, record, text: str) -> None:
         """The session's own write (`Session.write_text`, through its
         host's `input_sent`): an injected prompt, a switch, a close flow's

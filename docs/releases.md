@@ -97,6 +97,12 @@ downloads of each version, see the
   stands for a second before it is reported, and a sign of work inside
   that second cancels it silently; a turn's end reaches the row about a
   second later than before, and a rise is never held.
+- **Fixed: a session whose CLI was killed mid-turn stayed busy for a
+  minute.** The CLI's last progress report kept the row busy for the
+  report's full window after the process was gone, and the kill's turn was
+  never announced. The CLI leaving the terminal now ends the turn the way
+  its own clear does: the row is idle within a few seconds, and a turn
+  whose records were written is announced.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's
