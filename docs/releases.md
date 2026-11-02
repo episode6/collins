@@ -83,6 +83,12 @@ downloads of each version, see the
   there and never hear otherwise, so the tab refused the composer and drops until
   it was reopened. What a client is told on attaching and what it hears afterwards
   are now one series, and a wrong reading is corrected within two seconds.
+- **Fixed: a finished turn was announced twice, and an idle repaint once
+  more.** The `finished` field of a running session's `session` event was
+  sent twice per turn and again on every repaint of an idle session, where
+  the row's unread flag and the notification were right; a client acting on
+  the event could not tell a turn from a redraw. It is now sent once per
+  confirmed turn, as the session-facts page requires.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's

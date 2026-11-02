@@ -318,9 +318,14 @@ class ServiceActivity:
     def _on_finished(self, key: str) -> None:
         record = self._record_by_handle(key)
         if record is not None:
-            # No bound transcript yet to judge by: the edge passes as it
-            # always did for a placeholder.
-            record.send({"finished": True})
+            # The handle's edge is for a placeholder with no transcript to
+            # judge by. Once the id is bound the id's edge is judged and a
+            # counted finish lands on this same record (`_land_finish`
+            # finds it by id), so the handle's edge sends nothing from then
+            # on: it sent a second `finished` per turn and one per idle
+            # repaint (§5 ruling 35).
+            if not record.session.session_id:
+                record.send({"finished": True})
             return
         self.judge.edge(key)
 

@@ -3,9 +3,9 @@
 PR-1.12a), through fakes: a verdict reaches a session with no row as a
 `session` field by handle and a session with rows as the store's flags; a
 counted finish flags the rows, tells the session's clients and announces,
-with the window's three exemptions; a resolved session's handle edge
-passes while its id edge is judged; the background-busy poll's answer
-marks and finishes the attached session."""
+with the window's three exemptions; a bound session's finish is the
+judge's alone, its handle edge silent (§5 ruling 35); the background-busy
+poll's answer marks and finishes the attached session."""
 
 from collins.activity import PROGRESS_FINISH_GRACE_S, EchoGate, FinishLedger, ProgressWatch
 from collins.service import termstream
@@ -173,11 +173,12 @@ def test_a_session_with_rows_is_the_stores_busy_flag():
     assert store.items[SID].busy is False
 
 
-def test_a_resolved_sessions_handle_edge_passes_while_its_id_edge_is_judged():
-    """Both keys are marked on every verdict (`_keys`): the handle's
-    finish reaches the tab for its placeholder with no transcript to judge
-    by; the id's goes through the judge, where an armed ledger that saw
-    no movement holds it."""
+def test_a_bound_sessions_finish_is_the_judges_alone():
+    """Both keys are marked on every verdict (`_keys`). Once the id is
+    bound the handle's edge sends nothing (it sent a second `finished` per
+    turn and one per idle repaint: §5 ruling 35); the id's goes through the
+    judge, where an armed ledger that saw no movement holds it, and a
+    counted finish reaches the placeholder's record once, by id."""
     store, state = FakeStore(SID), FakeState()
     session = FakeSession("s-1", SID)
     session.finish_ledger.arm((1, 1), 100)
@@ -186,14 +187,27 @@ def test_a_resolved_sessions_handle_edge_passes_while_its_id_edge_is_judged():
     activity.tracker.mark("s-1")
     activity.tracker.mark(SID)
     activity.tracker.finish("s-1")
-    assert {"finished": True} in record.sent
+    assert {"finished": True} not in record.sent
     activity.tracker.finish(SID)
     assert SID in activity.judge.held and session.updates == 1
     assert store.items[SID].unread is False and announced == []
     session.stamp = (2, 1)
     activity.transcript_landed(record)
     assert store.items[SID].unread is True and announced == [SID]
-    assert record.sent.count({"finished": True}) == 2  # the id's, now counted
+    assert record.sent.count({"finished": True}) == 1
+    # An idle repaint after the bind: both keys rise and fall again with
+    # the transcript unmoved, the id's edge is held and runs out, and
+    # nothing more is sent or flagged.
+    store.items[SID].unread = False
+    activity.tracker.mark("s-1")
+    activity.tracker.mark(SID)
+    activity.tracker.finish("s-1")
+    activity.tracker.finish(SID)
+    assert SID in activity.judge.held
+    _ms, expire, args = timers.due[activity.judge.held[SID]]
+    expire(*args)
+    assert record.sent.count({"finished": True}) == 1
+    assert store.items[SID].unread is False and announced == [SID]
 
 
 # -- the session's own writes --------------------------------------------------------
