@@ -878,7 +878,7 @@ class Fake:
         write(f"{CSI}c{CSI}?u")  # who is this terminal, and does it speak kitty's keyboard protocol
         self.progress(0)  # the CLI clears its report once at startup
         self.title("fake claude")
-        self.draw_all(f"fake claude {VERSION} in {self.cwd} progress:{'on' if self.progress_on else 'off'}")
+        self.draw_all(f"fake claude {VERSION} in {self.cwd}")
         try:
             while self.running:
                 timeout = self.next_due()

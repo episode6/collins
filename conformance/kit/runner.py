@@ -63,6 +63,7 @@ class Run:
         self.implementation = ""
         self.settings: dict = {}  # the server's `settings`, as the first subscribe's snapshot said
         self.spoofs: bool | None = None  # whether an agent pty had the two spoofs (None: not read)
+        self.died = None  # the session the agent-leaving check left, for the shell-alone row
         self.known_session: str | None = None  # a session id the sessions checks bound, for Level 2
         self.clients: list[apiclient.Client] = []
         self.all_clients: list[apiclient.Client] = []  # every client ever made, for the wire check

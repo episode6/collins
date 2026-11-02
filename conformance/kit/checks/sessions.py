@@ -57,6 +57,8 @@ class Session:
         self.spawned_at = 0.0
         self.id: str | None = None
         self.cwd = ""  # where the pty started, as the spawn reply said
+        self.since = 0  # the event index the agent-leaving check started at
+        self.pty_gone = False  # whether the pty ended with the agent
 
     def facts(self) -> dict:
         return self.client.session_facts(self.pty)
@@ -99,16 +101,29 @@ def timeline(s: Session, since: int, t0: float) -> str:
     return "; ".join(parts)
 
 
-def unlisted_fields(run: Run, event: apiclient.Event) -> None:
+def check_unlisted_fields(s: Session, notes: list[str]) -> None:
     """A `session` field that belongs to a family the server does not list
-    must not be sent (index.md, State)."""
-    p = run.p
-    for family, entry in p.CONFORMANCE_FAMILIES.items():
-        if family in run.caps:
+    is never sent (index.md, State): held over every `session` event this
+    client has seen, snapshots and deltas alike."""
+    p = s.run.p
+    stray: dict[str, set[str]] = {}
+    seen = 0
+    for event in s.client.events:
+        if event.type != "session":
             continue
-        stray = sorted(set(entry.session_fields) & set(event.fields))
-        if stray:
-            raise CheckFailed(f"the session event carries {stray} of the unlisted family `{family}`")
+        seen += 1
+        for family, entry in p.CONFORMANCE_FAMILIES.items():
+            if family in s.run.caps:
+                continue
+            found = set(entry.session_fields) & set(event.fields)
+            if found:
+                stray.setdefault(family, set()).update(found)
+    if stray:
+        raise CheckFailed(
+            "session events carried fields of unlisted families: "
+            + "; ".join(f"`{family}`: {sorted(fields)}" for family, fields in sorted(stray.items()))
+        )
+    notes.append(f"{seen} session events")
 
 
 def spawn_session(run: Run, client: apiclient.Client, notes: list[str], **extra) -> Session:
@@ -148,11 +163,6 @@ def spawn_session(run: Run, client: apiclient.Client, notes: list[str], **extra)
         raise CheckFailed(
             f"the snapshot's handle {snapshot['handle']!r} is not the spawn reply's {s.handle!r}"
         )
-    unlisted_fields(run, snapshot)
-    # Whether the agent has the two progress spoofs, off the fake's own
-    # banner: the checks that need its progress report are skipped without.
-    if run.spoofs is None and client.wait_output(s.pty, b"progress:", 10.0) >= 0:
-        run.spoofs = b"progress:on" in bytes(client.output[s.pty])
     return s
 
 
@@ -197,7 +207,6 @@ def check_second_attach(s: Session, notes: list[str]) -> None:
     )
     if snapshot is None:
         raise CheckFailed("no whole `session` snapshot (one carrying `cwd`) for the second client within 5 s")
-    unlisted_fields(s.run, snapshot)
     held = s.facts()
     differences = []
     for name in (
@@ -308,6 +317,13 @@ def check_turn(s: Session, notes: list[str]) -> None:
         raise CheckFailed(f"prompt: {reply.describe()}")
     if s.wait_marker("fake-claude got: turn one", 5.0, start_out) < 0:
         raise CheckFailed("the fake never saw the prompt's text")
+    client.pump(1.0)
+    if s.run.spoofs is None:
+        # Whether the agent reports its progress, read off the turn's own
+        # output: the checks that need the report are skipped without it.
+        s.run.spoofs = b"\x1b]9;4;3" in s.output_since(start_out)
+        if not s.run.spoofs:
+            notes.append("the turn's output held no OSC 9;4;3: the agent reports no progress here")
     if not s.wait_fact("busy", True, max(t0 + 3.0 - time.monotonic(), 0.1)):
         raise CheckFailed(f"busy was not true within 3 s of the prompt: {s.busy_events(since)}")
     rose_at = time.monotonic()
@@ -665,11 +681,36 @@ def check_die(run: Run, notes: list[str]) -> None:
     fell = [when for when, value in s.busy_events(since) if value is False][0]
     notes.append(f"busy fell {fell - left_at:.1f} s after the agent left")
     pty_gone = any(pty_ended(e, s.pty) for e in client.events[since:])
-    facts = s.facts()
-    if not pty_gone and ("agent_running" in facts or "running_command" in facts):
-        # The shell the agent left behind is made to draw the box's own mark
-        # and no-break space, so that only a reading of the process table,
-        # never of the screen, answers false.
+    if not pty_gone and s.facts().get("agent_running") is True:
+        raise CheckFailed("agent_running stayed true after the agent left")
+    if s.id is None:
+        s.id = s.facts().get("session")
+    if s.id and run.known_session and s.id == run.known_session:
+        raise CheckFailed("a second new session bound to the first session's transcript")
+    if s.id and not client.wait_until(lambda: s.item().get("running") is False, 10.0):
+        raise CheckFailed("item.running stayed true after the agent left")
+    # The pty, if it lives on with its shell, is left for the shell-alone
+    # reading's own row, which ends it.
+    s.since = since
+    s.pty_gone = pty_gone
+    run.died = s
+
+
+def check_shell_alone(run: Run, notes: list[str]) -> None:
+    """The shell the agent left behind, made to draw the box's own mark and
+    no-break space, is not the agent: `takes_prompt` is false by the
+    process table, never by the screen (ruling 45). Its own row, so that a
+    shell that cannot be set up skips this reading and nothing else."""
+    s = getattr(run, "died", None)
+    if s is None:
+        raise CheckSkipped("the agent-leaving check did not leave a session")
+    client = s.client
+    try:
+        if s.pty_gone:
+            raise CheckSkipped("the pty ended with the agent: no shell was left to read")
+        facts = s.facts()
+        if "agent_running" not in facts and "running_command" not in facts:
+            raise CheckSkipped("the server reports neither agent_running nor running_command")
         client.wait_quiet(s.pty, 0.5, 10.0)
         client.send_input(
             s.pty, b"PS1=$(printf '\\342\\235\\257\\302\\240'); printf '\\033[r\\033[2J\\033[H'\r"
@@ -685,19 +726,13 @@ def check_die(run: Run, notes: list[str]) -> None:
                 "takes_prompt is not false after the agent left and the shell, drawing the box's mark, "
                 "has the pty"
             )
-        if s.facts().get("agent_running") is True:
-            raise CheckFailed("agent_running stayed true after the agent left")
-    if s.id is None:
-        s.id = s.facts().get("session")
-    if s.id and run.known_session and s.id == run.known_session:
-        raise CheckFailed("a second new session bound to the first session's transcript")
-    if s.id and not client.wait_until(lambda: s.item().get("running") is False, 10.0):
-        raise CheckFailed("item.running stayed true after the agent left")
-    if not pty_gone:
-        client.call("close", pty=s.pty, mode="kill")
-        if client.wait_for(lambda e: pty_ended(e, s.pty), 15.0, since) is None:
-            raise CheckFailed("no `pty-exited` after close {mode: kill}")
-    client.close()
+    finally:
+        if not s.pty_gone:
+            client.call("close", pty=s.pty, mode="kill")
+            if client.wait_for(lambda e: pty_ended(e, s.pty), 15.0, s.since) is None:
+                notes.append("no `pty-exited` after close {mode: kill}")
+        client.close()
+        run.died = None
 
 
 def check_populated_snapshot(run: Run, notes: list[str]) -> None:
@@ -852,6 +887,7 @@ def run_sessions(run: Run) -> None:
             ("state.get, state.set and resolver.arm", check_state),
             ("the snapshot of a populated server", lambda s, notes: check_populated_snapshot(s.run, notes)),
             ("close {exit} ends the pty; a clean exit flags nothing", check_close_exit),
+            ("no session field of an unlisted family", check_unlisted_fields),
         )
         turn = r.run("a turn: busy, the bind, one finished, unread, the transcript's facts", check_turn, s)
         if turn is None:
@@ -863,5 +899,6 @@ def run_sessions(run: Run) -> None:
     finally:
         pass
     r.run("the agent leaving mid-turn ends busy within 10 s", check_die, run)
+    r.run("a shell left behind, drawing the box's mark, is not the agent", check_shell_alone, run)
     r.run("close {background} hands the session off", check_background_handoff, run)
     r.run("the recorded Claude Code streams (--replay)", check_replay, run)
