@@ -11,6 +11,10 @@ acceptance of PR-S2):
     python3 scripts/stub_server.py --app-id com.episode6.Collins.Stub &
     COLLINS_APP_ID=com.episode6.Collins.Stub python3 -m collins
 
+`--caps NAME...` makes it claim families it does not serve (every request of
+theirs is still `unknown`): the conformance kit run against that must fail
+every claimed family's check, which is how the kit is shown able to fail.
+
 A dev script, not a product: `conformance/` is what tests a server.
 """
 
@@ -31,6 +35,7 @@ _held = []  # the open connections: a WebsocketConnection nothing holds is colle
 
 
 _named = {"implementation": "stub-server"}  # --predates: none (spec D18)
+_caps: list = []  # --caps: families claimed and not served
 
 
 def answer(message: dict) -> dict:
@@ -43,7 +48,7 @@ def answer(message: dict) -> dict:
             version="0.0.0",
             service_id="stub",
             host="stub",
-            caps=[],
+            caps=list(_caps),
             **_named,
         )
     if kind == "subscribe":
@@ -75,9 +80,11 @@ def main() -> int:
     parser.add_argument(
         "--predates", action="store_true", help="say hello as a Collins service from before families"
     )
+    parser.add_argument("--caps", nargs="*", default=[], help="families to claim in the hello and not serve")
     arguments = parser.parse_args()
     if arguments.predates:
         _named.clear()
+    _caps.extend(arguments.caps)
     path = server.socket_path(arguments.app_id)
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     if os.path.exists(path):

@@ -576,11 +576,13 @@ def check_screens(t: Terminal, notes: list[str]) -> None:
                 failures.append(
                     f"{label}: capture differs\n      server: {got[-200:]!r}\n      VTE:    {want[-200:]!r}"
                 )
+        redraws_before = len(second.redraws.get(t.pty, []))
         reply = second.attach(t.pty, COLS, ROWS)
         if not reply.ok:
             failures.append(f"{label}: attach {reply.describe()}")
             continue
-        second.wait_redraw(t.pty, 10.0, len(second.redraws.get(t.pty, [])) + 1)
+        if second.wait_redraw(t.pty, 10.0, redraws_before + 1) is None:
+            failures.append(f"{label}: no redraw within 10 s of the attach")
         got_modes = set(reply.get("modes") or [])
         want_modes = tracker.expected()
         if got_modes != want_modes:
