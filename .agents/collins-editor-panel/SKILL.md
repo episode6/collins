@@ -174,10 +174,10 @@ files.py` the service's:
   told (Reload), `gone` marks the buffer dirty and says so. An event that
   arrives while a save or load is in flight waits (`pending_change`) for
   the reply's mtime, so the editor's own write never reads as a change.
-  The link is installed behind the `files` capability of the service's
-  hello (`App._install_file_transport`, decided on every connect like
-  git's); against a service without it nothing is sent and every open
-  lands in the banner. A reconnect (`remotefiles.reset()` in
+  The link is installed on every hello (`App._install_file_transport`), and
+  every `fs.*` asks `apilink.has(CAP_FILES)` before it goes: against a service
+  without it nothing is sent and every open's banner says "This service has
+  no files" (`remotefiles.NO_FILES`). A reconnect (`remotefiles.reset()` in
   `App._on_connected`) re-sends every live watch. The agent rewrites these
   files constantly, so this path is exercised more than manual saves are.
   Known gap: keystrokes typed during a silent reload's round trip are
@@ -636,14 +636,17 @@ touches the disk.
   the empty clipboard, the non-local scope's formats and reads, `fs.mkdir`.
 
 **Following the session** (`request_root` / `offer_root`): the tab's cwd tick
-calls `_maybe_follow_editor`, whose scope is the service's (`cwd.settle`:
-`projectfiles.follow_scope` after the settling); `plan_reroot` decides which
+calls `_maybe_follow_editor`, whose scope is the service's (`cwd.settle`,
+sent with no wait and landing on the main loop: `projectfiles.follow_scope`
+after the settling; with no `internal` nothing is asked and the pane follows
+`agent_cwd` once per move); `plan_reroot` decides which
 open files map to the new root (`renamed_path`), given the counterparts the
 service says are files (`reroot_counterparts`, stat'ed with the new root's
 `is_dir` on a worker: `request_root` → `_reroot_checked`, superseded by a
 newer request). A move queued while the follow dialog was up is judged
 again by `cwd.settle` with `judge: true` (`set_follow_judge`, the tab's
-`session.judge_cwd`; a pane with no session only offers). Panel shells get
+`session.judge_cwd`; a pane with no session, or a service with no `internal`,
+only offers). Panel shells get
 the same offer to `cd` (`_maybe_offer_shells_follow`).
 
 **Narrow mode** (`editor_narrow_width`, default 500, 0 = never): an

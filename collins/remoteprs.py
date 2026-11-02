@@ -39,11 +39,16 @@ from pathlib import Path
 from gi.repository import GObject
 
 from . import apilink, prdetail, prstatus
+from .api import protocol
 from .api.protocol import RequestRefused
-from .i18n import translate
+from .i18n import N_, _, translate
 from .prstatus import PullRequest
 
 log = logging.getLogger(__name__)
+
+# What an action answers on a service that serves no `prs` (D5): nothing
+# crosses the wire, and every surface that could reach one is hidden.
+NO_PRS = N_("This service has no pull requests")
 
 
 class RemotePrStore(GObject.Object):
@@ -107,6 +112,8 @@ class RemotePrStore(GObject.Object):
         return [prstatus.known(pr) for pr in prstatus.from_records(self.records(session_id))]
 
     def set_records(self, session_id: str, records: list) -> None:
+        if not apilink.has(protocol.CAP_PRS):
+            return
         if not session_id or records == self._records.get(session_id, []):
             return
         old = self.records(session_id)
@@ -157,14 +164,20 @@ def _record(pr: PullRequest) -> dict:
 
 def perform(key: str, pr: PullRequest) -> str | None:
     """`practions.perform`, on the service: None, or the failure's words."""
+    if not apilink.has(protocol.CAP_PRS):
+        return _(NO_PRS)
     return _action({"t": "pr.action", "pr": _record(pr), "key": key})
 
 
 def comment(pr: PullRequest, body: str) -> str | None:
+    if not apilink.has(protocol.CAP_PRS):
+        return _(NO_PRS)
     return _action({"t": "pr.comment", "pr": _record(pr), "body": body})
 
 
 def review(pr: PullRequest, verdict: str, body: str = "") -> str | None:
+    if not apilink.has(protocol.CAP_PRS):
+        return _(NO_PRS)
     message = {"t": "pr.review", "pr": _record(pr), "verdict": verdict}
     if body:
         message["body"] = body
@@ -172,20 +185,28 @@ def review(pr: PullRequest, verdict: str, body: str = "") -> str | None:
 
 
 def reply_in_thread(pr: PullRequest, thread_id: str, body: str) -> str | None:
+    if not apilink.has(protocol.CAP_PRS):
+        return _(NO_PRS)
     return _action({"t": "pr.thread", "pr": _record(pr), "thread": thread_id, "body": body})
 
 
 def set_thread_resolved(pr: PullRequest, thread_id: str, resolved: bool) -> str | None:
+    if not apilink.has(protocol.CAP_PRS):
+        return _(NO_PRS)
     return _action({"t": "pr.thread", "pr": _record(pr), "thread": thread_id, "resolved": bool(resolved)})
 
 
 def fetch_detail(url: str) -> prdetail.PullRequestDetail | None:
     """`prdetail.fetch`, on the service."""
+    if not apilink.has(protocol.CAP_PRS):
+        return None
     reply = _call({"t": "pr.detail", "url": url}) or {}
     return prdetail.detail_from_record(reply.get("detail"))
 
 
 def fetch_threads(url: str) -> tuple:
+    if not apilink.has(protocol.CAP_PRS):
+        return ()
     reply = _call({"t": "pr.threads", "url": url}) or {}
     return prdetail.threads_from_records(reply.get("threads"))
 
@@ -199,6 +220,8 @@ def fetch_blob(repository: str, ref: str, path: str) -> Path:
     reason — the stand-in's tooltip. Worker thread."""
     from . import blobcache, prblobs
 
+    if not apilink.has(protocol.CAP_PRS):
+        raise prblobs.BlobError(_(NO_PRS))
     reply = _call({"t": "pr.blob", "repository": repository, "ref": ref, "path": path}) or {}
     url = reply.get("url")
     if not isinstance(url, str) or not url.startswith(BLOB_URL_PREFIX):
@@ -216,12 +239,14 @@ BLOB_URL_PREFIX = "/api/blob?kind=pr&"
 
 def invalidate(url: str) -> None:
     """`prstatus.invalidate`, on the service (whose cache it is)."""
-    if prstatus._FETCHABLE.match(url or ""):
+    if prstatus._FETCHABLE.match(url or "") and apilink.has(protocol.CAP_PRS):
         _call({"t": "pr.fetch", "urls": [url], "invalidate": True})
 
 
 def sweep(targets) -> dict[str, list[PullRequest]]:
     """`prstatus.sweep`, on the service: ``(session id, PRs, cwd)`` each."""
+    if not apilink.has(protocol.CAP_PRS):
+        return {}
     message_targets = []
     for session_id, prs, cwd in targets:
         target = {"session": session_id, "prs": prstatus.to_records(prs)}

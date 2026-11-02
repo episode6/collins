@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-31. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ from . import (
     updatecheck,
     welcome,
 )
+from .api import protocol
 from .api.protocol import RequestRefused
 from .bgblock import (
     BLOCK_IN_FLIGHT,
@@ -130,6 +131,11 @@ HIDE_NOTICE_ID = "collins-hidden"
 # have spawned their shells, short enough that the marks are current by the
 # time anyone has read the panel.
 _LAUNCH_SWEEP_DELAY_MS = 2500
+
+# How long a graceful close waits on a server with no `internal` before the
+# window closes the tab with `kill` (MainWindow._graceful_close; the Collins
+# service keeps this budget itself, about as long).
+CLOSE_BUDGET_S = 6
 
 # The geometry a background session's terminal is spawned at when there is no
 # visible agent terminal to copy (see start_background_session). Never shown is
@@ -374,6 +380,10 @@ class MainWindow(Adw.ApplicationWindow):
         # A remote service that speaks another protocol, after the dialog's
         # Cancel: the name shown with a *Connect to…* button (set_mismatch).
         self._banner_mismatch = ""
+        # A service from before this window's version (spec D18): named
+        # with a *Restart service* button, for as long as its hello is the
+        # last one (sync_legacy_banner).
+        self._banner_legacy = False
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -510,43 +520,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_toggle.set_tooltip_text(_("Toggle sidebar (F9)"))
         content_header.pack_start(self.sidebar_toggle)
 
-        new_menu = Gio.Menu()
-        for provider in available_providers():
-            new_menu.append(
-                _("New {name} session…").format(name=provider.name),
-                f"win.new-session-provider::{provider.id}",
-            )
-        # A one-off launch in the visible project with the *opposite* of its
-        # effective worktree choice. Label and target depend on which tab is
-        # visible, so the item is rebuilt every time the dropdown opens (see
-        # _refresh_alt_new_session_item); this records where it goes.
-        self._new_menu = new_menu
-        self._alt_new_pos = new_menu.get_n_items()
-        self._alt_new_present = False
+        self._new_menu = new_menu = Gio.Menu()
         self._alt_new_asked = 0  # which ask of the service the entry waits on
-        # The sidebar's Chats project: a session in a throwaway directory
-        # ("chat" here ≠ the native streaming chat entries below).
-        new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
-        for provider in available_providers():
-            new_menu.append(
-                _("Continue last {name} session…").format(name=provider.name),
-                f"win.continue-session::{provider.id}",
-            )
-        # Native streaming chat runs the agent in this process, on this
-        # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
-        # client that is not on the service's machine, and slated for
-        # removal. Its variants are this device's CLI's.
-        chat_providers = available_providers() if apilink.is_local() else []
-        for provider in chat_providers:
-            for variant in provider.chat_variants():  # native streaming chat
-                if variant.label:
-                    text = _("New {name} native chat ({mode}) (experimental)").format(
-                        name=provider.name, mode=_(variant.label)
-                    )
-                else:
-                    text = _("New {name} native chat (experimental)…").format(name=provider.name)
-                new_menu.append(text, f"win.new-chat-provider::{provider.id}:{variant.key}")
-        new_menu.append(_("New window"), "app.new-window")
+        self._sync_new_menu()
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")
         new_btn.set_tooltip_text(_("New session (Ctrl+Shift+T)"))
         new_btn.set_menu_model(new_menu)
@@ -1106,6 +1082,77 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._quit_requested = False
 
+    def _sync_new_menu(self) -> None:
+        """Fill the New menu for the service as the last hello lists it: at
+        build, and again on every hello (`apply_families`)."""
+        menu = self._new_menu
+        menu.remove_all()
+        providers = available_providers()
+        for provider in providers:
+            menu.append(
+                _("New {name} session…").format(name=provider.name),
+                f"win.new-session-provider::{provider.id}",
+            )
+        # A one-off launch in the visible project with the *opposite* of its
+        # effective worktree choice. Label and target depend on which tab is
+        # visible, so the item is rebuilt every time the dropdown opens (see
+        # _refresh_alt_new_session_item); this records where it goes.
+        self._alt_new_pos = menu.get_n_items()
+        self._alt_new_present = False
+        # The sidebar's Chats project: a session in a throwaway directory
+        # ("chat" here ≠ the native streaming chat entries below), whose
+        # folder is made by a job (chats.trust).
+        if apilink.has(protocol.CAP_JOBS):
+            menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
+        for provider in providers:
+            menu.append(
+                _("Continue last {name} session…").format(name=provider.name),
+                f"win.continue-session::{provider.id}",
+            )
+        # Native streaming chat runs the agent in this process, on this
+        # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
+        # client that is not on the service's machine, and slated for
+        # removal. Its variants are this device's CLI's.
+        chat_providers = providers if apilink.is_local() else []
+        for provider in chat_providers:
+            for variant in provider.chat_variants():  # native streaming chat
+                if variant.label:
+                    text = _("New {name} native chat ({mode}) (experimental)").format(
+                        name=provider.name, mode=_(variant.label)
+                    )
+                else:
+                    text = _("New {name} native chat (experimental)…").format(name=provider.name)
+                menu.append(text, f"win.new-chat-provider::{provider.id}:{variant.key}")
+        menu.append(_("New window"), "app.new-window")
+
+    def apply_families(self) -> None:
+        """A hello listed the service's families (the app's `_on_connected`):
+        what this window built from the last one's follows, which is every
+        `apilink.has` read at construction; everything else asks as it is
+        shown or sent. Nothing is closed or opened here (no dock surgery on
+        a hello): a page whose family went ends as its pty's or its next
+        request's refusal says."""
+        self.sync_legacy_banner()
+        self._sync_new_menu()
+        self.sidebar.apply_families()
+        for index in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(index).get_child()
+            if isinstance(tab, TerminalTab):
+                tab.apply_families()
+
+    def sync_legacy_banner(self) -> None:
+        """Say so when the last hello is a pre-family Collins service's, which
+        a package upgrade leaves running (spec D18): every family stays hidden,
+        and this is the way out. It goes with the next hello that lists one."""
+        self._banner_legacy = apilink.predates_families()
+        self._sync_service_banner()
+
+    def _legacy_banner_title(self) -> str:
+        app = self.get_application()
+        label = app.connection_label() if hasattr(app, "connection_label") else ""
+        default_id = app is not None and app.get_application_id() == APP_ID
+        return quitrules.legacy_banner_words(remote=bool(label), default_id=default_id)
+
     def set_reconnecting(self, reconnecting: bool, name: str = "", detail: str = "") -> None:
         """Raise or lower the reconnect banner (`App._on_connection_state`).
         *name* is a remote connection's ("Reconnecting to <name>", §3.24),
@@ -1155,6 +1202,10 @@ class MainWindow(Adw.ApplicationWindow):
             banner.set_title(_("Restarting when idle"))
             banner.set_button_label(_("Cancel"))
             banner.set_revealed(True)
+        elif self._banner_legacy:
+            banner.set_title(self._legacy_banner_title())
+            banner.set_button_label(_("Restart service"))
+            banner.set_revealed(True)
         else:
             banner.set_revealed(False)
 
@@ -1165,6 +1216,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if self._banner_restart_pending and hasattr(app, "cancel_service_restart"):
             app.cancel_service_restart()
+            return
+        if self._banner_legacy:
+            self._ask_restart_service()
 
     def close_panel_ptys(self) -> None:
         """The app is quitting: every tab's panel shells end on the service
@@ -2224,11 +2278,12 @@ class MainWindow(Adw.ApplicationWindow):
         # The tab is bound to the id the CLI actually runs, which for an
         # attached fork is the fork's — including its (still stubby) transcript.
         bound_id = attach_id or session.session_id
-        jsonl_path = (
-            str(Path(session.jsonl_path).parent / f"{attach_id}.jsonl")
-            if attach_id
-            else session.jsonl_path
-        )
+        if not session.has_transcript:
+            jsonl_path = None  # a server's row with no transcript to name (spec D6)
+        elif attach_id:
+            jsonl_path = str(Path(session.jsonl_path).parent / f"{attach_id}.jsonl")
+        else:
+            jsonl_path = session.jsonl_path
         tab = None
         if attach_pty is not None:
             tab = TerminalTab(
@@ -2410,7 +2465,10 @@ class MainWindow(Adw.ApplicationWindow):
         # The folder is the service's to make, and to pre-trust in the
         # CLI's config so the launch skips the folder-trust prompt: it is
         # an empty directory it made a moment before (the ``chats.trust``
-        # job, chats.trust_chat_dir). The session starts when it lands.
+        # job, chats.trust_chat_dir). The session starts when it lands. Its
+        # ways in are hidden on a service with no jobs (D5).
+        if not apilink.has(protocol.CAP_JOBS):
+            return
 
         def landed(event: jobclient.JobEvent) -> None:
             if not event.finished:
@@ -2454,7 +2512,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _show_clone_dialog(self) -> None:
         """Add project → Clone repository: clone into the target directory
         (the clone_directory setting, editable in the dialog), then add the
-        checkout the way Open folder adds a picked one — trust gate and all."""
+        checkout the way Open folder adds a picked one — trust gate and all.
+        A clone is a job: nothing on a service with no `jobs` (D5), whose menu
+        has no such item."""
+        if not apilink.has(protocol.CAP_JOBS):
+            return
         dialog = clonedialog.CloneDialog(
             self.state.get_setting("clone_directory"), self._on_project_cloned
         )
@@ -4262,6 +4324,12 @@ class MainWindow(Adw.ApplicationWindow):
         # budgets — are the session's, on the service; a budget running
         # out comes back as the tab's "close-budget" (_on_tab_close_budget).
         backgrounding = page in self._bg_closing
+        if not apilink.has(protocol.CAP_INTERNAL):
+            # The close poll and its budget are the Collins service's; a
+            # server without them may never say the agent left, so the
+            # window keeps a budget of its own and closes with `kill` (spec
+            # §3.4). The tab that left in time is no longer in the set.
+            GLib.timeout_add_seconds(CLOSE_BUDGET_S, self._close_budget_over, page)
         if not tab.session.begin_close(exit_text, backgrounding):
             if backgrounding:
                 # The service's gate refused the /bg (bgagents.blocker: a
@@ -4276,6 +4344,11 @@ class MainWindow(Adw.ApplicationWindow):
                 if graceful and tab.session.begin_close(graceful, False):
                     return
             self._close_confirmed(page)
+
+    def _close_budget_over(self, page: Adw.TabPage) -> bool:
+        if page in self._closing_pages:
+            self._close_confirmed(page)
+        return GLib.SOURCE_REMOVE
 
     def _on_tab_close_budget(self, _tab: TerminalTab, _phase: str, page: Adw.TabPage) -> None:
         """The service's close poll ran out of budget for this page: the CLI
@@ -4321,7 +4394,7 @@ class MainWindow(Adw.ApplicationWindow):
         job matches (the agent CLI and the transcripts are its machine's)
         and records the link; the answer is said here."""
         session_id = param.get_string()
-        if self.store.get_session(session_id) is None:
+        if self.store.get_session(session_id) is None or not apilink.has(protocol.CAP_JOBS):
             return
 
         def landed(event: jobclient.JobEvent) -> None:
@@ -4847,7 +4920,11 @@ class MainWindow(Adw.ApplicationWindow):
         session_id = tab.session_id if is_session else None
         return background_blocker(
             is_session=is_session,
-            supports_detach=is_session and tab.provider.background_exit() is not None,
+            supports_detach=(
+                is_session
+                and tab.provider.background_exit() is not None
+                and apilink.has(protocol.CAP_BACKGROUND)  # D5: no /bg, no menu item, no yellow line
+            ),
             is_fork=is_session and tab.fork,
             is_sandboxed=is_session and tab.sandboxed,
             session_id=session_id,
@@ -4953,9 +5030,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         Outside a git repository there is nothing to show, and the tab says
         so in the terminal (the F7 precedent): a shortcut that silently does
-        nothing is indistinguishable from one that was never installed."""
+        nothing is indistinguishable from one that was never installed.
+        A service with no `git` has no such page at all (D5)."""
         tab = self._current_terminal_tab()
-        if tab is None:
+        if tab is None or not apilink.has(protocol.CAP_GIT):
             return
         if not tab.toggle_git_page():
             tab.feed_message(_("This session isn't in a git repository"))
@@ -4969,7 +5047,7 @@ class MainWindow(Adw.ApplicationWindow):
         carrying a fetch of its own, and one press should never be able to
         throw away the diff you were half way through reading."""
         tab = self._current_terminal_tab()
-        if tab is None:
+        if tab is None or not apilink.has(protocol.CAP_PRS):
             return
         if not tab.open_latest_pr_page():
             tab.feed_message(_("No pull request is linked to this session yet"))
@@ -5952,8 +6030,14 @@ class MainWindow(Adw.ApplicationWindow):
         on through the restart and each open tab shows its own again;
         without one every foreground session ends with the service and
         each open tab resumes its own once it is back, as a quit and a
-        relaunch did before the service. The CLI's background daemon and
+        relaunch did before the service. Nothing on a service with no
+        `internal`, which serves no `service.restart` (D5: its menu item is
+        hidden too), though a pre-family Collins service serves it without
+        listing it, and its banner's button comes here (D18). The CLI's
+        background daemon and
         its agents run on either way (D52)."""
+        if not apilink.serves_restart():
+            return
         app = self.get_application()
         link = getattr(app, "_service_link", None)
         try:
@@ -7036,6 +7120,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.set_project_archived(name, not self.state.is_project_archived(name))
 
     def _on_generate_icon(self, _action, param: GLib.Variant) -> None:
+        if not apilink.has(protocol.CAP_JOBS) or not apilink.has(protocol.CAP_USAGE):
+            return  # its menu item is hidden then (D5)
         cwd = param.get_string()
         dialogs.generate_icon_dialog(
             self,

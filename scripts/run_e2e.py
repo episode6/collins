@@ -64,6 +64,7 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 # seconds costs balance, never correctness. Refresh with the
 # balance-e2e-shards skill when a check grows or a shard drifts.
 CHECK_SECONDS = {
+    "check_server_families.py": 74.4,  # run 41350346194 (PR 646)
     "check_archive_worktree.py": 28.3,
     "check_pr_refresh_on_finish.py": 18.5,
     "check_composer_paste_back.py": 18.1,

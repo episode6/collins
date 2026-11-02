@@ -222,6 +222,20 @@ the glue, as the tab's.
   active), so the service answers as this terminal would even beside a
   new-chat screen with no agent pty.
 
+**With no `shells` family** (server-side spec D5) there are no shell pages: the
+footer's toggle and the strip's add button are hidden, `show_panel` and
+`open_panel_shell` do nothing, and a saved layout's shell, PR, attachments or git
+page does not come back when its family is gone (`TerminalTab._restorable_kinds`,
+through `panellayout.prune`). That pruned dock is a view and is never written
+back: `capture_panel_layout` answers the record it was given (`_layout_record`)
+and `save_panel_history` leaves the history alone, so a family-less hello costs no
+saved page (ruling 20). A hello that lists the family again brings the record back
+with no reopen, a beat later and with the keyboard kept
+(`TerminalTab._sync_saved_records`), when the dock is still the view it opened as
+with no page in it: `restore_layout` only rebuilds into a fresh dock, so a view
+holding a kept page (a git page, a docked composer) or one the person changed keeps
+its record until the tab is reopened. A hello that loses a family closes nothing.
+
 ## Adding a page kind
 
 1. Implement the protocol on the widget; give it a `page_kind`.

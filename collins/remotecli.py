@@ -20,6 +20,7 @@ import logging
 from collections.abc import Callable
 
 from . import apilink, clisetup, providers
+from .api import protocol
 from .api.protocol import RequestRefused
 
 log = logging.getLogger(__name__)
@@ -68,7 +69,10 @@ def default_provider() -> providers.Provider:
 def detect() -> str:
     """The service's pre-fill for the ask: the first known location on its
     machine that would be accepted, "" for none. A blocking call, made once
-    as the welcome dialog is built (a few stats on the service)."""
+    as the welcome dialog is built (a few stats on the service). Nothing
+    without `internal`, where `cli.check` is not served (D5)."""
+    if not apilink.has(protocol.CAP_INTERNAL):
+        return ""
     try:
         reply = apilink.call({"t": "cli.check"})
     except RequestRefused as refusal:
@@ -85,7 +89,7 @@ def check(path: str, on_verdict: Callable[[str], None]) -> None:
     It rides the primary like `state.set`, so a check sent after a write
     sees the write applied."""
     link = apilink.current()
-    if link is None:
+    if link is None or not apilink.has(protocol.CAP_INTERNAL):
         on_verdict(clisetup.MISSING)
         return
 
@@ -104,7 +108,7 @@ def refresh(on_done: Callable[[], None] | None = None) -> None:
     """Ask the service where its `claude` is now (after an answer was
     written, or cleared), and run *on_done* once it said."""
     link = apilink.current()
-    if link is None:
+    if link is None or not apilink.has(protocol.CAP_INTERNAL):
         if on_done is not None:
             on_done()
         return

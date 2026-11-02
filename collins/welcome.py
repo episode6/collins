@@ -53,6 +53,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from . import apilink, clisetup, remotecli, tokensettings, welcomegate  # noqa: E402
+from .api import protocol  # noqa: E402
 from .i18n import _  # noqa: E402
 from .state import AppState  # noqa: E402
 
@@ -102,7 +103,7 @@ def maybe_show(window, state: AppState, store, then: Callable[[], None]):
     launch check from being refused for nothing.) Returns the dialog, or
     None when nothing showed.
     """
-    cli_found = not remotecli.missing()
+    cli_found = welcomegate.cli_is_found()
     if not welcomegate.should_show(state, cli_found):
         then()
         return None
@@ -127,7 +128,7 @@ def show(window, state: AppState, store) -> WelcomeDialog:
     all.
     """
     log.info("welcome: showing the dialog on demand")
-    dialog = WelcomeDialog(window, state, store, lambda: None, not remotecli.missing())
+    dialog = WelcomeDialog(window, state, store, lambda: None, welcomegate.cli_is_found())
     dialog.present(window)
     return dialog
 
@@ -173,9 +174,14 @@ class WelcomeDialog(Adw.Dialog):
                 "switches for each."
             )
         )
-        page.add(self._build_cli_group())
-        page.add(self._build_token_group())
-        page.add(self._build_mcp_group())
+        # What this service's families have to disclose (D5): a group with
+        # none would describe a run or a tool that isn't there.
+        if apilink.has(protocol.CAP_INTERNAL):
+            page.add(self._build_cli_group())
+        if apilink.has(protocol.CAP_USAGE):
+            page.add(self._build_token_group())
+        if apilink.has(protocol.CAP_TOOLS):
+            page.add(self._build_mcp_group())
 
         header = Adw.HeaderBar()
         bar = Gtk.ActionBar()

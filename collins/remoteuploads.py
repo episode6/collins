@@ -34,6 +34,7 @@ from urllib.parse import quote
 from gi.repository import Gio, GLib
 
 from . import apilink, dropimages, uploads
+from .api import protocol
 from .i18n import _
 
 log = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ def upload(data: bytes, name: str, session: str | None = None, link: apilink.Lin
     """Send *data* as *name* for *session* (None: the pending directory)
     and return the path the service wrote. Raises `ValueError` with the
     user's words. Worker thread."""
+    if not apilink.has(protocol.CAP_TOOLS):
+        raise ValueError(_("This service does not take dropped files"))  # D5: no PUT goes out
     link = link or apilink.current()
     if link is None or not hasattr(link, "http_put"):
         raise ValueError(_("Not connected to the service"))

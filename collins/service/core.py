@@ -1840,10 +1840,12 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_store_lookup(self, message: protocol.Message, client: Client) -> dict:
-        return protocol.reply(message.id, found=self.feed.send_one(client, message.get("session")))
+        record = self.feed.send_one(client, message.get("session"))
+        return protocol.reply(message.id, found=record is not None, sessions=[record] if record else [])
 
     def _req_store_page_archived(self, message: protocol.Message, client: Client) -> dict:
-        return protocol.reply(message.id, items=self.feed.page(client))
+        records = self.feed.page(client)
+        return protocol.reply(message.id, items=len(records), sessions=records)
 
     def _req_store_refresh(self, message: protocol.Message, client: Client) -> dict:
         self.store.refresh(force_rebuild=bool(message.get("force")))

@@ -37,6 +37,14 @@ Titles were the service store's already. Rule 6 is unchanged: the modules
 that run `claude -p` are the same ones, called on the service. The Token
 use page and the welcome gate are client UI writing service settings.
 
+**With no `usage` or `jobs` family** (server-side spec D5): no usage panel, no
+Token use group, no Generate Icon; the pickers fall back to
+`claudemodels.FALLBACK_MODELS` with no round trip (`modelcatalog._ask` answers
+"nothing cached", not "failed"), `models.defaults` answers `{}`, a project has the
+generic icon, and the launch's `login.repair` is skipped. The welcome dialog shows
+only the groups whose family is listed, and is skipped when none is
+(`welcomegate.DISCLOSED_BY`); with no `internal` nothing asks where `claude` is.
+
 ## Headless runs
 
 All three go through `titles.headless_argv(cli, model, effort)`:

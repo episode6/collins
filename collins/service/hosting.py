@@ -398,13 +398,41 @@ class SessionRecord:
             if cli_changed is not None:
                 cli_changed(self, bool(fields["running_command"]))
 
+    def _refresh_tracked(self) -> dict:
+        """One read of every fact a poll or a settle also sends, through the
+        road that records it: what moved goes to the attached clients and
+        `_sent` holds it. What was read; with no pty (before the spawn, after
+        the exit) there is nothing to read and it is recorded nowhere."""
+        tracked = {
+            **self.launch_facts(),
+            **self.sandbox_facts(),
+            **self.box_facts(),
+            **self.process_facts(),
+        }
+        if self.pty() is not None:
+            self._send_changed(tracked)
+        return tracked
+
     def snapshot(self) -> dict:
-        """Every fact, for a client attaching. `landed` rides along once a
-        transcript read has landed (the tab acts on the transcript facts
-        — labels, chips, agent files — only under it), and `busy` and
-        `lookup_empty` as the tracker and the last landing left them."""
+        """Every fact, for a client attaching or subscribing. A snapshot and
+        the events are one series (§5 ruling 34): `_send_changed` sends only
+        what differs from `_sent`, so a client told a word `_sent` does not
+        hold is never corrected, and a second read can disagree with the first
+        (a CLI that execs on its way up has an empty cmdline for a third of a
+        millisecond, which reads as no agent at all). So what a poll or a
+        settle also sends is refreshed once, for everyone, and reported as
+        recorded: a misreading is then every client's, and the next poll
+        corrects it. The transcript facts are as the last landing or reset
+        recorded them: a worker's `update` moves the model ahead of its landing,
+        which is the landing's to send. `landed` rides along once a transcript
+        read has landed (the tab acts on the transcript facts — labels, chips,
+        agent files — only under it), and `busy` and `lookup_empty` as the
+        tracker and the last landing left them."""
         session = self.session
+        tracked = self._refresh_tracked()
         facts = {
+            **tracked,
+            **{name: self._sent[name] for name in tracked if name in self._sent},
             "session": session.session_id,
             "fork": bool(session.fork),
             "provider": str(getattr(session.provider, "id", "") or "")[: protocol.SHORT_MAX],
@@ -414,11 +442,7 @@ class SessionRecord:
             "agent_cwd": self._sent.get("agent_cwd", session.cwd),
             "pid": session.child_pid(),
             "resolver_cwd": session.resolver_cwd,
-            **self.launch_facts(),
-            **self.sandbox_facts(),
-            **self.box_facts(),
-            **self.process_facts(),
-            **self.transcript_facts(),
+            **{name: self._sent.get(name, value) for name, value in self.transcript_facts().items()},
             "lookup_empty": bool(self._sent.get("lookup_empty", False)),
             "busy": bool(self._sent.get("busy", False)),
         }
@@ -683,6 +707,7 @@ class SessionRecord:
         self.session.shell_spawned()
         self.session.start_cwd_poll()
         self.refresh_facts()
+        self.sandbox_changed()
         self._sent.update(self.process_facts())
 
     def sandbox_changed(self) -> None:
@@ -872,13 +897,12 @@ class SessionRecord:
 
     def client_attached(self, sink) -> None:
         """The facts whole to the one attaching — after what moved since
-        the last send went to everyone already attached, so a second attach
-        inside a settle starves no one (the snapshot records nothing). A
-        resolver paused for want of a client resumes (`mapped`). A shell
-        alone's startup hold (`close_if_orphan_shell`) is off: somebody
-        shows it again."""
+        the last send went to everyone already attached, which the snapshot's
+        own refresh does, so a second attach inside a settle starves no one
+        and they all hold one series. A resolver paused for want of a client
+        resumes (`mapped`). A shell alone's startup hold
+        (`close_if_orphan_shell`) is off: somebody shows it again."""
         self._cancel_orphan_recheck()
-        self.refresh_facts()
         self.send_to(sink, self.snapshot())
         self.session.arm_resolver()
 

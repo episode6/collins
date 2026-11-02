@@ -27,7 +27,8 @@ from collections.abc import Callable
 
 from gi.repository import GLib
 
-from . import blobcache, projecticons
+from . import apilink, blobcache, projecticons
+from .api import protocol
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ _waiting: dict[str, list[Callable[[bytes | None], None]]] = {}
 
 def icon_bytes(root: str | None, on_ready: Callable[[bytes | None], None] | None = None) -> bytes | None:
     """What is held for *root*'s icon now; see the module docstring. Main
-    thread."""
-    if not root:
+    thread. A service with no `files` has none: the generic icon, with no
+    thread and no GET (D5, ruling 21)."""
+    if not root or not apilink.has(protocol.CAP_FILES):
         return None
     held = _held.get(root)
     now = time.monotonic()

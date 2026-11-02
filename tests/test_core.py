@@ -714,8 +714,8 @@ def test_a_fact_that_does_not_fit_costs_the_others_nothing(server, tmp_path):
 
 def test_a_second_attach_does_not_starve_the_first(server, tmp_path):
     """What moved since the last send goes to the clients already attached
-    before the newcomer's snapshot; the snapshot records nothing, so the
-    first client's next settle still sees the change."""
+    before the newcomer's snapshot: the snapshot's own refresh is the road
+    that broadcasts it, so nobody is left on the old word (§5 ruling 34)."""
     first, second = Client(), Client()
     client_a = server.connect(first.on_output, first.on_event, device="laptop")
     client_b = server.connect(second.on_output, second.on_event, device="desk")
@@ -730,6 +730,173 @@ def test_a_second_attach_does_not_starve_the_first(server, tmp_path):
     assert first.of("session")[-1].get("takes_prompt") is True  # A heard the change
     assert second.of("session")[-1].get("takes_prompt") is True  # B's snapshot has it
     record.box_facts = original
+
+
+def _word(ends: Client, fact: str):
+    """The last word on *fact* a client heard, snapshot or event."""
+    return [event[fact] for event in ends.of("session") if fact in event][-1]
+
+
+def test_a_misread_at_an_attach_is_corrected_for_everyone(server, tmp_path):
+    """§5 ruling 34, the race PR-S2's check found. A CLI that execs on its way
+    up shows an empty cmdline for a third of a millisecond, so the process table
+    can read True, False, True. The snapshot used to read it a second time and
+    record nothing: told False over a `_sent` of True, the client was never
+    corrected, and its tab refused the composer. The reads go through a fake
+    process table, one at a time: an unread one would be a read too few, an
+    extra read an IndexError."""
+    along, newcomer = Client(), Client()
+    client_a = server.connect(along.on_output, along.on_event, device="laptop")
+    client_b = server.connect(newcomer.on_output, newcomer.on_event, device="desk")
+    pty = spawn_agent(client_a, tmp_path)["pty"]
+    client_a.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    table: list[bool] = []
+    record.session.agent_is_running = lambda: table.pop(0)
+
+    # True: a poll tells the one attached.
+    table[:] = [True]
+    record.refresh_process_facts()
+    assert not table and _word(along, "agent_running") is True
+    assert record._sent["agent_running"] is True
+
+    # False, in the window, as a second client attaches: one read, everybody's.
+    table[:] = [False]
+    client_b.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert not table
+    assert _word(newcomer, "agent_running") is False and _word(along, "agent_running") is False
+    assert record._sent["agent_running"] is False
+
+    # True: the next poll corrects both, which it could not if `_sent` said True.
+    table[:] = [True]
+    record.refresh_process_facts()
+    assert not table
+    assert _word(newcomer, "agent_running") is True and _word(along, "agent_running") is True
+    assert record._sent["agent_running"] is True
+
+
+def test_the_race_as_it_happened_needs_no_client_attached_first(server, tmp_path):
+    """The first read recorded with nobody attached (its event dropped), the
+    attach's own read False: the one client still ends on what `_sent` holds."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    record = server.core.sessions[pty]
+    table = [True, False, True]
+    record.session.agent_is_running = lambda: table.pop(0)
+    record.refresh_process_facts()
+    assert record._sent["agent_running"] is True
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert _word(ends, "agent_running") is False and record._sent["agent_running"] is False
+    record.refresh_process_facts()
+    assert not table and _word(ends, "agent_running") is True
+
+
+@pytest.mark.parametrize(
+    ("reader", "fact", "recorded_by"),
+    [
+        ("box_facts", "takes_prompt", "refresh_facts"),
+        ("box_facts", "running_command", "refresh_process_facts"),
+        ("launch_facts", "closing", "refresh_facts"),
+        ("sandbox_facts", "sandboxed", "sandbox_changed"),
+        ("process_facts", "agent_running", "refresh_process_facts"),
+    ],
+)
+def test_every_tracked_fact_is_one_series(server, tmp_path, reader, fact, recorded_by):
+    """The same for each kind of fact a poll or a settle also sends: after each
+    of True, False, True the client attaching and the one attached hold the
+    same word, and it is the word `_sent` holds."""
+    along, newcomer = Client(), Client()
+    client_a = server.connect(along.on_output, along.on_event, device="laptop")
+    client_b = server.connect(newcomer.on_output, newcomer.on_event, device="desk")
+    pty = spawn_agent(client_a, tmp_path)["pty"]
+    client_a.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    original = getattr(record, reader)
+    word = [True]
+    if fact == "running_command":
+        # What the poll's road reads of this one is the session's own.
+        record.session.has_running_command = lambda: word[0]
+    setattr(record, reader, lambda: {**original(), fact: word[0]})
+
+    getattr(record, recorded_by)()
+    assert _word(along, fact) is True and record._sent[fact] is True
+
+    word[0] = False
+    client_b.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert _word(newcomer, fact) is False and _word(along, fact) is False
+    assert record._sent[fact] is False
+
+    word[0] = True
+    getattr(record, recorded_by)()
+    assert _word(newcomer, fact) is True and _word(along, fact) is True
+    assert record._sent[fact] is True
+    setattr(record, reader, original)
+
+
+def test_a_snapshot_reads_each_tracked_fact_once(server, tmp_path):
+    """No fact read once for the change detection and again for the snapshot."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    record = server.core.sessions[pty]
+    reads = dict.fromkeys(("box_facts", "launch_facts", "sandbox_facts", "process_facts"), 0)
+    originals = {name: getattr(record, name) for name in reads}
+
+    def counting(name: str):
+        def read() -> dict:
+            reads[name] += 1
+            return originals[name]()
+
+        return read
+
+    for name in reads:
+        setattr(record, name, counting(name))
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert reads == dict.fromkeys(reads, 1)
+    for name, original in originals.items():
+        setattr(record, name, original)
+
+
+def test_a_subscribers_snapshot_is_the_same_series(server, tmp_path):
+    """`core.py`'s subscribe path calls the same `snapshot`: a reading it makes
+    is the attached client's too."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    table = [True, False, True]
+    record.session.agent_is_running = lambda: table.pop(0)
+    record.refresh_process_facts()
+    assert _word(ends, "agent_running") is True
+    assert record.snapshot()["agent_running"] is False
+    assert _word(ends, "agent_running") is False
+    record.refresh_process_facts()
+    assert not table and _word(ends, "agent_running") is True
+
+
+def test_a_snapshot_has_the_transcript_as_it_landed(server, tmp_path):
+    """A worker's `transcript.update` moves the model ahead of its landing. The
+    snapshot says what the landing recorded, and the landing says the rest to
+    the attached and the attaching alike, so neither is left on another word."""
+    along, newcomer = Client(), Client()
+    client_a = server.connect(along.on_output, along.on_event, device="laptop")
+    client_b = server.connect(newcomer.on_output, newcomer.on_event, device="desk")
+    pty = spawn_agent(client_a, tmp_path)["pty"]
+    client_a.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    record.session.transcript.model = lambda: "claude-opus-5-5"
+    record.transcript_landed([], False)
+    assert _word(along, "model") == "claude-opus-5-5"
+
+    record.session.transcript.model = lambda: "claude-sonnet-5-5"  # updated, not landed
+    client_b.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert _word(newcomer, "model") == "claude-opus-5-5"
+
+    record.transcript_landed([], False)
+    assert _word(newcomer, "model") == "claude-sonnet-5-5"
+    assert _word(along, "model") == "claude-sonnet-5-5"
 
 
 def test_the_close_budget_running_out_is_an_event_and_force_ends_the_pty(server, tmp_path, monkeypatch):

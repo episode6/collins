@@ -112,8 +112,9 @@ at the interval the [numbers table](./messages#numbers) gives.
 **Versions.** `protocol` is the protocol the client speaks and
 `min_protocol`, optional, the oldest it also speaks. The service computes
 the newest protocol both windows share and answers with it, or refuses
-`protocol` (naming both numbers in the refusal's `args`) and closes the
-connection. Each side's window is at most two wide. New message types and
+`protocol` (naming both numbers in the refusal's `args`, and the `caps` its
+hello would have listed) and closes the connection. Each side's window is at
+most two wide. New message types and
 fields do not bump the protocol: they ship behind a name in `caps`, and a
 client uses one only when the service lists it. The names today: `local`
 (the service offers a local proof), `git` (the `git.*` requests,
@@ -637,7 +638,10 @@ server, and only a value that asks for a feature the server lacks is refused.
 
 **What you say you serve.** List the families you serve in your hello's `caps`
 and your product's name in `implementation`. A family you do not list is one
-you do not serve. Leave `local` out and omit `local_proof` if you offer no proof.
+you do not serve. You should send `implementation` even if you list no family:
+a hello with neither is the shape of a Collins service from before families,
+and the Collins window answers it by offering to restart that service. Leave
+`local` out and omit `local_proof` if you offer no proof.
 
 **How a client reaches you.** Over ssh a client runs a discovery command to
 learn your socket's path, so document yours.
@@ -659,11 +663,31 @@ this to carry on without a feature, and the window blocks on some of its calls
 while it waits, so a request left unanswered freezes it where a refusal costs a
 round trip.
 
-**What the Collins window does without a family.** It does not yet read most of
-these names. It sends the request anyway and treats `unknown` as any other
-refusal: the feature shows the refusal or stays empty. Two exceptions matter
-for a server. A refused first `subscribe` is fatal to the window's startup, and
-a few refusals are matched by their exact sentence, which
+**What the Collins window does without a family.** It reads `caps` from every
+hello, hides what belongs to a family you do not list, and sends none of that
+family's requests, blob fetches or uploads. A Level 0 server shows it a
+connected, empty sidebar with no dialog. Without a family:
+
+| Family | What the window does without it |
+| --- | --- |
+| `git` | No branch, git toggle, git page or git menu items. |
+| `files` | The editor opens nothing, and its banner says the service has no files. The file tree and quick open stay empty, and projects show the generic icon. A client that is not local gets one box to type a folder's path in, not the picker, and you judge the path it hands you. Whether a folder is a checkout can't be asked, so the worktree box and *Git pull* go too and a launch is plain. |
+| `prs` | No pull request chips, pages or menus, and no gh notice. |
+| `sandbox` | No Sandboxed checkbox, pin, chip or Preferences group. |
+| `tools` | No attachments gallery or session-tool settings. A drop is refused with a toast. |
+| `jobs` | No clone, generated icon, new scratch chat or link repair, and no login repair at launch. |
+| `usage` | No usage panel and no icon generation. The model menus fall back to a built-in list. |
+| `background` | No background item or button: closing a tab exits the agent. |
+| `shells` | No terminal panel, and Ctrl+J does nothing. |
+| `composer` | Typing goes to the agent. The composer sends through `prompt`, into an empty box only, as the model and effort menus do with `/model` and `/effort`. A closed draft is kept and never typed back. |
+| `internal` | No *Restart service* or CLI path row. The editor follows `agent_cwd` itself, a close is timed by the window and ends in `kill`, and a protocol mismatch offers only Quit. |
+
+Three more things matter for a server. A `subscribe` you refuse, or a first one
+you do not answer in time, is a failed connect, not a failed startup: on a
+reconnect as at launch, the window shows its Reconnecting banner and tries again.
+An `item` with no `path` is a row with
+no transcript, so the row's transcript actions are hidden. And a few refusals
+are matched by their exact sentence, which
 [Conformance](./messages#refusal-sentences-a-client-matches) lists.
 
 **What is still to be written.** These pages specify the messages, and three

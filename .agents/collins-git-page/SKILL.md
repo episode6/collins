@@ -494,8 +494,10 @@ own** (below): they are the seam the transport sits on.
 the app every runner is routed through `remotegit.Transport`
 (`gitops.set_transport`, installed by `remotegit.install(link)` on every
 hello, `App._install_git_transport`: since PR-3.0 (D54 (6)) whatever the
-caps say, so a client never runs git itself and a service without the
-`git` capability refuses each ask; a caller that
+caps say, so a client never runs git itself. With no `git` capability nothing
+crosses the wire (server-side spec ruling 17): a runner answers
+`GitResult(False, "", NO_GIT, unreachable=True)`, `git.info` no entry, and the
+footer's branch, the toggle and the git menu items are hidden; a caller that
 brings its own `run=` — a test's fake — never sees it, and the service's
 process never has one: `GitFeed.__init__` refuses to start with a
 transport installed, so its own `file_patch` / `run_plan` / `file_at`

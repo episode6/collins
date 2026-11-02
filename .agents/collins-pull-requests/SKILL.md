@@ -25,6 +25,11 @@ answer first) and `service.status` carries the verdict as `gh` (`ready`,
 `missing`, `logged-out`; absent until known); `ghwelcome` polls that from
 a worker thread, never runs gh itself. The clone job keeps its own check.
 
+**With no `prs` family** (server-side spec D5) nothing reaches the service
+(`remoteprs` answers `NO_PRS` with no round trip) and every surface is empty or
+hidden: no records means no chips, marks or menus; the footer's refresh, the
+Preferences group and the gh card are hidden; `open_pr_page` does nothing.
+
 ## On the service (PR-1.11)
 
 `gh` is authenticated on the service's machine, so every PR read and action

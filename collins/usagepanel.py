@@ -25,6 +25,7 @@ import time
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from . import apilink, jobclient, usage
+from .api import protocol
 from .api.protocol import RequestRefused
 from .i18n import _
 from .state import AppState
@@ -350,6 +351,8 @@ class UsagePanel(Gtk.Box):
         self.refetch()
 
     def _refresh(self, manual: bool = False) -> None:
+        if not apilink.has(protocol.CAP_USAGE):
+            return  # the panel is hidden on such a service (D5)
         # A click during an in-flight background fetch still claims its
         # result: the user asked, so a failure owes them the snackbar.
         self._manual_fetch = self._manual_fetch or manual
@@ -362,11 +365,14 @@ class UsagePanel(Gtk.Box):
             # The fetch is the service's (`usage.get`: its machine's login,
             # PR-1.11), asked from this thread as the module was.
             try:
-                reply = apilink.call({"t": "usage.get"})
-                if "snapshot" in reply:
-                    result: object = usage.snapshot_from_record(reply["snapshot"])
+                if apilink.has(protocol.CAP_USAGE):
+                    reply = apilink.call({"t": "usage.get"})
+                    if "snapshot" in reply:
+                        result: object = usage.snapshot_from_record(reply["snapshot"])
+                    else:
+                        result = usage.UsageError(reply.get("kind") or "http", reply.get("error") or "")
                 else:
-                    result = usage.UsageError(reply.get("kind") or "http", reply.get("error") or "")
+                    result = usage.UsageError("network", "")  # a hello moved under the thread (D5)
             except usage.UsageError as err:
                 result = err
             except RequestRefused as refusal:
@@ -409,7 +415,8 @@ class UsagePanel(Gtk.Box):
             # fetch does on a fresh install with a dead token: tokenrefresh
             # refuses until the dialog that discloses the run is answered,
             # and the status text below names `claude` as the fix meanwhile.
-            jobclient.start("login.repair", {"mode": "repair"}, self._on_login_repair)
+            if apilink.has(protocol.CAP_JOBS):
+                jobclient.start("login.repair", {"mode": "repair"}, self._on_login_repair)
         if self._snapshot is not None:
             # Keep showing stale data; the tooltip carries its age and what
             # went wrong.

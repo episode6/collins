@@ -74,3 +74,30 @@ def test_the_window_reads_and_stats_no_transcript_for_the_services_work():
 def test_the_app_runs_no_archive_sweep():
     tree = _tree("app.py")
     assert "autodelete" not in _imports(tree) and "_sweep_archived" not in _names(tree)
+
+
+def test_a_refused_resubscribe_is_lost_whatever_its_code():
+    """Spec D6 and ruling 32, on the app the suite cannot import: the handler
+    hands every refusal to `lost` with the manager's words, and reads the code
+    for nothing else. `test_connection.py` runs that road; the e2e run
+    `refused-subscribe` runs it on a real window."""
+    function = next(
+        node
+        for node in ast.walk(_tree("app.py"))
+        if isinstance(node, ast.FunctionDef) and node.name == "_on_connected"
+    )
+    handler = next(
+        handler
+        for node in ast.walk(function)
+        if isinstance(node, ast.Try)
+        for handler in node.handlers
+        if isinstance(handler.type, ast.Name) and handler.type.id == "RequestRefused"
+    )
+    conditions = [node.test for node in ast.walk(handler) if isinstance(node, ast.If)]
+    assert not [test for test in conditions if "error" in ast.dump(test)], "a code decides whether it is lost"
+    lost = [
+        node
+        for node in ast.walk(handler)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "lost"
+    ]
+    assert len(lost) == 1 and "resubscribe_refused_words" in ast.dump(lost[0])

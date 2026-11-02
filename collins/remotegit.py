@@ -72,6 +72,10 @@ def _words(refusal: RequestRefused) -> str:
 
 log = logging.getLogger(__name__)
 
+# What a git ask answers on a service that serves no `git` (D5, ruling 17):
+# nothing crosses the wire. A page reached another way shows these words.
+NO_GIT = N_("This service has no git")
+
 # The words of a plan refused before it is sent (Transport.plan): the
 # patch and its keys would not fit one frame of the API.
 PLAN_TOO_LARGE = N_("The change is too large to send to the service: use git from a shell")
@@ -181,7 +185,10 @@ class Mirror:
         status is never served stale: the menus' state and the footer's
         entry mode read it, and it has the service's status budget to
         answer in). None when there is no entry and the service could not
-        be asked."""
+        be asked, and with no round trip when it serves no `git` (the
+        footer's branch label and the git menu then stay hidden, D5)."""
+        if not apilink.has(protocol.CAP_GIT):
+            return None
         with self._lock:
             entry = self._entries.get(cwd)
             fresh = entry is not None and time.monotonic() - entry.fetched_at <= max_age
@@ -198,6 +205,8 @@ class Mirror:
         return entry
 
     def _message(self, cwd: str, previous: GitInfo | None, changes: bool, state: bool) -> dict:
+        if not apilink.has(protocol.CAP_GIT):
+            raise apilink.absent(protocol.CAP_GIT)  # each caller asked first: this is the wire's own guard
         message: dict = {"t": "git.info", "cwd": cwd}
         if changes:
             message["changes"] = True
@@ -312,6 +321,8 @@ class Mirror:
         refs alone, on the service's 2 s tick: no monitors, no state.
         The watch is remembered until `unwatch`, and sent again on
         `reset`."""
+        if not apilink.has(protocol.CAP_GIT):
+            return
         message: dict = {
             "t": "git.watch", "cwd": cwd, "handle": handle, "files": list(files)[: protocol.REPO_PATHS_MAX]
         }
@@ -325,8 +336,8 @@ class Mirror:
 
     def _send_watch(self, message: dict) -> None:
         link = self._link_of()
-        if link is None or gitinfo.reader() is None:
-            return  # no link, or git is local (a service without the git capability)
+        if link is None or gitinfo.reader() is None or not apilink.has(protocol.CAP_GIT):
+            return  # no link, no transport, or a service that serves no `git`
         link.send(
             message, on_refused=lambda r: log.debug("git.watch %s refused: %s", message.get("cwd"), r.msgid)
         )
@@ -335,7 +346,7 @@ class Mirror:
         with self._lock:
             self._watches.pop(handle, None)
         link = self._link_of()
-        if link is None or gitinfo.reader() is None:
+        if link is None or gitinfo.reader() is None or not apilink.has(protocol.CAP_GIT):
             return
         link.send({"t": "git.unwatch", "handle": handle}, on_refused=lambda r: None)
 
@@ -365,7 +376,7 @@ class Mirror:
         page's compare after a `git-changed` or a fresh watch reads the
         mirror it leaves."""
         link = self._link_of()
-        if link is None or gitinfo.reader() is None:
+        if link is None or gitinfo.reader() is None or not apilink.has(protocol.CAP_GIT):
             then()
             return
         with self._lock:
@@ -404,7 +415,7 @@ class Mirror:
         had (no link, git local, a refusal). The page's check of a state
         pushed beside a read in flight, before it reloads."""
         link = self._link_of()
-        if link is None or gitinfo.reader() is None:
+        if link is None or gitinfo.reader() is None or not apilink.has(protocol.CAP_GIT):
             then(None)
             return
         with self._lock:
@@ -474,6 +485,8 @@ class Transport:
         env: dict[str, str] | None,
         ok_statuses: tuple[int, ...],
     ) -> gitops.GitResult:
+        if not apilink.has(protocol.CAP_GIT):
+            return gitops.GitResult(False, "", _(NO_GIT), unreachable=True)
         found = gitops.match_argv(argv)
         if found is None:
             log.error("remotegit: no builder makes this argv, not sent: git %s", " ".join(list(argv)[:6]))
@@ -513,6 +526,8 @@ class Transport:
         return gitops.GitResult(int(status) in tuple(ok_statuses), stdout, stderr)
 
     def blob(self, cwd: str, at: str, ref: str | None, path: str, timeout: float) -> gitops.BlobResult:
+        if not apilink.has(protocol.CAP_GIT):
+            return gitops.BlobResult(False, b"", _(NO_GIT), unreachable=True)
         link = self._link_of()
         if link is None or not hasattr(link, "http_get"):
             return gitops.BlobResult(False, b"", "Not connected to the service", unreachable=True)
@@ -529,6 +544,8 @@ class Transport:
         listed = list(paths)[: protocol.REPO_PATHS_MAX]
         if not listed:
             return {}
+        if not apilink.has(protocol.CAP_GIT):
+            return dict.fromkeys(listed)
         try:
             fields = apilink.call({"t": "git.sizes", "cwd": root, "paths": listed}, timeout=CALL_MARGIN_S)
         except Exception as err:  # a refusal or a link that raised: every path unsized
@@ -544,6 +561,8 @@ class Transport:
     def plan(
         self, cwd: str, plan: gitpatch.Plan, context: gitops.PlanContext, three_way: bool, timeout: float
     ) -> gitops.ApplyResult:
+        if not apilink.has(protocol.CAP_GIT):
+            return gitops.ApplyResult(False, "", _(NO_GIT), unreachable=True)
         message = {
             "t": "git.plan",
             "cwd": cwd,

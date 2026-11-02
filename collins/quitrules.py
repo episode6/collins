@@ -95,6 +95,22 @@ def quit_body(*, other_windows: bool, panel_busy: bool, tray_present: bool, firs
     return " ".join(parts)
 
 
+# -- the banner over a service that predates this window (server-side spec D18) -----
+
+
+def legacy_banner_words(remote: bool, default_id: bool) -> str:
+    """What the banner says, beside its *Restart service* button. The command
+    is named where it would work: a remote's service and the default app id's
+    run under that unit, and another app id's is a detached spawn no unit
+    names (ruling 23)."""
+    words = _("This service predates this window. Restart it to use every feature.")
+    if remote or default_id:
+        words += " " + _("Or run {command} where it runs.").format(
+            command="systemctl --user restart collins-service.service"
+        )
+    return words
+
+
 # -- the *Restart service* dialog's body (`MainWindow._ask_restart_service`, §3.21) ---
 
 

@@ -197,20 +197,36 @@ def step_host_markup(win) -> None:
     """The hello's host is a remote machine's word and the page's
     description is Pango markup (rule 5): a host with markup characters is
     shown as it is, not parsed. Patched here, in the client's own process."""
-    real = apilink.service_host
+    real = apilink.service_host, apilink.implementation
     apilink.service_host = lambda: "a&b<c>"
+    apilink.implementation = lambda: "x&y<z>"  # the hello's word, as the host is
     try:
         other = PreferencesDialog(win.state, lambda: None)
     finally:
-        apilink.service_host = real
+        apilink.service_host, apilink.implementation = real
     page = other._service_page
     check(
-        "the service page's description carries the host escaped",
-        page.get_description() == "The Collins service on a&amp;b&lt;c&gt;",
+        "the service page's description carries the host and the server escaped",
+        page.get_description() == "The Collins service on a&amp;b&lt;c&gt;\nServed by x&amp;y&lt;z&gt;",
         page.get_description(),
     )
     shown = [lb.get_text() for lb in labels_under(page) if lb.get_text().startswith("The Collins service")]
-    check("and its label shows the host verbatim", shown == ["The Collins service on a&b<c>"], shown)
+    check(
+        "and its label shows both verbatim",
+        shown == ["The Collins service on a&b<c>\nServed by x&y<z>"],
+        shown,
+    )
+    apilink.service_host = lambda: "a&b<c>"
+    apilink.implementation = lambda: None
+    try:
+        unnamed = PreferencesDialog(win.state, lambda: None)
+    finally:
+        apilink.service_host, apilink.implementation = real
+    check(
+        "a server that names itself nothing shows only the host",
+        unnamed._service_page.get_description() == "The Collins service on a&amp;b&lt;c&gt;",
+        unnamed._service_page.get_description(),
+    )
 
 
 def step_layout() -> bool:

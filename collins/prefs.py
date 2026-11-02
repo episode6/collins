@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-11-01. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -41,6 +41,7 @@ from . import (  # noqa: E402
     updatecheck,
     welcome,
 )
+from .api import protocol
 from .api.protocol import RequestRefused
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .formatting import display_path
@@ -327,7 +328,8 @@ class PreferencesDialog(Adw.Dialog):
                 _("The Collins service on {host}").format(host=GLib.markup_escape_text(host))
                 if host
                 else _("The Collins service")
-            ),
+            )
+            + self._implementation_line(),
         )
         self._pages = (self._device_page, self._service_page)
         self._groups: dict[tuple[str, str], _SearchableGroup] = {}
@@ -353,6 +355,8 @@ class PreferencesDialog(Adw.Dialog):
             "editor": self._build_editor_group,
         }
         for name in prefslayout.GROUPS:
+            if name in prefslayout.GROUP_FAMILIES and not apilink.has(prefslayout.GROUP_FAMILIES[name]):
+                continue  # no such surface on this service (D5): hidden, not disabled
             built = builders[name](state)
             if isinstance(built, _SplitGroup) != (prefslayout.GROUP_SIDES[name] == "mixed"):
                 raise ValueError(f"the {name} group is built as the wrong kind for its side")
@@ -410,6 +414,15 @@ class PreferencesDialog(Adw.Dialog):
         # _on_search_stopped keeps Escape closing anyway.
         self.set_child(toolbar_view)
         self.set_focus(self._search_entry)
+
+    @staticmethod
+    def _implementation_line() -> str:
+        """The server's name under the host (D2: shown, and nothing gated on
+        it). The hello's word, so escaped as the host is."""
+        name = apilink.implementation()
+        if not name:
+            return ""
+        return "\n" + _("Served by {name}").format(name=GLib.markup_escape_text(name))
 
     def _build_cli_group(self, state: AppState) -> _SearchableGroup:
         # Above everything on the Service page, under no heading: the CLI is
@@ -488,14 +501,16 @@ class PreferencesDialog(Adw.Dialog):
         icon_size_row.set_value(int(state.get_setting("project_icon_size") or 16))
         icon_size_row.connect("notify::value", self._on_icon_size_changed)
         general_group.add(icon_size_row, "project_icon_size")
-        self._build_clone_directory_row(state, general_group)
+        if apilink.has(protocol.CAP_JOBS):  # a clone is a job (D5)
+            self._build_clone_directory_row(state, general_group)
         self._usage_panel_row = Adw.SwitchRow(
             title=_("Show Claude usage"),
             subtitle=_("Show subscription usage limits below the session list"),
         )
         self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
         self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
-        general_group.add(self._usage_panel_row, "show_usage_panel")
+        if apilink.has(protocol.CAP_USAGE):  # no panel to show on a service without it (D5)
+            general_group.add(self._usage_panel_row, "show_usage_panel")
         self._update_check_row = Adw.SwitchRow(
             title=_("Check for updates"),
             subtitle=_(
@@ -642,16 +657,17 @@ class PreferencesDialog(Adw.Dialog):
             _("Archiving a session that is still running also closes its tab"),
             "archive_running_session",
         )
-        self._add_running_behavior_row(
-            sessions_group,
-            _("When archiving a session in a git worktree"),
-            _(
-                "Whether to move the session's worktree to the trash once it "
-                "has stopped; Undo brings it back with the session"
-            ),
-            "archive_worktree",
-            behaviors=_WORKTREE_BEHAVIORS,
-        )
+        if apilink.has(protocol.CAP_JOBS):  # a worktree's trash is a job (D5)
+            self._add_running_behavior_row(
+                sessions_group,
+                _("When archiving a session in a git worktree"),
+                _(
+                    "Whether to move the session's worktree to the trash once it "
+                    "has stopped; Undo brings it back with the session"
+                ),
+                "archive_worktree",
+                behaviors=_WORKTREE_BEHAVIORS,
+            )
         self._quit_behavior_row = self._add_running_behavior_row(
             sessions_group,
             _("When quitting with running sessions"),
@@ -719,7 +735,8 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
         self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
-        sessions_group.add(self._bg_poll_row, "background_status_poll")
+        if apilink.has(protocol.CAP_BACKGROUND):  # no yellow lines to keep up (D5)
+            sessions_group.add(self._bg_poll_row, "background_status_poll")
         return sessions_group
 
     def _build_auto_delete_row(self, state: AppState, group: _SearchableGroup | _SplitGroup) -> None:
@@ -1178,7 +1195,8 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._composer_typing_row.set_active(bool(state.get_setting("composer_on_typing")))
         self._composer_typing_row.connect("notify::active", self._on_composer_typing_changed)
-        composer_group.add(self._composer_typing_row, "composer_on_typing")
+        if apilink.has(protocol.CAP_COMPOSER):  # with none a key is the CLI's own (D5)
+            composer_group.add(self._composer_typing_row, "composer_on_typing")
         self._attach_overlay_row = Adw.SwitchRow(
             title=_("Floating composer button"),
             subtitle=_(
@@ -2198,6 +2216,11 @@ class PreferencesDialog(Adw.Dialog):
         behaviors: list[tuple[str, str]] | None = None,
     ) -> Adw.ComboRow:
         behaviors = behaviors if behaviors is not None else _RUNNING_BEHAVIORS
+        if not apilink.has(protocol.CAP_BACKGROUND):
+            # No /bg to choose on such a service (D5): a saved "background"
+            # reads as the first choice here, and exits where it is acted on
+            # (the window's blocker).
+            behaviors = [choice for choice in behaviors if choice[0] != "background"]
         row = Adw.ComboRow(title=title, subtitle=subtitle)
         labels = [_(label) for _v, label in behaviors]
         row.set_model(Gtk.StringList.new(labels))

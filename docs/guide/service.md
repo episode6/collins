@@ -85,7 +85,9 @@ exits 0.
 
 A package upgrade never restarts a running service: the new window keeps
 talking to the old service for as long as their protocols overlap. To
-run the new service code, use **Restart service** (below).
+run the new service code, use **Restart service** (below). The first window
+after an upgrade from a service older than v0.1.5 hides nearly everything, and
+its banner has the button.
 
 ## Quitting, detaching and reopening
 

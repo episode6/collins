@@ -141,8 +141,7 @@ def check(label: str, ok: bool, detail: object = "") -> None:
 
 
 def settle() -> None:
-    """Run what the main loop has ready, and no more: the box must still
-    be locked when it is read, before the (fast) fake clone finishes."""
+    """Run what the main loop has ready, and no more."""
     context = GLib.MainContext.default()
     for _ in range(50):
         if not context.pending():
@@ -329,7 +328,8 @@ def step_filter() -> None:
     dialog._target.set_text(CODE)
     type_into(dialog, "wid")
     dialog._start_clone()
-    settle()
+    # Read at once, with nothing pumped: `_start_clone` locks it before it asks,
+    # and on a fast machine the fake clone's finish is already there to land.
     check("cloning locks the box", not dialog._entry.get_sensitive())
     win = state["win"]
     poll(

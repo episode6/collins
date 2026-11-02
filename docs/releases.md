@@ -57,9 +57,32 @@ downloads of each version, see the
   program serving this API in place of `collins-service` has to answer. The
   same independent-work reading now covers such a server, written from the
   spec. The hello's `caps` lists every family, with nine new names, and its
-  new `implementation` field names the product. A newer window talking to an
-  older service before this change sees none of the new names; nothing reads
-  them yet.
+  new `implementation` field names the product.
+- **The window shows what its service serves.** It reads those names on every
+  connect, hides what a service doesn't list, and sends that family nothing: a
+  server with no pull requests has no PR chips, one with no panel shells has no
+  terminal panel, and one with nothing beyond the wire shows a connected, empty
+  sidebar. What a service can't show stays saved: a panel layout or an editor
+  state it could not restore is there again on a service that can.
+  [Implementing a server](/api/#implementing-a-server) lists what goes
+  with each family, and *Preferences → Service* says which server it is. **A
+  service still running from before this version lists none of the names**, and
+  a package upgrade restarts nothing, so the first window after upgrading hides
+  nearly everything: its banner says why and has a *Restart service* button,
+  and `systemctl --user restart collins-service.service` does the same. Open
+  tabs get their panels back when it restarts, except that a session saved with
+  a git page or a docked composer alongside its shells gets its shells back only
+  after the tab is closed and reopened.
+- **A server that doesn't answer no longer stops the window.** A refused first
+  subscribe opens the window under its Reconnecting banner instead of ending
+  the launch, a refused one on a reconnect keeps the banner up and tries again
+  instead of sitting on an empty sidebar, and the tab's two-second tick no longer
+  waits on the service, so a slow answer can't freeze the window.
+- **Fixed: a tab could stay convinced its agent wasn't running.** A window that
+  attached in the instant the CLI was starting could be told the agent wasn't
+  there and never hear otherwise, so the tab refused the composer and drops until
+  it was reopened. What a client is told on attaching and what it hears afterwards
+  are now one series, and a wrong reading is corrected within two seconds.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another

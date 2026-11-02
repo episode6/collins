@@ -136,9 +136,28 @@ def saved_settings() -> dict:
         return {}
 
 
-def later(fn, ms: int = 1000) -> bool:
-    GLib.timeout_add(ms, fn)
+def when(predicate, then, timeout_ms: int = 15000) -> bool:
+    """Run *then* once *predicate* holds, looking every 50 ms; at the deadline
+    too, whose checks then say what is wrong. Every step here waits on a word
+    of the service's: a verdict is a reply, and until it lands the button is
+    insensitive and still wears its old label, so no fixed wait is enough."""
+    waited = [0]
+
+    def tick() -> bool:
+        waited[0] += 50
+        if predicate() or waited[0] >= timeout_ms:
+            then()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    GLib.timeout_add(50, tick)
     return GLib.SOURCE_REMOVE
+
+
+def continue_shows(dialog) -> bool:
+    """The verdict landed, and it is Continue."""
+    cont = button(dialog, "Continue")
+    return cont is not None and cont.get_sensitive()
 
 
 i18n.init("en")
@@ -164,7 +183,12 @@ def stage() -> bool:
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
     state["win"] = win
-    return later(step_asked, 1500)
+
+    def asked() -> bool:
+        dialog = win.get_visible_dialog()
+        return isinstance(dialog, welcome.WelcomeDialog) and continue_shows(dialog)
+
+    return when(asked, step_asked)
 
 
 def step_asked() -> bool:
@@ -190,7 +214,7 @@ def step_asked() -> bool:
     check("the service's verdict on it is Continue", button(dialog, "Continue") is not None
           and button(dialog, "Continue").get_sensitive())
     entry.set_text(f"{E2E}/nowhere/claude")
-    return later(step_refused, 500)
+    return when(lambda: button(dialog, "Use This CLI") is not None, step_refused)
 
 
 def step_refused() -> bool:
@@ -203,7 +227,7 @@ def step_refused() -> bool:
     )
     check("no Continue for it", button(dialog, "Continue") is None)
     state["entry"].set_text(SHIM)
-    return later(step_accepted, 500)
+    return when(lambda: continue_shows(dialog), step_accepted)
 
 
 def step_accepted() -> bool:
@@ -213,7 +237,15 @@ def step_accepted() -> bool:
     if cont is None:
         return done()
     cont.emit("clicked")
-    return later(step_continued, 800)
+
+    def continued() -> bool:
+        return (
+            not isinstance(state["win"].get_visible_dialog(), welcome.WelcomeDialog)
+            and saved_settings().get("claude_cli_path") == SHIM
+            and remotecli.found_at() == SHIM
+        )
+
+    return when(continued, step_continued)
 
 
 def step_continued() -> bool:
@@ -229,7 +261,7 @@ def step_continued() -> bool:
     prefs = PreferencesDialog(win.state, lambda: None)
     prefs.present(win)
     state["prefs"] = prefs
-    return later(step_prefs, 800)
+    return when(lambda: (prefs._cli_reason.get_subtitle() or "").startswith("Found it"), step_prefs)
 
 
 def step_prefs() -> bool:
@@ -240,7 +272,13 @@ def step_prefs() -> bool:
     reason = prefs._cli_reason.get_subtitle() or ""
     check("with the service's verdict on it", reason.startswith("Found it"), reason)
     prefs._cli_row.set_text("")
-    return later(step_cleared, 800)
+
+    def cleared() -> bool:
+        return saved_settings().get("claude_cli_path") == "" and (prefs._cli_reason.get_subtitle() or "").startswith(
+            "claude isn't on PATH"
+        )
+
+    return when(cleared, step_cleared)
 
 
 def step_cleared() -> bool:

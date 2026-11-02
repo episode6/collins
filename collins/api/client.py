@@ -29,7 +29,8 @@ service sent them. The one request `call` sends on the primary is
 connection, and the main thread drains the queue while it waits, so the
 mirrors are filled when `subscribe` returns
 (the connection manager asks for it at startup and on every reconnect, and
-nowhere else does a main-thread call drain).
+nowhere else does a main-thread call drain: a call can come from inside a
+landing, and a drain there would run other landings inside it).
 
 **Flow control** (§3.2): every live output frame fed is counted per pty,
 and an `ack {pty, offset}` goes back every `ACK_BYTES` or `ACK_MS` after
@@ -88,12 +89,27 @@ class ProtocolMismatch(ConnectionLost):
     """The service and this client speak no protocol in common (the hello
     refused ``protocol``, or the hello's window and ours do not meet):
     *service* and *client* are the two protocol versions, which the
-    mismatch dialog names (§3.21)."""
+    mismatch dialog names (§3.21). *caps* is what the server listed, its
+    hello's or its refusal's `caps`, and None when it named none, which only a
+    pre-family Collins service ever did (spec D18, ruling 18). The dialog
+    offers *Restart Service* to that one, and otherwise only with `internal`
+    among them (D5)."""
 
-    def __init__(self, message: str, service: int | None, client: int) -> None:
+    def __init__(self, message: str, service: int | None, client: int, caps=None) -> None:
         super().__init__(message)
         self.service = service
         self.client = client
+        self.caps = None if caps is None else frozenset(str(cap) for cap in caps)
+
+
+def _named_caps(details: dict) -> list | tuple | None:
+    """The caps a `protocol` refusal names: None only when it names none (a
+    pre-family service), and what is there but no list reads as listing
+    nothing, which offers nothing."""
+    if "caps" not in details:
+        return None
+    caps = details["caps"]
+    return caps if isinstance(caps, list) else ()
 
 
 def new_client_id() -> str:
@@ -164,6 +180,7 @@ class SocketLink(apilink.Link):
         self.on_lost = on_lost
         self._on_output = on_output
         self.hello: dict = {}
+        self.families = frozenset()  # the last hello's `caps` (apilink.has)
         self.local = False
         self.connected = False
         self._lock = threading.Lock()
@@ -283,10 +300,12 @@ class SocketLink(apilink.Link):
                 f"and this Collins speaks {protocol.PROTOCOL}",
                 int(hello["protocol"]),
                 protocol.PROTOCOL,
+                None if apilink.hello_predates_families(hello) else hello.get("caps") or (),
             )
         self._open(self._sync, deadline)
         self._hello(self._sync, deadline)
         self.hello = hello
+        self.families = frozenset(str(cap) for cap in hello.get("caps") or ())
         self.connected = True
         return hello
 
@@ -367,6 +386,7 @@ class SocketLink(apilink.Link):
                     refusal.msgid.format_map(details),
                     service if isinstance(service, int) and not isinstance(service, bool) else None,
                     protocol.PROTOCOL,
+                    _named_caps(details),
                 ) from None
             raise ConnectionLost(f"hello refused: {refusal.msgid}") from None
 
@@ -946,6 +966,15 @@ class PtyClient:
         elif kind == "detach" and isinstance(message.get("pty"), int):
             self.ptys.discard(message["pty"])
         return reply
+
+    def send(self, message: dict, on_reply=None, on_refused=None) -> None:
+        """`Link.send`: the same ask with no wait, its answer landing on
+        the main loop (a request the main thread makes on a timer)."""
+        if self.closed:
+            if on_refused is not None:
+                on_refused(RequestRefused(protocol.ERROR_GONE, "the connection is closed", {}))
+            return
+        self.link.send(message, on_reply, on_refused)
 
     def claim(self, pty: int) -> None:
         """Hear *pty*'s frames and events without a request (a reattach

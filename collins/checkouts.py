@@ -32,7 +32,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from . import remotefiles
+from . import apilink, remotefiles
+from .api import protocol
 
 
 def git_marker(cwd: str) -> str:
@@ -68,8 +69,11 @@ def ask_answer(
     """Whether *cwd* is a git checkout, asked of the service off the main
     loop; `then(answer)` lands at `GLib.PRIORITY_DEFAULT`, exactly once,
     with True, False, or None for "could not ask" (see the module
-    docstring). No directory is False: there is nothing to ask."""
-    if not cwd:
+    docstring). No directory is False: there is nothing to ask. No `files`
+    on the service is False too (spec D5, ruling 20): no box was shown and
+    nothing was promised, so a launch is plain, where None would refuse a
+    Send with a worktree wish for ever."""
+    if not cwd or not apilink.has(protocol.CAP_FILES):
         then(False)
         return
     marker = git_marker(cwd)

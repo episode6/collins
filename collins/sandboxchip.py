@@ -48,7 +48,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
-from . import choosers, mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
+from . import apilink, choosers, mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
+from .api import protocol  # noqa: E402
 from .api.protocol import RequestRefused  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _, translate  # noqa: E402
@@ -151,7 +152,7 @@ class SandboxChip(Gtk.MenuButton):
         self._refusal = ""
         box = self._box()
         link = self._link()
-        if not sandboxplan.valid_box_id(box) or link is None:
+        if not sandboxplan.valid_box_id(box) or link is None or not apilink.has(protocol.CAP_SANDBOX):
             return None
         self._listen()
         try:
@@ -267,6 +268,7 @@ class SandboxChip(Gtk.MenuButton):
         shell.set_halign(Gtk.Align.START)
         shell.set_tooltip_text(_("Open a shell inside this session's sandbox"))
         shell.connect("clicked", self._open_shell)
+        shell.set_visible(apilink.has(protocol.CAP_SHELLS))  # hidden on a service with no shells (D5)
         self._content.append(shell)
 
     def _grant_row(self, workspace: str, drawn: dict, defaults: list[str], hosted: bool) -> Gtk.Widget:
