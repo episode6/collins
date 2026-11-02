@@ -1474,15 +1474,18 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "close",
-        "End a pty's session: the graceful exit, the /bg handoff, or force.",
+        "End a pty's session: `exit` types the agent's own exit keys, `background` its handoff "
+        "command, `kill` forces it; `text` is keystrokes to type instead of the server's own.",
         family=FAMILY_CORE, level=1,
         request=_request(
             {
                 "pty": _req(_PTY),
                 "mode": _req(Field(K_STR, choices=frozenset({"exit", "background", "kill"}), high=16)),
-                # The keystrokes of an exit or a handoff, as the provider
-                # spells them; `force` is the window's answer to a budget
-                # event (the same as mode ``kill``).
+                # The keystrokes to type instead of the server's own
+                # (optional): a bare `exit` types the agent's exit keys and a
+                # bare `background` its handoff command, as the server knows
+                # them; `force` is the window's answer to a budget event (the
+                # same as mode ``kill``).
                 "text": _s(256),
                 "force": _BOOL,
             }

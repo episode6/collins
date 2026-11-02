@@ -1478,7 +1478,14 @@ class ServiceCore:
         mode = message.get("mode")
         record = self.sessions.get(pty_id)
         if mode in ("exit", "background") and not message.get("force") and record is not None:
-            text = message.get("text") or ""
+            # The keystrokes are the server's to know (§5 ruling 54): a
+            # bare close types the agent's own exit keys or its handoff
+            # command, as the pages allow; `text` is a client's override.
+            # Refused only when the server has no keys and the client
+            # sent none.
+            provider = record.session.provider
+            own = provider.graceful_exit() if mode == "exit" else provider.background_exit()
+            text = message.get("text") or own or ""
             if not text:
                 return protocol.refuse(
                     message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"

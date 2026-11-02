@@ -866,7 +866,7 @@ No fields.
 
 ### `close`
 
-End a pty's session: the graceful exit, the /bg handoff, or force.
+End a pty's session: `exit` types the agent's own exit keys, `background` its handoff command, `kill` forces it; `text` is keystrokes to type instead of the server's own.
 
 Family: `core` · Level 1
 

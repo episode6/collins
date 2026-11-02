@@ -396,13 +396,26 @@ def test_a_graceful_close_is_the_sessions_and_a_kill_the_ptys(server, tmp_path):
     client = server.connect(ends.on_output, ends.on_event, device="laptop")
     pty = spawn_agent(client, tmp_path)["pty"]
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
-    with pytest.raises(loopback.RequestRefused):
-        client.request({"t": "close", "pty": pty, "mode": "exit"})  # no keystrokes to feed
-    client.request({"t": "close", "pty": pty, "mode": "exit", "text": "\x03\x03"})
     session = server.core.sessions[pty].session
-    assert session.closing is True
+    written = []
+    session.pty.write = lambda data: written.append(bytes(data))
+    # A bare close types the agent's own exit keys (§5 ruling 54: the
+    # pages allow it, and the keys are the server's to know).
+    client.request({"t": "close", "pty": pty, "mode": "exit"})
+    assert session.closing is True and written == [b"\x03\x03"]
     client.request({"t": "close.end", "pty": pty})
     assert session.closing is False
+    # `text` is typed instead of the server's own.
+    client.request({"t": "close", "pty": pty, "mode": "exit", "text": "/exit\r"})
+    assert session.closing is True and written == [b"\x03\x03", b"/exit\r"]
+    client.request({"t": "close.end", "pty": pty})
+    assert session.closing is False
+    # A server whose agent has no such keys refuses a bare close.
+    session.provider.graceful_exit = lambda: None
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "close", "pty": pty, "mode": "exit"})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    session.pty.write = type(session.pty).write.__get__(session.pty)
     client.request({"t": "close", "pty": pty, "mode": "kill"})
     assert pump(3, lambda: pty not in server.core.ptys.ptys)
     assert pty not in server.core.sessions  # dropped once the exit is reported

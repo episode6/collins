@@ -134,6 +134,11 @@ downloads of each version, see the
   tracker reported them in turn; a client reading the `finished` event
   could still see the session busy. Every fall is now reported before any
   finish, as the session-facts page promises.
+- **Fixed: a bare `close {mode: "exit"}` was refused.** The service
+  required the client to send the exit keystrokes, where every page
+  allows a close with the mode alone. A bare `exit` now types the agent's
+  own exit keys and a bare `background` its handoff command; `text` is
+  still typed instead when a client sends it.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's
