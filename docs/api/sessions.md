@@ -290,8 +290,14 @@ and offers to change them: the `switch` request types the CLI's own
 the records the appendix's [records](#b-the-records) entry names: the
 model and the effort on an assistant record (`message.model`, and the
 record's own `effort`), the permission mode on a typed prompt's record
-(`permissionMode`); the latest of each on the main chain is the current
-one, since the CLI writes them with every record. Three things trip a
+(`permissionMode`) and on the standalone `permission-mode` records the
+CLI writes whenever it saves its state (with each request and reply, and
+as it exits); the latest of each in the file is the current one, since
+the CLI writes them over and over, and a standalone record carries no
+timestamp, so latest means last in the file. A mode cycled at the
+keyboard between prompts reaches the file at the CLI's next save, which
+is the next prompt's at the latest, so a reading that takes the later of
+the two records is right from then on. Three things trip a
 naive reading: the CLI writes a placeholder model into some synthetic
 assistant records, which are not the agent's model; a sub-agent's records
 sit in the same file with `isSidechain` true and carry the sub-agent's
@@ -571,11 +577,19 @@ moment.
 A transcript's records are typed by a top-level `type`. The ones a server
 reads:
 
-- **The first records are metadata.** A file written by 2.1.316 opens with
-  records such as `last-prompt`, `bridge-session`, `mode` and
-  `permission-mode`, which carry a `sessionId` and no `timestamp` and no
-  `cwd`. The session's start time and directory are read from the first
-  record that carries `timestamp` and `cwd`, not from line one.
+- **The first records are metadata, and they recur.** A file written by
+  2.1.316 opens with records such as `last-prompt`, `bridge-session`,
+  `mode` and `permission-mode`, which carry a `sessionId` and no
+  `timestamp` and no `cwd`. The session's start time and directory are
+  read from the first record that carries `timestamp` and `cwd`, not from
+  line one. The same group (`last-prompt`, `ai-title`, `mode`,
+  `permission-mode`, `atis-latch`, …) is written again whenever the CLI
+  saves its state: before each request, after each reply and as it exits,
+  so these records are found through the whole file, and the last
+  `permission-mode` record is the mode at the last save. A mode cycled at
+  the keyboard (shift+tab) writes no record at the keystroke (none within
+  5 s on 2.1.316): the next save carries it, and the next typed prompt's
+  `user` record carries it too.
 - **`user`** records carry the person's prompts and the tools' results.
   Each has `cwd`, `timestamp`, `uuid`, `parentUuid`, `isSidechain`,
   `gitBranch` and `version` (the CLI's version), and `message.content`,
