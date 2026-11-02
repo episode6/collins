@@ -241,9 +241,13 @@ class FakeHost:
         self.forks: list[str] = []
         self.cwds: list = []
         self.inputs: list[str] = []  # what write_text announced, in order
+        self.agent_running_recorded = True  # the host's last recorded reading
 
     def alive(self):
         return self.is_alive
+
+    def agent_running(self):
+        return self.agent_running_recorded
 
     def paint(self, text):
         self.events.append(("paint", text))
@@ -364,6 +368,19 @@ def test_an_empty_box_takes_a_prompt(rig):
     assert session.takes_prompt()
     assert session.prompt_block() == ""
     assert session.entered_prompt() is None
+
+
+def test_a_shell_alone_drawing_the_mark_takes_no_prompt(rig):
+    """§5 ruling 40: the host's last recorded `agent_running` gates the
+    read. A shell the agent left behind can draw the CLI's mark, and a
+    prompt typed then lands in the shell: whatever the screen shows, no
+    agent recorded is no prompt taken, and unknown is no agent."""
+    session, _term, host, _clock = rig
+    host.agent_running_recorded = False
+    assert not session.takes_prompt()
+    assert session.prompt_block()
+    host.agent_running_recorded = True
+    assert session.takes_prompt()
 
 
 def test_typed_text_blocks_a_prompt_and_reads_back(rig):

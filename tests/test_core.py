@@ -223,8 +223,19 @@ def test_the_box_facts_move_with_the_screen(server, tmp_path):
     screen = server.core.ptys.get(pty).screen
     assert pump(3, lambda: screen.capture_contents().count(_CLI["mark"]) >= 2)
     client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")  # the CLI's prompt mark, drawn by cat's echo
-    assert pump(3, lambda: any(e.get("takes_prompt") for e in ends.of("session")))
+    assert pump(3, lambda: "\u276f\xa0" in screen.capture_contents())
+    pump(0.3)  # the settle and a margin
+    # A shell alone drawing the mark takes no prompt: no agent has been
+    # recorded on the pty (§5 ruling 40), whatever the screen shows.
+    assert not any(e.get("takes_prompt") for e in ends.of("session"))
+    assert record._sent.get("takes_prompt") is False
+    # The poll that finds the agent re-reads the box at once, with no
+    # settle in between: the change is one `session` event with the
+    # fields that moved.
+    record.session.agent_is_running = lambda: True
+    record.refresh_process_facts()
     moved = [e for e in ends.of("session") if "takes_prompt" in e][-1]
+    assert moved["takes_prompt"] is True
     assert set(moved) >= {"t", "pty", "handle", "takes_prompt"}
     assert "cwd" not in moved  # a changed-fields event, not the snapshot
 

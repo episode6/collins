@@ -103,6 +103,13 @@ downloads of each version, see the
   never announced. The CLI leaving the terminal now ends the turn the way
   its own clear does: the row is idle within a few seconds, and a turn
   whose records were written is announced.
+- **Fixed: a shell drawing the CLI's prompt mark could read as an agent
+  waiting for a prompt.** The box reading checked only that the terminal
+  had a child, so a shell left behind by an exited agent, or any program
+  whose prompt looked like the CLI's, could make a session report an
+  empty input box, and a prompt sent then would have landed in the shell.
+  The reading now takes the service's own word on whether the agent runs,
+  and is re-read the moment that word changes.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's

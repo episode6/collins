@@ -460,6 +460,13 @@ class SessionHost(Protocol):
         there, as it does on a VTE `commit` carrying one)."""
         ...
 
+    def agent_running(self) -> bool:
+        """The host's last recorded reading of `agent_running`, the one its
+        clients were last sent; False before the first reading. What
+        `takes_prompt` consults, so that the two facts never disagree for
+        longer than a poll and no settle walks /proc (§5 ruling 40)."""
+        ...
+
 
 class CutSink(Protocol):
     """Where an open-cut lands: the composer that asked for it."""
@@ -768,9 +775,14 @@ class Session:
         this does is find what it reads — the line the cursor is on, how far
         into it the cursor sits, and whether the rest of that line is the
         agent's own dim ghost text — and rule out a terminal with no agent
-        left in it.
+        in it: a shell the agent left behind draws a prompt of its own, and
+        whatever that looks like a prompt typed now lands in the shell, so
+        the host's last recorded `agent_running` gates the read (§5 ruling
+        40; the facts page's first required property of `takes_prompt`).
         """
         if self.pty.child_pid() is None:
+            return False
+        if not self.host.agent_running():
             return False
         column, row = self.screen.cursor()
         text = self.screen.row_text(row, self.screen.columns())

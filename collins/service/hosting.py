@@ -540,24 +540,33 @@ class SessionRecord:
         exit there is nothing to read."""
         if self.pty() is None:
             return
-        facts = {**self.box_facts(), **self.launch_facts()}
         # The process questions walk the tree: re-asked here only when the
         # foreground flips; the tracker's 2 s poll re-reads them for every
         # session (`refresh_process_facts`: a sandboxed launch's
         # `agent_running` turns true under it), so a settle never walks
         # /proc on its own account (a command streaming output would have
-        # it walk twenty times a second).
-        if facts.get("running_command") != self._sent.get("running_command"):
-            facts.update(self.process_facts())
-        self._send_changed(facts)
+        # it walk twenty times a second). On a flip the walk goes first, so
+        # the box read below consults the agent's recorded presence.
+        running = bool(self.session.has_running_command())
+        if running != self._sent.get("running_command"):
+            self._send_changed({**self.process_facts(), "running_command": running})
+        self._send_changed({**self.box_facts(), **self.launch_facts()})
 
     def refresh_process_facts(self) -> None:
-        """The /proc poll's tick: the questions that walk the process tree."""
+        """The /proc poll's tick: the questions that walk the process tree.
+        `agent_running` flipping re-reads the box facts, which consult it
+        (`Session.takes_prompt`), so the two never disagree for longer than
+        a poll, and a shell alone drawing the CLI's mark reads
+        `takes_prompt` false until the poll that finds the agent, with no
+        settle in between (§5 ruling 40)."""
         if self.pty() is None:
             return
+        before = self._sent.get("agent_running")
         self._send_changed(
             {**self.process_facts(), "running_command": bool(self.session.has_running_command())}
         )
+        if self._sent.get("agent_running") != before:
+            self._send_changed(self.box_facts())
 
     # -- SessionHost -----------------------------------------------------------------
 
@@ -733,6 +742,11 @@ class SessionRecord:
                 activity.input_sent(self, text)
             except Exception:  # noqa: BLE001 - the tracker's failure is not the write's
                 log.exception("session %s: the tracker failed on the session's own write", self.handle)
+
+    def agent_running(self) -> bool:
+        """What the clients were last told of `agent_running` (one series,
+        §5 ruling 34); False before the first reading (§5 ruling 40)."""
+        return bool(self._sent.get("agent_running", False))
 
     def process_exited(self, status: int) -> None:
         self.exited = True
