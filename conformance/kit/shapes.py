@@ -21,6 +21,9 @@ from . import proto
 
 SAMPLE_PATH = "/"
 SAMPLE_URL = "https://example.invalid/x/y/pull/1"
+# A pty no server has (the largest id the table allows): a sample request
+# that names a pty must never reach one that exists on the server.
+IMPOSSIBLE_PTY = 2**32 - 1
 
 
 def _sample_string(spec, name: str) -> str:
@@ -53,8 +56,10 @@ def sample(spec, name: str = ""):
     if kind == p.K_STR:
         return _sample_string(spec, name)
     if kind == p.K_INT:
+        if name == "pty":
+            return IMPOSSIBLE_PTY
         low = spec.low if spec.low is not None else 0
-        return int(max(low, 0)) if low is not None else 0
+        return int(max(low, 0))
     if kind == p.K_NUM:
         return float(spec.low or 0)
     if kind == p.K_BOOL:

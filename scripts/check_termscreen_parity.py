@@ -33,7 +33,7 @@ scenario's bytes with the capture text and cursor VTE showed, what the kit
 holds a server's `pty.capture` and cursor report to; server-side spec D8),
 and copies the recorded streams with their marks and goldens into
 `conformance/data/streams/` for the kit's `--replay`, so the kit's data and
-the goldens never drift (`tests/test_termscreen.py` checks they agree).
+the goldens never drift (`tests/test_conformance_data.py` checks they agree).
 `--only NAME` runs the scenarios whose name contains NAME.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.

@@ -7,7 +7,8 @@
 """Level 0, the wire: what docs/api/index.md asks of every server.
 
 The hello and its negotiation, `sequence` before hello, `unknown` for a
-made-up type, `direction` for a service-only type, `invalid` on a bound,
+made-up type, `invalid` on a bound and on a service-only event sent with an
+id (`direction` itself no client can draw: see `check_direction`),
 the two channels, `subscribe`'s snapshot ordering and reply counts, the
 keepalives across 25 s of idleness, a chunked request and reply where the
 server claims `files`, `service.status`'s required fields, the local
@@ -133,11 +134,11 @@ def check_direction(run: Run, notes: list[str]) -> None:
     c = run.client()
     reply = c.call_on(c.primary, {"t": "rows", "rows": []})
     expect_refusal(reply, "invalid", "`rows`, a service-only event, with an id")
-    reply = c.call_on(c.primary, {"t": "pty-exited", "pty": 1, "status": 0})
+    reply = c.call_on(c.primary, {"t": "pty-exited", "pty": shapes.IMPOSSIBLE_PTY, "status": 0})
     expect_refusal(reply, "invalid", "`pty-exited` with an id")
     before = len(c.events)
     c.send_raw({"t": "item", "session": "kit-direction", "path": "/x"})
-    c.send_raw({"t": "pty", "pty": 1, "kind": "agent"})
+    c.send_raw({"t": "pty", "pty": shapes.IMPOSSIBLE_PTY, "kind": "agent"})
     c.pump(0.5)
     if len(c.events) != before:
         raise CheckFailed("a wrong-peer event drew an answer: " + c.events[before].type)
@@ -149,15 +150,16 @@ def check_direction(run: Run, notes: list[str]) -> None:
 
 def check_invalid(run: Run, notes: list[str]) -> None:
     c = run.client()
-    reply = c.call("attach", pty=1, cols=5000, rows=10)
+    nowhere = shapes.IMPOSSIBLE_PTY
+    reply = c.call("attach", pty=nowhere, cols=5000, rows=10)
     expect_refusal(reply, "invalid", "`attach` with cols 5000")
     reply = c.call("state.get", key="")
     expect_refusal(reply, "invalid", "`state.get` with an empty key")
-    reply = c.call("attach", pty=1)
+    reply = c.call("attach", pty=nowhere)
     expect_refusal(reply, "invalid", "`attach` without cols and rows")
     reply = c.call("pty.info", pty="one")
     expect_refusal(reply, "invalid", "`pty.info` with a string pty")
-    reply = c.call("close", pty=1, mode="later")
+    reply = c.call("close", pty=nowhere, mode="later")
     expect_refusal(reply, "invalid", "`close` with a mode outside its enumeration")
     # A request whose id is not one (below 0) has nothing to answer with: it
     # is dropped, and the connection goes on.
@@ -212,11 +214,18 @@ def check_subscribe(run: Run, notes: list[str]) -> None:
     reply, snapshot = c.subscribe()
     if not reply.ok:
         raise CheckFailed(f"subscribe: {reply.describe()}")
-    if not snapshot or snapshot[-1].type != "rows":
-        last = snapshot[-1].type if snapshot else "nothing"
-        raise CheckFailed(f"the snapshot's last event before the reply was {last}, not `rows`")
-    if not isinstance(snapshot[-1].get("rows"), list):
+    rows = [e for e in snapshot if e.type == "rows"]
+    if not rows:
+        raise CheckFailed("no `rows` event came before the subscribe reply")
+    if not isinstance(rows[-1].get("rows"), list):
         raise CheckFailed("`rows` carries no list")
+    if run.options.level >= 1:
+        ptys_seen = {e.get("pty") for e in snapshot if e.type == "pty" and e.get("kind") == "agent"}
+        sessions_seen = {e.get("pty") for e in snapshot if e.type == "session"}
+        if ptys_seen - sessions_seen:
+            raise CheckFailed(
+                f"the snapshot sent no `session` for the agent ptys {sorted(ptys_seen - sessions_seen)}"
+            )
     items = [e for e in snapshot if e.type == "item"]
     ptys = [e for e in snapshot if e.type == "pty"]
     if reply.get("items", len(items)) != len(items):
@@ -406,8 +415,12 @@ def check_chunking(run: Run, notes: list[str]) -> None:
 
 def check_every_request_answered(run: Run, notes: list[str]) -> None:
     """Every request type is answered within the call timeout; a type of a
-    family the server does not list gets `unknown` and nothing else; a
-    core type is never `unknown`."""
+    family the server does not list gets `unknown` and nothing else; a core
+    type at or below the level under test is never `unknown` (a server run at
+    `--level 1` may answer the store's requests `unknown`). Every sample names
+    a pty no server has, and nothing of `internal`, `debug` or a skipped
+    family is sent to a server that lists it: the kit touches nothing it did
+    not make."""
     c = run.client()
     p = run.p
     unanswered = []
@@ -432,9 +445,13 @@ def check_every_request_answered(run: Run, notes: list[str]) -> None:
     for name in shapes.request_types():
         entry = p.TYPES[name]
         claimed = entry.family == p.FAMILY_CORE or entry.family in run.caps
-        if claimed and (name in destructive or entry.family == p.CAP_DEBUG):
+        if claimed and (name in destructive or entry.family in (p.CAP_DEBUG, p.CAP_INTERNAL)):
+            continue  # nothing the kit would ask a live server for its own sake
+        if claimed and entry.family in run.options.skip_families:
             continue
+        above_level = entry.family == p.FAMILY_CORE and entry.level > run.options.level
         message = shapes.minimal_request(name)
+        assert message.get("pty") in (None, shapes.IMPOSSIBLE_PTY), name  # never a pty that could exist
         try:
             reply = c.call_on(c.primary, message, timeout=10.0)
         except apiclient.Timeout:
@@ -445,7 +462,7 @@ def check_every_request_answered(run: Run, notes: list[str]) -> None:
         if not claimed:
             if reply.ok or reply.error != "unknown":
                 wrong.append(f"{name} ({entry.family}): {reply.describe()}")
-        elif not reply.ok and reply.error == "unknown":
+        elif not reply.ok and reply.error == "unknown" and not above_level:
             wrong.append(f"{name} ({entry.family}, claimed): refused `unknown`")
     if unanswered:
         raise CheckFailed(f"never answered: {', '.join(unanswered)}")

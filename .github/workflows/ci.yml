@@ -242,7 +242,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 -m unittest discover -s conformance/tests -t .
-      - run: python3 scripts/run_conformance.py --skip-family prs --skip-family sandbox --replay --json conformance-results.json
+      - run: python3 scripts/run_conformance.py --skip-family prs --skip-family sandbox --replay --vte-bytes --json conformance-results.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:

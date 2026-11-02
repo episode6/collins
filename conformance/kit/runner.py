@@ -47,6 +47,8 @@ class Options:
     json_out: str = ""
     only: list[str] = field(default_factory=list)
     keep_scratch: bool = False
+    vte_bytes: bool = False  # a query answered in another terminal's voice fails, not notes
+    spawn_budget: float = 5.0  # seconds from the spawn to the fake's box taking a prompt
 
 
 class Run:
@@ -60,6 +62,7 @@ class Run:
         self.caps: set[str] = set()
         self.implementation = ""
         self.settings: dict = {}  # the server's `settings`, as the first subscribe's snapshot said
+        self.spoofs: bool | None = None  # whether an agent pty had the two spoofs (None: not read)
         self.known_session: str | None = None  # a session id the sessions checks bound, for Level 2
         self.clients: list[apiclient.Client] = []
         self.all_clients: list[apiclient.Client] = []  # every client ever made, for the wire check
@@ -68,6 +71,10 @@ class Run:
             options.scratch = tempfile.mkdtemp(prefix="collins-conformance-")
             self._made_scratch = True
         os.makedirs(options.scratch, exist_ok=True)
+        # The real path: a server and the CLI name a session's directory by
+        # the path they resolve, and a symlinked temporary directory (macOS's
+        # default) would bind to another name than the one the kit asked for.
+        options.scratch = os.path.realpath(options.scratch)
         # The session's own directory, so its transcript directory is the kit's
         # (`~/.claude/projects/<encoded cwd>`) and nothing of the person's.
         self.cwd = os.path.join(options.scratch, "project")

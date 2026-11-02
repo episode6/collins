@@ -40,7 +40,7 @@ CONTROL = re.compile(
 # "An attach's redraw").
 LEFT_OUT = frozenset({"?3", "?25", "?1048", "?47", "?1047", "?1049"})
 
-KITTY_STACK_MAX = 32  # entries Collins keeps, per the page's informative half
+KITTY_ENTRIES_KEPT = 32  # pushed entries a server keeps at most, per the page's informative half
 
 
 def fresh_terminal(decrqm_table: dict) -> dict[str, bool]:
@@ -115,7 +115,7 @@ class ExpectedModes:
             return
         numbers = _numbers(params)
         if marker == b">":  # push
-            if len(self.kitty) - 1 < KITTY_STACK_MAX:
+            if len(self.kitty) - 1 < KITTY_ENTRIES_KEPT:
                 self.kitty.append(numbers[0] if numbers else 0)
         elif marker == b"<":  # pop
             for _ in range(numbers[0] if numbers else 1):

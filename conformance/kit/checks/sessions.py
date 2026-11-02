@@ -39,6 +39,13 @@ PROGRESS_CLEAR = re.compile(rb"\x1b\]9;4;0;?(?:\x1b\\|\x07)")
 REPORT = re.compile(rb"\x1b\]777;([^\x1b\x07]*)(?:\x1b\\|\x07)")
 
 
+def pty_ended(event: apiclient.Event, pty: int) -> bool:
+    """A `pty-exited` for *pty* that is the pty's end: one with `table` true
+    says only that the agent's row left the pty table while the pty lives
+    on (the agent exited, the shell stays), and is not it."""
+    return event.type == "pty-exited" and event.get("pty") == pty and not event.get("table")
+
+
 class Session:
     """A fake session the kit spawned, and what it knows of it."""
 
@@ -49,6 +56,7 @@ class Session:
         self.handle = ""
         self.spawned_at = 0.0
         self.id: str | None = None
+        self.cwd = ""  # where the pty started, as the spawn reply said
 
     def facts(self) -> dict:
         return self.client.session_facts(self.pty)
@@ -113,8 +121,9 @@ def spawn_session(run: Run, client: apiclient.Client, notes: list[str], **extra)
         raise CheckFailed(f"spawn: {reply.describe()}")
     s.pty = reply["pty"]
     s.handle = reply.get("handle") or ""
-    if reply.get("cwd") not in (None, run.cwd):
-        notes.append(f"the pty started in {reply['cwd']}, not the {run.cwd} asked for")
+    s.cwd = reply.get("cwd") or run.cwd
+    if s.cwd != run.cwd:
+        notes.append(f"the pty started in {s.cwd}, not the {run.cwd} asked for")
     attach = client.attach(s.pty, COLS, ROWS)
     if not attach.ok:
         raise CheckFailed(f"attach: {attach.describe()}")
@@ -134,20 +143,22 @@ def spawn_session(run: Run, client: apiclient.Client, notes: list[str], **extra)
 
 
 def check_takes_prompt(s: Session, notes: list[str]) -> None:
-    deadline = s.spawned_at + 5.0
+    budget = s.run.options.spawn_budget
+    deadline = s.spawned_at + budget
     if not s.client.wait_until(
         lambda: s.facts().get("takes_prompt") is True, max(deadline - time.monotonic(), 0.1)
     ):
         facts = s.facts()
         raise CheckFailed(
-            "takes_prompt was not true within 5 s of the spawn: "
+            f"takes_prompt was not true within {budget:g} s of the spawn (the fake's budget, "
+            "--spawn-budget): "
             + json.dumps(
                 {k: facts.get(k) for k in ("takes_prompt", "agent_running", "running_command", "pid", "cwd")}
             )
         )
     facts = s.facts()
-    if facts.get("cwd") != s.run.cwd:
-        raise CheckFailed(f"session.cwd is {facts.get('cwd')!r}, the spawn asked for {s.run.cwd!r}")
+    if facts.get("cwd") != s.cwd:
+        raise CheckFailed(f"session.cwd is {facts.get('cwd')!r}, the spawn reply said {s.cwd!r}")
     if "pid" in facts and not isinstance(facts["pid"], int):
         raise CheckFailed(f"session.pid is {facts['pid']!r}")
     for name in ("agent_running", "running_command"):
@@ -216,8 +227,46 @@ def check_box_text(s: Session, notes: list[str]) -> None:
     s.client.send_input(s.pty, b"\x03")
     if not s.wait_fact("takes_prompt", True, 5.0):
         raise CheckFailed("takes_prompt did not come back true after the box was cleared")
-    if text in s.capture().split("\n")[-6:]:
+    if any(text in row for row in s.capture().split("\n")[-6:]):
         raise CheckFailed("the box still shows the text after Ctrl+C")
+
+
+def check_lookalikes(s: Session, notes: list[str]) -> None:
+    """What the page says a reading must tell from an empty box: text past a
+    cursor sent home (Ctrl+A), a folded paste's stand-in, and a menu's mark
+    with an ordinary space; and the box empty again after each."""
+    client = s.client
+    # Ctrl+A: the cursor at the box's start, the text past it.
+    client.call("write", pty=s.pty, text="text past the cursor")
+    if not s.wait_fact("takes_prompt", False, 5.0):
+        raise CheckFailed("takes_prompt stayed true with text in the box")
+    client.send_input(s.pty, b"\x01")
+    client.pump(1.5)
+    if s.facts().get("takes_prompt") is not False:
+        raise CheckFailed("takes_prompt went true after Ctrl+A, with the text still past the cursor")
+    client.send_input(s.pty, b"\x03")
+    if not s.wait_fact("takes_prompt", True, 5.0):
+        raise CheckFailed("takes_prompt did not come back after the box was cleared")
+    # A paste over 800 characters: the box shows a stand-in, which is text.
+    client.send_input(s.pty, b"\x1b[200~" + b"p" * 900 + b"\x1b[201~")
+    if not client.wait_until(lambda: "[Pasted text #" in s.capture(), 5.0):
+        raise CheckFailed("the fake did not fold the paste into a stand-in")
+    if not s.wait_fact("takes_prompt", False, 5.0):
+        raise CheckFailed("takes_prompt stayed true while the box holds a paste's stand-in")
+    client.send_input(s.pty, b"\x03")
+    if not s.wait_fact("takes_prompt", True, 5.0):
+        raise CheckFailed("takes_prompt did not come back after the stand-in was cleared")
+    # A menu: the mark with an ordinary space after it takes the keys.
+    reply = s.prompt("menu")
+    if not reply.ok:
+        raise CheckFailed(f"prompt 'menu': {reply.describe()}")
+    if not client.wait_until(lambda: "Which way?" in s.capture(), 5.0):
+        raise CheckFailed("the fake did not draw its menu")
+    if not s.wait_fact("takes_prompt", False, 5.0):
+        raise CheckFailed("takes_prompt stayed true while a menu, marked `\u276f` and a space, had the keys")
+    client.send_input(s.pty, b"\r")
+    if not s.wait_fact("takes_prompt", True, 5.0):
+        raise CheckFailed("takes_prompt did not come back after the menu was answered")
 
 
 def check_turn(s: Session, notes: list[str]) -> None:
@@ -260,7 +309,7 @@ def check_turn(s: Session, notes: list[str]) -> None:
         raise CheckFailed("busy did not fall within 10 s of the turn's end")
     fell_at = time.monotonic()
     if not client.wait_until(lambda: s.finished_count(since) >= 1, 10.0):
-        raise CheckFailed("no `finished` within 10 s of busy falling")
+        raise CheckFailed("no `finished` within 10 s of busy falling (the page's bound)")
     finishes = [e for e in client.session_events(s.pty, since) if e.get("finished") is True]
     falls = [when for when, value in s.busy_events(since) if value is False]
     if falls and finishes and finishes[0].when < falls[0]:
@@ -278,6 +327,18 @@ def check_turn(s: Session, notes: list[str]) -> None:
         )
     if s.item().get("busy") is True:
         raise CheckFailed("item.busy is still true after the session's busy fell")
+    # The box after a turn shows the resting kind of hint, dim and in the
+    # fake's own words: an empty box all the same.
+    if not s.wait_fact("takes_prompt", True, 5.0):
+        raise CheckFailed("takes_prompt is not true after the turn, with the resting hint in the box")
+    if s.run.options.level >= 2:
+        notified = client.wait_for(
+            lambda e: e.type == "notify" and e.get("kind") == "finished" and e.get("session") == s.id,
+            5.0,
+            since,
+        )
+        if notified is None:
+            raise CheckFailed("no `notify {kind: finished}` for the turn (Level 2)")
     notes.append(
         f"busy rose {rose_at - t0:.1f} s after the prompt, fell {fell_at - turn_end:.1f} s after the "
         f"turn's end, bound as {s.id}"
@@ -289,6 +350,44 @@ def check_turn(s: Session, notes: list[str]) -> None:
         raise CheckFailed(
             f"{count} `finished` for one turn (the fake repainted its screen three times after it)"
         )
+
+
+def check_second_attach_mid_turn(s: Session, notes: list[str]) -> None:
+    """One series while the agent works: a client attaching mid-turn is told
+    `busy: true` in its snapshot (the event that carries the static `cwd`,
+    since a delta may land first), and the rest agrees with the series."""
+    client = s.client
+    start_out = client.output_len(s.pty)
+    reply = s.prompt("long 8")
+    if not reply.ok:
+        raise CheckFailed(f"prompt: {reply.describe()}")
+    if not s.wait_fact("busy", True, 3.0):
+        raise CheckFailed("busy did not rise within 3 s")
+    second = s.run.client("conformance-midturn")
+    second.send_event("theme", term=TERM)
+    attach = second.attach(s.pty, COLS, ROWS)
+    if not attach.ok:
+        raise CheckFailed(f"attach mid-turn: {attach.describe()}")
+    snapshot = second.wait_for(
+        lambda e: e.type == "session" and e.get("pty") == s.pty and "cwd" in e.fields, 5.0
+    )
+    if snapshot is None:
+        raise CheckFailed("no whole `session` snapshot (one carrying `cwd`) within 5 s of the attach")
+    if snapshot.get("busy") is not True:
+        raise CheckFailed("the snapshot says busy false while the agent is mid-turn (one series, mid-turn)")
+    held = s.facts()
+    for name in ("session", "model", "effort", "agent_running", "running_command", "cwd"):
+        if name in held and snapshot.get(name) != held.get(name):
+            raise CheckFailed(
+                f"the snapshot's {name} {snapshot.get(name)!r} differs from the series' {held.get(name)!r}"
+            )
+    second.close()
+    if s.wait_marker("fake-claude turn", 15.0, start_out) < 0:
+        raise CheckFailed("the turn did not end")
+    if not s.wait_fact("busy", False, 10.0):
+        raise CheckFailed("busy did not fall after the turn")
+    client.pump(1.0)
+    client.call("store.flags", session=s.id, unread=False)
 
 
 def check_flags(s: Session, notes: list[str]) -> None:
@@ -341,6 +440,10 @@ def check_quiet_road(s: Session, notes: list[str]) -> None:
         raise CheckFailed("busy did not fall within 10 s of the turn's end")
     if not client.wait_until(lambda: s.finished_count(since) >= 1, 10.0):
         raise CheckFailed("no `finished` after the turn")
+    # The row's status is `open` since check_flags: the server has no notion
+    # of a row being looked at and flags it all the same.
+    if not client.wait_until(lambda: s.item().get("unread") is True, 5.0):
+        raise CheckFailed("item.unread was not set on a finish while the row's status was open")
     client.pump(3.0)
     if s.finished_count(since) != 1:
         raise CheckFailed(f"{s.finished_count(since)} `finished` for the turn")
@@ -351,6 +454,10 @@ def check_turn_end_road(s: Session, notes: list[str]) -> None:
     """The agent's clear ends busy within 10 s while its output never stops;
     one `finished`; a rise after the fall is no failure; nothing more when
     the output stops."""
+    if s.run.spoofs is False:
+        raise CheckSkipped(
+            "the agent pty has no progress spoofs: the fake reports no progress, so there is no clear"
+        )
     client = s.client
     since = len(client.events)
     start_out = client.output_len(s.pty)
@@ -375,8 +482,8 @@ def check_turn_end_road(s: Session, notes: list[str]) -> None:
         raise CheckFailed("busy did not fall within 10 s of the progress clear, with output flowing")
     fell_at = time.monotonic()
     out_at_fall = client.output_len(s.pty)
-    if not client.wait_until(lambda: s.finished_count(fall_index) >= 1, 5.0):
-        raise CheckFailed("no `finished` within 5 s of the fall")
+    if not client.wait_until(lambda: s.finished_count(since) >= 1, 10.0):
+        raise CheckFailed("no `finished` within 10 s of the fall")
     client.pump(2.0)
     if client.output_len(s.pty) <= out_at_fall:
         raise CheckFailed("the fake's output stopped: the scenario did not run as meant")
@@ -408,13 +515,20 @@ def check_switch(s: Session, notes: list[str]) -> None:
         how = "prompt '/effort low'"
     if not reply.ok:
         raise CheckFailed(f"{how}: {reply.describe()}")
+    # The page allows a server to read a switch from the next reply instead
+    # of the command's confirmation: a turn is played before the field is held.
     if not s.wait_fact("effort", "low", 10.0):
-        raise CheckFailed(f"effort is {s.facts().get('effort')!r} 10 s after the switch")
+        notes.append("the switch was not read from the command's confirmation; a turn follows")
+        s.prompt("turn after the switch")
+        if not s.wait_fact("effort", "low", 20.0):
+            raise CheckFailed(f"effort is {s.facts().get('effort')!r} a turn after the switch")
     reply = s.prompt("/model claude-fake-6")
     if not reply.ok:
         raise CheckFailed(f"prompt '/model': {reply.describe()}")
     if not s.wait_fact("model", "claude-fake-6", 10.0):
-        raise CheckFailed(f"model is {s.facts().get('model')!r} 10 s after /model")
+        s.prompt("turn after the model switch")
+        if not s.wait_fact("model", "claude-fake-6", 20.0):
+            raise CheckFailed(f"model is {s.facts().get('model')!r} a turn after /model")
     notes.append(f"through {how}")
     client.pump(1.0)
     client.call("store.flags", session=s.id, unread=False)
@@ -460,9 +574,13 @@ def check_state(s: Session, notes: list[str]) -> None:
         raise CheckFailed(
             f"state.get service_id: {reply.describe()}, the hello said {s.run.hello['service_id']!r}"
         )
-    reply = client.call("state.set", key="settings", entry="welcome_seen", value=True)
+    settings = client.call("state.get", key="settings").get("value") or {}
+    entry = "progress_termprop" if "progress_termprop" in settings else next(iter(settings), None)
+    if entry is None:
+        raise CheckFailed("the server's settings are empty: nothing to write back")
+    reply = client.call("state.set", key="settings", entry=entry, value=settings[entry])
     if not reply.ok and reply.error != "refused":
-        raise CheckFailed(f"state.set settings.welcome_seen: {reply.describe()}")
+        raise CheckFailed(f"state.set settings.{entry} (to its own value): {reply.describe()}")
     notes.append("the write was " + ("accepted" if reply.ok else "refused (allowed)"))
     reply = client.call("state.set", key="service_id", value="kit")
     if reply.ok:
@@ -478,9 +596,9 @@ def check_close_exit(s: Session, notes: list[str]) -> None:
     reply = client.call("close", pty=s.pty, mode="exit")
     if not reply.ok:
         raise CheckFailed(f"close {{mode: exit}}: {reply.describe()}")
-    exited = client.wait_for(lambda e: e.type == "pty-exited" and e.get("pty") == s.pty, 20.0, since)
+    exited = client.wait_for(lambda e: pty_ended(e, s.pty), 20.0, since)
     if exited is None:
-        raise CheckFailed("no `pty-exited` within 20 s of close {mode: exit}")
+        raise CheckFailed("no `pty-exited` (without `table`) within 20 s of close {mode: exit}")
     if not client.wait_until(lambda: s.item().get("running") is False, 5.0):
         raise CheckFailed("item.running stayed true after the pty exited")
     client.pump(3.0)
@@ -504,9 +622,10 @@ def check_die(run: Run, notes: list[str]) -> None:
         raise CheckFailed(f"prompt: {reply.describe()}")
     if not s.wait_fact("busy", True, 3.0):
         raise CheckFailed("busy did not rise")
+    client.send_input(s.pty, b"\x04")  # the fake leaves now, its progress report standing
     left = client.wait_for(
         lambda e: (
-            (e.type == "pty-exited" and e.get("pty") == s.pty)
+            pty_ended(e, s.pty)
             or (e.type == "session" and e.get("pty") == s.pty and e.get("running_command") is False)
             or (e.type == "session" and e.get("pty") == s.pty and e.get("agent_running") is False)
         ),
@@ -520,23 +639,102 @@ def check_die(run: Run, notes: list[str]) -> None:
         raise CheckFailed("busy did not fall within 10 s of the agent leaving with its report standing")
     fell = [when for when, value in s.busy_events(since) if value is False][0]
     notes.append(f"busy fell {fell - left_at:.1f} s after the agent left")
-    pty_gone = any(e.type == "pty-exited" and e.get("pty") == s.pty for e in client.events[since:])
+    pty_gone = any(pty_ended(e, s.pty) for e in client.events[since:])
     facts = s.facts()
     if not pty_gone and ("agent_running" in facts or "running_command" in facts):
-        client.pump(2.0)
+        # The shell the agent left behind is made to draw the box's own mark
+        # and no-break space, so that only a reading of the process table,
+        # never of the screen, answers false.
+        client.send_input(s.pty, b"PS1='\xe2\x9d\xaf\xc2\xa0'\r")
+        if not client.wait_until(lambda: "\u276f\u00a0" in s.capture().split("\n")[-1], 10.0):
+            notes.append("the shell left behind did not draw the box's mark as its prompt; checked as is")
+        client.pump(2.5)
         if s.facts().get("takes_prompt") is not False:
-            raise CheckFailed("takes_prompt is not false after the agent left and the shell has the pty")
-        if facts.get("agent_running") is True:
+            raise CheckFailed(
+                "takes_prompt is not false after the agent left and the shell, drawing the box's mark, "
+                "has the pty"
+            )
+        if s.facts().get("agent_running") is True:
             raise CheckFailed("agent_running stayed true after the agent left")
     if s.id is None:
         s.id = s.facts().get("session")
+    if s.id and run.known_session and s.id == run.known_session:
+        raise CheckFailed("a second new session bound to the first session's transcript")
     if s.id and not client.wait_until(lambda: s.item().get("running") is False, 10.0):
         raise CheckFailed("item.running stayed true after the agent left")
     if not pty_gone:
         client.call("close", pty=s.pty, mode="kill")
-        if client.wait_for(lambda e: e.type == "pty-exited" and e.get("pty") == s.pty, 15.0, since) is None:
+        if client.wait_for(lambda e: pty_ended(e, s.pty), 15.0, since) is None:
             raise CheckFailed("no `pty-exited` after close {mode: kill}")
     client.close()
+
+
+def check_populated_snapshot(run: Run, notes: list[str]) -> None:
+    """The subscribe snapshot of a server with a session running: the events
+    before the reply, the counts matching, a `session` for the agent pty
+    (the empty-server case is Level 0's)."""
+    client = run.client("conformance-populated")
+    reply, snapshot = client.subscribe()
+    if not reply.ok:
+        raise CheckFailed(f"subscribe: {reply.describe()}")
+    items = [e for e in snapshot if e.type == "item"]
+    ptys = [e for e in snapshot if e.type == "pty"]
+    if not ptys:
+        raise CheckFailed("no `pty` in the snapshot while the kit's session runs")
+    if reply.get("items", len(items)) != len(items) or reply.get("ptys", len(ptys)) != len(ptys):
+        raise CheckFailed(
+            f"the reply counts {reply.get('items')} items and {reply.get('ptys')} ptys; "
+            f"{len(items)} and {len(ptys)} were sent"
+        )
+    if not any(e.type == "rows" for e in snapshot):
+        raise CheckFailed("no `rows` before the reply")
+    agent_ptys = {e.get("pty") for e in ptys if e.get("kind") == "agent"}
+    with_session = {e.get("pty") for e in snapshot if e.type == "session"}
+    if agent_ptys - with_session:
+        raise CheckFailed(
+            f"no `session` in the snapshot for the agent ptys {sorted(agent_ptys - with_session)}"
+        )
+    seen: set[str] = set()
+    for item in items:
+        if item.get("session") not in seen:
+            seen.add(item.get("session"))
+            if "path" not in item.fields:
+                raise CheckFailed(f"the first `item` for {item.get('session')} has no `path`")
+    notes.append(f"{len(items)} items, {len(ptys)} ptys, {len(snapshot)} events")
+    client.close()
+
+
+def check_background_handoff(run: Run, notes: list[str]) -> None:
+    """A bare `close {mode: "background"}` hands the session off: the fake
+    receives `/bg` (the `background` family)."""
+    run.need("background")
+    client = run.client("conformance-bg")
+    client.subscribe()
+    client.send_event("theme", term=TERM)
+    s = spawn_session(run, client, notes)
+    try:
+        if not client.wait_until(
+            lambda: s.facts().get("takes_prompt") is True, run.options.spawn_budget + 10
+        ):
+            raise CheckFailed("the fake's box never came up")
+        # A conversation to hand off: the handoff continues a session, so one
+        # turn binds the session to its transcript first.
+        s.prompt("a turn before the handoff")
+        if not client.wait_until(lambda: isinstance(s.facts().get("session"), str), 12.0):
+            raise CheckFailed("the session was not bound before the handoff")
+        if not client.wait_until(
+            lambda: s.facts().get("busy") is False and s.facts().get("takes_prompt"), 20.0
+        ):
+            raise CheckFailed("the turn before the handoff did not end")
+        start_out = client.output_len(s.pty)
+        reply = client.call("close", pty=s.pty, mode="background")
+        if not reply.ok:
+            raise CheckFailed(f"close {{mode: background}}: {reply.describe()}")
+        if s.wait_marker("fake-claude got: /bg", 15.0, start_out) < 0:
+            raise CheckFailed("the fake never received `/bg` after close {mode: background}")
+    finally:
+        client.call("close", pty=s.pty, mode="kill")
+        client.close()
 
 
 def check_replay(run: Run, notes: list[str]) -> None:
@@ -553,10 +751,9 @@ def check_replay(run: Run, notes: list[str]) -> None:
         raise CheckFailed("the fake's box never came up")
     failures = []
     count = 0
-    for name in ("classic", "fullscreen"):
+    names = sorted(n[: -len(".bin")] for n in os.listdir(streams_dir) if n.endswith(".bin"))
+    for name in names:
         bin_path = os.path.join(streams_dir, name + ".bin")
-        if not os.path.exists(bin_path):
-            continue
         with open(os.path.join(streams_dir, name + ".marks.json"), encoding="utf-8") as handle:
             marks = json.load(handle)
         with open(os.path.join(streams_dir, name + ".golden.json"), encoding="utf-8") as handle:
@@ -567,7 +764,7 @@ def check_replay(run: Run, notes: list[str]) -> None:
                 continue
             count += 1
             start_out = client.output_len(s.pty)
-            reply = s.prompt(f"replay {bin_path} {mark['offset']}")
+            reply = s.prompt(f"replay {mark['offset']} {bin_path}")
             if not reply.ok:
                 failures.append(f"{name}.{mark['name']}: prompt {reply.describe()}")
                 continue
@@ -613,19 +810,27 @@ def run_sessions(run: Run) -> None:
         r.run("takes_prompt within 5 s of the spawn", check_takes_prompt, s)
         r.run("a second attach holds the series' word; entered is null", check_second_attach, s)
         r.run("text in the box: takes_prompt false, prompt refused, Ctrl+C clears", check_box_text, s)
-        if (
-            r.run("a turn: busy, the bind, one finished, unread, the transcript's facts", check_turn, s)
-            is None
-        ):
+        r.run("the lookalikes of an empty box: Ctrl+A, a folded paste, a menu", check_lookalikes, s)
+        after_the_turn = (
+            ("a second attach mid-turn holds busy true (one series)", check_second_attach_mid_turn),
+            ("store.flags: the client's fields taken, the server's refused", check_flags),
+            ("the quiet road: a quiet under a second ends nothing; unread while looking", check_quiet_road),
+            ("the turn-end road: the clear ends busy while output flows", check_turn_end_road),
+            ("a switch is reflected within a turn", check_switch),
+            ("spawn refuses a running session and what it lacks", check_spawn_refusals),
+            ("state.get, state.set and resolver.arm", check_state),
+            ("the snapshot of a populated server", lambda s, notes: check_populated_snapshot(s.run, notes)),
+            ("close {exit} ends the pty; a clean exit flags nothing", check_close_exit),
+        )
+        turn = r.run("a turn: busy, the bind, one finished, unread, the transcript's facts", check_turn, s)
+        if turn is None:
+            for name, _check in after_the_turn:
+                r.skip(name, "the first turn failed")
             return
-        r.run("store.flags: the client's fields taken, the server's refused", check_flags, s)
-        r.run("the quiet road: a quiet under a second ends nothing", check_quiet_road, s)
-        r.run("the turn-end road: the clear ends busy while output flows", check_turn_end_road, s)
-        r.run("a switch is reflected within a turn", check_switch, s)
-        r.run("spawn refuses a running session and what it lacks", check_spawn_refusals, s)
-        r.run("state.get, state.set and resolver.arm", check_state, s)
-        r.run("close {exit} ends the pty; a clean exit flags nothing", check_close_exit, s)
+        for name, check in after_the_turn:
+            r.run(name, check, s)
     finally:
         pass
     r.run("the agent leaving mid-turn ends busy within 10 s", check_die, run)
+    r.run("close {background} hands the session off", check_background_handoff, run)
     r.run("the recorded Claude Code streams (--replay)", check_replay, run)

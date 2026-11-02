@@ -94,6 +94,18 @@ def parse(argv: list[str]) -> Options:
     parser.add_argument(
         "--keep-scratch", action="store_true", help="leave the temporary scratch directory behind"
     )
+    parser.add_argument(
+        "--vte-bytes",
+        action="store_true",
+        help="fail a query answered in another terminal's voice (the page's SHOULD; a note otherwise)",
+    )
+    parser.add_argument(
+        "--spawn-budget",
+        type=float,
+        default=5.0,
+        metavar="SECONDS",
+        help="seconds the fake's box may take to take a prompt after the spawn (default 5)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     options = Options(
@@ -107,6 +119,8 @@ def parse(argv: list[str]) -> Options:
         json_out=args.json,
         only=args.only,
         keep_scratch=args.keep_scratch,
+        vte_bytes=args.vte_bytes,
+        spawn_budget=args.spawn_budget,
     )
     if args.fake_claude:
         options.fake_claude = os.path.abspath(args.fake_claude)

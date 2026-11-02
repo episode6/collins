@@ -648,7 +648,7 @@ table (and so the reference), the affected MIT page (`docs/api/`) and the
 conformance kit's checks or data (`conformance/`); the gates are
 `tests/test_api_reference.py`, `tests/test_conformance_data.py`, the
 `conformance` CI job (the kit against the service, `scripts/run_conformance.py`),
-`tests/test_termscreen.py` and the two VTE checks (`check_termstream_answers.py`,
+`tests/test_conformance_data.py` (the kit's data against the goldens and the page) and the two VTE checks (`check_termstream_answers.py`,
 `check_conformance_data.py`).** The kit is MIT and clean-room: nothing under
 `conformance/` reads or paraphrases `collins/service/`, `providers.py`,
 `activity.py` or `sessions.py`; it tests what the pages say, and a check the

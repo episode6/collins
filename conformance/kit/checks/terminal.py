@@ -136,18 +136,30 @@ def check_environment(t: Terminal, notes: list[str]) -> None:
                 f"{name}={env.get(name)!r}, expected {value!r} (the kit's theme named vte {TERM['vte']})"
             )
     if t.kind == "agent":
-        settings = t.run.settings
-        if settings.get("progress_termprop", True):
-            for name, value in (("ConEmuANSI", "ON"), ("TERM_PROGRAM", "kitty")):
-                if env.get(name) != value:
-                    raise CheckFailed(f"an agent pty has {name}={env.get(name)!r}, expected {value!r}")
-        else:
-            notes.append("progress_termprop is off on the server: the spoofs are not expected")
+        spoofs_record(t.run, env, notes)
     else:
         for name in ("ConEmuANSI", "TERM_PROGRAM"):
             if env.get(name) in ("ON", "kitty"):
                 raise CheckFailed(f"a shell pty has {name}={env.get(name)!r}: the spoofs are the agent's")
     notes.append(" ".join(f"{k}={v}" for k, v in env.items()))
+
+
+def spoofs_record(run: Run, env: dict, notes: list[str]) -> None:
+    """The two spoofs on an agent pty: the page lets a server with another
+    way to know the agent is working leave them out, so their absence is a
+    note, recorded for the sessions checks that depend on the fake's
+    progress reports (the turn-end road is skipped without them)."""
+    present = env.get("ConEmuANSI") == "ON" and env.get("TERM_PROGRAM") == "kitty"
+    run.spoofs = present
+    if present:
+        return
+    if not run.settings.get("progress_termprop", True):
+        notes.append("progress_termprop is off on the server: the spoofs are not expected")
+    else:
+        notes.append(
+            "no ConEmuANSI=ON / TERM_PROGRAM=kitty on the agent pty: allowed for a server with another way "
+            "to know the agent works; the checks that need the agent's progress report are skipped"
+        )
 
 
 def check_grid(t: Terminal, notes: list[str]) -> None:
@@ -183,6 +195,7 @@ def check_answered(t: Terminal, notes: list[str]) -> None:
     client = t.client
     probe.query(b"\x1bc")  # a fresh terminal: the modes at their defaults, the pen plain
     failures = []
+    other_voice: list[str] = []
     count = 0
     for row in t.queries["answered"]:
         name = row["name"]
@@ -195,15 +208,18 @@ def check_answered(t: Terminal, notes: list[str]) -> None:
             answer = probe.query(prelude + query_bytes)
             regex = notation.pattern(reply_tokens, values)
             match = regex.fullmatch(answer)
-            if match is None:
-                failures.append(
+            if not answer:
+                failures.append(f"{name} ({notation.describe(query_bytes)}): no answer within half a second")
+            elif match is None:
+                # The page's SHOULD: another terminal's voice is conformant at
+                # the wire. A note, unless --vte-bytes asks for VTE's bytes.
+                other_voice.append(
                     f"{name} ({notation.describe(query_bytes)}): answered {notation.describe(answer)}, "
-                    "expected "
+                    "VTE answers "
                     + notation.describe(
                         notation.render(reply_tokens, {**{k: "?" for k in notation.CLASSES}, **values})
                     )
                 )
-                continue
             if query_bytes in bytes(client.output[t.pty])[start:]:
                 failures.append(f"{name}: the query reached the client")
     # The replies come in query order, each ahead of any typing queued.
@@ -212,13 +228,36 @@ def check_answered(t: Terminal, notes: list[str]) -> None:
         failures.append(f"three queries in a row answered out of order or short: {notation.describe(answer)}")
     # A query ended by BEL is answered ended by BEL.
     answer = probe.query(b"\x1b]11;?\x07")
-    if not answer.endswith(b"\x07") or not answer.startswith(b"\x1b]11;rgb:"):
-        failures.append(f"OSC 11 ended by BEL answered {notation.describe(answer)}")
+    if not answer:
+        failures.append("OSC 11 ended by BEL was not answered")
+    elif not answer.endswith(b"\x07") or not answer.startswith(b"\x1b]11;rgb:"):
+        other_voice.append(f"OSC 11 ended by BEL answered {notation.describe(answer)}")
     # Several palette pairs in one query: one reply each, in order.
     answer = probe.query(b"\x1b]4;1;?;2;?\x1b\\")
     want = f"\x1b]4;1;rgb:{t.palette[1]}\x1b\\\x1b]4;2;rgb:{t.palette[2]}\x1b\\".encode()
-    if answer != want:
-        failures.append(f"OSC 4 with two pairs answered {notation.describe(answer)}")
+    if not answer:
+        failures.append("OSC 4 with two pairs was not answered")
+    elif answer != want:
+        other_voice.append(f"OSC 4 with two pairs answered {notation.describe(answer)}")
+    # The page's one stated divergence: a palette index under 16 set as
+    # `38;5;<i>`, which VTE answers `38:5:<i>` and Collins as the named colour.
+    answer = probe.query(b"\x1b[0m\x1b[38;5;1m\x1bP$qm\x1b\\")
+    probe.query(b"\x1b[0m")
+    if answer == b"\x1bP1$r0;38:5:1m\x1b\\":
+        notes.append("DECRQSS of 38;5;1 answers VTE's 38:5:1")
+    elif answer == b"\x1bP1$r0;31m\x1b\\":
+        notes.append("DECRQSS of 38;5;1 answers the named colour 31 (the page's stated divergence)")
+    else:
+        failures.append(
+            f"DECRQSS of 38;5;1 answered {notation.describe(answer)}, neither VTE's nor the stated divergence"
+        )
+    if other_voice and t.run.options.vte_bytes:
+        failures.extend(other_voice)
+    elif other_voice:
+        notes.append(
+            f"{len(other_voice)} answers in another terminal's voice (conformant at the wire; "
+            "--vte-bytes fails them): " + "; ".join(other_voice[:4])
+        )
     if failures:
         raise CheckFailed(
             "; ".join(failures[:8]) + (f" ... ({len(failures)} in all)" if len(failures) > 8 else "")
@@ -359,6 +398,34 @@ def check_tokenizer(t: Terminal, notes: list[str]) -> None:
     answer = probe.query("\u009b6n".encode("utf-8"))
     if answer:
         failures.append(f"U+009B 6 n was answered {notation.describe(answer)}")
+    # BEL ends an OSC and not a DCS: `DCS $qm BEL ST` is a string whose text is
+    # `$qm BEL`, not the SGR query; the DCS proper afterwards is answered.
+    answer = probe.query(b"\x1bP$qm\x07\x1b\\")
+    if answer:
+        failures.append(f"DCS $qm ended by BEL was answered {notation.describe(answer)}")
+    answer = probe.query(b"\x1bP$qm\x1b\\")
+    if not answer.startswith(b"\x1bP1$r"):
+        failures.append(f"DCS $qm after the BEL case answered {notation.describe(answer)}")
+    # SUB aborts the sequence it arrives in.
+    answer = probe.query(b"\x1b[6\x1an")
+    if answer:
+        failures.append(f"CSI 6 SUB n answered {notation.describe(answer)}")
+    # A C0 inside a CSI takes effect where it arrives and the sequence goes on.
+    answer = probe.query(b"\x1b[H\x1b[6\x07n")
+    if not CPR.fullmatch(answer):
+        failures.append(f"CSI 6 BEL n (a C0 inside the sequence) answered {notation.describe(answer)}")
+    # A CSI over 4096 bytes is malformed and never a query.
+    answer = probe.query(b"\x1b[" + b"6" * 5000 + b"n")
+    if answer:
+        failures.append(f"a CSI of 5000 bytes was answered {notation.describe(answer)}")
+    # A string open past 64 KiB is abandoned: nothing of it is a query, and the
+    # connection goes on (the probe's bytes reach the client in pieces).
+    start = t.client.output_len(t.pty)
+    answer = probe.query(b"\x1b]10;" + b"x" * 70000 + b"?\x1b\\", timeout=30.0)
+    if answer:
+        failures.append(f"an OSC of 70000 bytes was answered {notation.describe(answer)}")
+    if t.client.wait_until(lambda: t.client.output_len(t.pty) - start >= 70000, 10.0) is False:
+        failures.append("the bytes of an oversized string did not reach the client")
     if failures:
         raise CheckFailed("; ".join(failures))
 
@@ -498,6 +565,99 @@ def check_pty_events_and_resize(t: Terminal, notes: list[str]) -> None:
         second.close()
 
 
+OTHER_TERM = {"vte": 7000, "fg": "#abcdef", "bg": "#123456", "scheme": "light"}
+
+
+def check_colours_follow_the_active_client(t: Terminal, notes: list[str]) -> None:
+    """A client with another `term` that takes the role is the one the colour
+    queries answer for; a client that only watches is not."""
+    run = t.run
+    other = run.client("conformance-colours", term=OTHER_TERM)
+    reply = other.attach(t.pty, COLS, ROWS)
+    if not reply.ok:
+        raise CheckFailed(f"attach: {reply.describe()}")
+    other.wait_redraw(t.pty, 10.0)
+    # The query is typed by a client that is not attached, so that nobody
+    # takes the role by typing (terminal.md: a client that is not attached
+    # takes no role).
+    outsider = run.client("conformance-outsider-colours")
+
+    def ask(query: bytes) -> bytes:
+        t.probe.seq += 1
+        seq = str(t.probe.seq)
+        outsider.send_input(t.pty, f"Q {seq} {query.hex()}\n".encode())
+        _, data = __import__("conformance.kit.probe", fromlist=["parse_hex_report"]).parse_hex_report(
+            t.probe.wait_report(f"R {seq} ", 8.0)
+        )
+        return data
+
+    answer = ask(b"\x1b]11;?\x1b\\")
+    if answer != b"\x1b]11;rgb:0000/0000/0000\x1b\\":
+        raise CheckFailed(f"OSC 11 while the first client is active answered {notation.describe(answer)}")
+    other.send_event("focus", pty=t.pty, focused=True)
+    t.client.wait_for(lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is False, 5.0)
+    try:
+        answer = ask(b"\x1b]11;?\x1b\\")
+        if answer != b"\x1b]11;rgb:1212/3434/5656\x1b\\":
+            raise CheckFailed(
+                f"OSC 11 with the other client active answered {notation.describe(answer)}, not its bg"
+            )
+        answer = ask(b"\x1b[?996n")
+        if answer != b"\x1b[?997;2n":
+            raise CheckFailed(
+                f"CSI ? 996 n with a light-scheme client active answered {notation.describe(answer)}"
+            )
+        answer = ask(b"\x1b[>c")
+        if answer != b"\x1b[>61;7000;1c":
+            raise CheckFailed(f"DA2 with a vte 7000 client active answered {notation.describe(answer)}")
+    finally:
+        t.client.send_event("focus", pty=t.pty, focused=True)
+        other.wait_for(lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is False, 5.0)
+        other.close()
+        outsider.close()
+    answer = ask_again = t.probe.query(b"\x1b]11;?\x1b\\")
+    if ask_again != b"\x1b]11;rgb:0000/0000/0000\x1b\\":
+        raise CheckFailed(f"OSC 11 after the role came back answered {notation.describe(answer)}")
+
+
+def check_agent_environment(t: Terminal, notes: list[str]) -> None:
+    """The spoofs on an agent pty, read through the fake's probe, when the
+    probe pty itself is a shell's (the shell case is the other check's)."""
+    if t.kind == "agent":
+        raise CheckSkipped("the probe pty is an agent's: its environment check covers this")
+    run = t.run
+    client = run.client("conformance-agent-env")
+    client.subscribe()
+    client.send_event("theme", term=TERM)
+    reply = client.call("spawn", kind="agent", cwd=run.cwd, cols=COLS, rows=ROWS, provider="claude")
+    if not reply.ok:
+        raise CheckFailed(f"spawn {{kind: agent}}: {reply.describe()}")
+    pty = reply["pty"]
+    try:
+        client.attach(pty, COLS, ROWS)
+        if not client.wait_until(lambda: client.session_facts(pty).get("takes_prompt"), SPAWN_WAIT_S):
+            raise CheckFailed("the fake's box never took a prompt")
+        answer = client.call("prompt", pty=pty, text="probe")
+        if not answer.ok:
+            raise CheckFailed(f"prompt 'probe': {answer.describe()}")
+        probe = Probe(client, pty)
+        probe.ready()
+        env = probe.environment()
+        probe.leave()
+        spoofs_record(run, env, notes)
+        for name, value in (
+            ("TERM", "xterm-256color"),
+            ("COLORTERM", "truecolor"),
+            ("VTE_VERSION", str(TERM["vte"])),
+        ):
+            if env.get(name) != value:
+                raise CheckFailed(f"an agent pty has {name}={env.get(name)!r}, expected {value!r}")
+        notes.append(" ".join(f"{k}={v}" for k, v in env.items()))
+    finally:
+        client.call("close", pty=pty, mode="kill")
+        client.close()
+
+
 def check_paint(t: Terminal, notes: list[str]) -> None:
     client = t.client
     text = "\r\npainted by the conformance kit\r\n"
@@ -586,14 +746,13 @@ def check_screens(t: Terminal, notes: list[str]) -> None:
                 f"{label}: cursor {match.group(1).decode()};{match.group(2).decode()}, "
                 f"VTE showed {expected_row};{expected_col}"
             )
-        if not scenario.get("alternate"):
-            capture = t.client.call("pty.capture", pty=t.pty)
-            got = normalise_capture(capture.get("text", ""))
-            want = normalise_capture(scenario["capture"])
-            if not (got == want or got.endswith("\n" + want) or (not want and True)):
-                failures.append(
-                    f"{label}: capture differs\n      server: {got[-200:]!r}\n      VTE:    {want[-200:]!r}"
-                )
+        capture = t.client.call("pty.capture", pty=t.pty)
+        got = normalise_capture(capture.get("text", ""))
+        want = normalise_capture(scenario["capture"])
+        if got != want:
+            failures.append(
+                f"{label}: capture differs\n      server: {got[-200:]!r}\n      VTE:    {want[-200:]!r}"
+            )
         redraws_before = len(second.redraws.get(t.pty, []))
         reply = second.attach(t.pty, COLS, ROWS)
         if not reply.ok:
@@ -635,6 +794,8 @@ def run_terminal(run: Run) -> None:
         r.run("the tokenizer's cuts", check_tokenizer, t)
         r.run("an attach's redraw", check_attach_redraw, t)
         r.run("the active client, resize and focus", check_pty_events_and_resize, t)
+        r.run("the colour queries follow the active client's term", check_colours_follow_the_active_client, t)
+        r.run("the agent's spawn environment", check_agent_environment, t)
         r.run("paint", check_paint, t)
         r.run("an input frame is written without an attach", check_input_without_attach, t)
         r.run("pty.info", check_pty_info, t)

@@ -277,11 +277,12 @@ The sequence the Collins window follows, which any client can:
 2. **`local`**, when the proof is readable.
 3. **`subscribe`**. The service sends its snapshot as ordinary events on
    the same connection, *before* the reply: an `item` per session with a
-   sidebar row, a `pty` per live pty, a `pr` per session with PR records,
-   a `state.set` per shared state key (a large map entry by entry), a
-   `notify` per notification row and a `diff.notes` per session with marks
-   on its diff, then `rows` (the sidebar's projection). The reply, carrying
-   the counts of `item` and `pty` events sent, marks the snapshot complete.
+   sidebar row, a `pty` per live pty, a `session` per live agent pty, a
+   `pr` per session with PR records, a `state.set` per shared state key (a
+   large map entry by entry), a `notify` per notification row, a
+   `diff.notes` per session with marks on its diff, and `rows` (the
+   sidebar's projection), in no promised order. The reply, carrying the
+   counts of `item` and `pty` events sent, marks the snapshot complete.
    From then on every change arrives as the same events: an `item` carries
    only the fields that moved, a `state.set` one key or entry.
 4. **`attach {pty, cols, rows}`** to show a pty. The reply names the grid

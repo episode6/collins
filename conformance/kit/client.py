@@ -428,7 +428,10 @@ class Client:
         last_len = -1
         last_change = time.monotonic()
         while time.monotonic() < deadline:
-            length = self.output_len(pty)
+            # Every byte the pty has shown this client, the redraw's included:
+            # a fast shell draws its prompt before the attach, and that prompt
+            # arrives in the redraw and not as live output.
+            length = sum(len(frame.payload) for frame in self.frames.get(pty, ()))
             if length != last_len:
                 last_len, last_change = length, time.monotonic()
             elif length > 0 and time.monotonic() - last_change >= quiet_s:

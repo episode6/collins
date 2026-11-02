@@ -23,10 +23,13 @@ prompt is a three-second turn with a reply and the records a turn leaves;
 ``pause`` a turn with no progress report and a quiet of 0.9 s inside it;
 ``stream`` a turn whose progress clears while output goes on; ``die`` (or
 ``--die``) a turn the fake leaves mid-way, its progress report standing;
-``long N`` an N-second turn; ``/model X`` and ``/effort X`` the CLI's local
-commands with their two records; ``!cmd`` a shell command, its output as the
-reply; ``probe`` the terminal probe (below); ``replay FILE OFFSET`` a
-recorded stream written to the terminal up to a byte offset.
+``long N`` an N-second turn; ``menu`` a menu that takes the keys until
+Enter, marked as the appendix says a menu is (the mark and an ordinary
+space); ``/model X`` and ``/effort X`` the CLI's local commands with their
+two records; ``!cmd`` a shell command, its output as the
+reply; ``probe`` the terminal probe (below); ``replay OFFSET FILE`` a
+recorded stream written to the terminal up to a byte offset (the path may
+hold spaces).
 
 The probe (``claude --probe``, or the ``probe`` prompt) puts the terminal in
 raw mode and takes commands, one per line, as the kit types them:
@@ -38,6 +41,11 @@ reports the environment; ``Z <seq>`` the terminal's size; ``X`` leaves. Every re
 an ``OSC 777 ; <text> ST`` string, which a server forwards to its clients
 and no terminal draws, so a report never changes the screen the kit is
 about to compare.
+
+``die`` leaves on the kit's Ctrl+D once the turn is under way. ``/bg`` is
+the handoff: the fake prints that it got it and leaves. A clean exit writes
+nothing to the transcript; ``--save-on-exit`` makes it save its state on
+the way out, as the CLI does.
 
 Other invocations the CLI's users make and a server may too: ``--version``,
 ``agents --json`` (an empty list), ``-p PROMPT`` (one line, exit 0).
@@ -68,6 +76,7 @@ NBSP = " "
 BOX_MARGIN = 4  # the box is columns − 4 wide: the mark, the space, two of right margin
 PASTE_CHARS = 800
 PASTE_BREAKS = 3
+SUBMIT_CHUNK = 16  # a chunk this short ending in CR submits (the fake's own boundary)
 STARTUP_HINT = 'Try "fix typecheck errors"'
 RESTING_HINT = "Ask about the last reply, or type a new prompt"
 SPINNER = ("✢", "✶", "✻", "✽")  # ✢ ✶ ✻ ✽
@@ -164,6 +173,33 @@ class Transcript:
         self._append(record)
 
     def assistant(self, text: str, model: str, effort: str) -> None:
+        # What a naive reading trips on, as the appendix lists it: a record
+        # the CLI made up locally, with the placeholder model, and a
+        # sub-agent's record on a sidechain with a model of its own.
+        self._append(
+            {
+                "type": "assistant",
+                **self._common(),
+                "message": {
+                    "role": "assistant",
+                    "model": "<synthetic>",
+                    "content": [{"type": "text", "text": "..."}],
+                },
+            }
+        )
+        sidechain = {**self._common(), "isSidechain": True}
+        self._append(
+            {
+                "type": "assistant",
+                **sidechain,
+                "effort": "low",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-fake-sidechain",
+                    "content": [{"type": "text", "text": "aside"}],
+                },
+            }
+        )
         record = {
             "type": "assistant",
             **self._common(),
@@ -364,6 +400,9 @@ class Fake:
         self.decoder_rest = b""
         self.saved_termios = None
         self.replaying = False
+        self.in_menu = False
+        self.dying = False
+        self.save_on_exit = bool(args.get("save_on_exit"))
         self.running = True
 
     def _open_transcript(self) -> Transcript:
@@ -486,7 +525,7 @@ class Fake:
         glyph = SPINNER[self.spinner_index % len(SPINNER)]
         self.spinner_index += 1
         elapsed = int(time.monotonic() - self.turn_started)
-        write(f"{CSI}?25l{CSI}{layout['spinner']};1H{CSI}K{glyph} Thinking… ({elapsed}s)")
+        write(f"{CSI}?25l{CSI}{layout['spinner']};1H{CSI}K{glyph} working ({elapsed}s)")
         self.title(("◐" if self.spinner_index % 2 else "◑") + " fake claude")
         self.park_cursor()
 
@@ -527,7 +566,7 @@ class Fake:
         self.clear_spinner()
         if clear:
             self.progress(0)
-        self.emit(f"⏺ fake-claude turn {self.turn_number} done")
+        self.emit(f">> fake-claude turn {self.turn_number} done")
         self.in_turn = False
         now = time.monotonic()
         self.repaints = [now + delay for delay in IDLE_REPAINTS_S]
@@ -538,7 +577,7 @@ class Fake:
         self.spinner_on = False
         self.clear_spinner()
         self.progress(0)
-        self.emit("⏺ fake-claude interrupted")
+        self.emit(">> fake-claude interrupted")
         self.in_turn = False
         self.repaints = [time.monotonic() + delay for delay in IDLE_REPAINTS_S]
 
@@ -560,6 +599,13 @@ class Fake:
             self.box.clear()
             self.leave()
             return
+        if head == "/bg":
+            # The handoff: the CLI hands the conversation to its daemon and
+            # leaves the foreground. The fake has no daemon; it leaves.
+            self.box.clear()
+            self.emit(">> fake-claude got: /bg")
+            self.leave()
+            return
         if head == "probe":
             self.box.clear()
             self.draw_box()
@@ -567,17 +613,24 @@ class Fake:
             return
         if head == "replay" and len(words) >= 3:
             self.box.clear()
-            self.replay(words[1], int(words[2]))
+            self.replay(text.split(None, 2)[2], int(words[1]))
+            return
+        if head == "menu":
+            self.box.clear()
+            self.show_menu()
             return
         if head in ("die", "--die"):
+            # A turn the fake leaves mid-way, its progress report standing:
+            # on the kit's Ctrl+D, once the kit has seen busy true, never at a
+            # fixed moment of the fake's own.
             self.begin_turn(text)
-            self.emit("⏺ fake-claude got: " + text)
-            self.schedule(0.5, lambda: self.emit("about to leave with the progress report standing"))
-            self.schedule(1.0, self.die)
+            self.emit(">> fake-claude got: " + text)
+            self.emit("working until Ctrl+D, then leaving with the progress report standing")
+            self.dying = True
             return
         if head == "pause":
             self.begin_turn(text, progress=False, spinner=False)
-            self.emit("⏺ fake-claude got: " + text)
+            self.emit(">> fake-claude got: " + text)
             self.schedule(0.3, lambda: self.emit("working, with no progress report"))
             self.schedule(0.6, lambda: self.emit("now quiet for 0.9 s"))
             self.schedule(1.5, lambda: self.emit("back after the quiet"))
@@ -586,21 +639,21 @@ class Fake:
             return
         if head == "stream":
             self.begin_turn(text)
-            self.emit("⏺ fake-claude got: " + text)
+            self.emit(">> fake-claude got: " + text)
             self.schedule(0.5, lambda: self.emit("streaming the reply"))
             self.schedule(1.5, lambda: self.emit("the reply's last line"))
             self.schedule(2.0, lambda: self.end_turn("a reply, then output that never stops", clear=True))
-            self.schedule(2.0, lambda: self.emit("⏺ fake-claude cleared"))
+            self.schedule(2.0, lambda: self.emit(">> fake-claude cleared"))
             for tick in range(40):
                 self.schedule(
                     2.3 + 0.3 * tick, lambda tick=tick: self.emit(f"still printing after the clear ({tick})")
                 )
-            self.schedule(14.5, lambda: self.emit("⏺ fake-claude stream over"))
+            self.schedule(14.5, lambda: self.emit(">> fake-claude stream over"))
             return
         if head == "long" and len(words) >= 2:
             seconds = max(float(words[1]), 1.0)
             self.begin_turn(text)
-            self.emit("⏺ fake-claude got: " + text)
+            self.emit(">> fake-claude got: " + text)
             ticks = int(seconds / 0.5)
             for tick in range(ticks):
                 self.schedule(0.5 * tick, lambda tick=tick: self.emit(f"working ({tick})"))
@@ -611,7 +664,7 @@ class Fake:
             self.schedule(0.1, lambda: self.shell(text[1:]))
             return
         self.begin_turn(text)
-        self.emit("⏺ fake-claude got: " + text)
+        self.emit(">> fake-claude got: " + text)
         lines = [
             "Let me think about that.",
             "Here is a reply, streamed in pieces,",
@@ -620,6 +673,19 @@ class Fake:
         for index, line in enumerate(lines):
             self.schedule(0.6 + 0.7 * index, lambda line=line: self.emit(line))
         self.schedule(TURN_S, lambda: self.end_turn("A reply to: " + text))
+
+    def show_menu(self) -> None:
+        """A menu that takes the keys: the mark with an ordinary space after
+        it, which the appendix says tells a menu from the box. Enter answers."""
+        s = self.screen
+        layout = s.layout(1)
+        write(f"{CSI}?25l{CSI}{layout['region_bottom'] + 1};1H{CSI}J")
+        write(f"{CSI}{layout['top_rule']};1H{RULE * s.cols}")
+        write(f"{CSI}{layout['first_prompt']};1HWhich way? (Enter to pick)")
+        write(f"{CSI}{layout['bottom_rule']};1H{MARK} 1. This way")
+        write(f"{CSI}{layout['mode']};1H  2. That way")
+        write(f"{CSI}{layout['bottom_rule']};3H{CSI}?25h")
+        self.in_menu = True
 
     def shell(self, command: str) -> None:
         try:
@@ -664,7 +730,11 @@ class Fake:
         os._exit(0)
 
     def leave(self) -> None:
-        self.transcript.save_state(self.permission_mode)
+        # A clean exit leaves the transcript as it was, so that it produces no
+        # finish; --save-on-exit writes the CLI's state records on the way out
+        # instead, a grown file that counts.
+        if self.save_on_exit:
+            self.transcript.save_state(self.permission_mode)
         self.progress(0, BEL)  # the clears a leaving CLI writes end with BEL
         self.running = False
 
@@ -687,7 +757,20 @@ class Fake:
                 self.replaying = False
                 self.draw_all("back from the replay")
             return
+        if self.in_menu:
+            if "\r" in text:
+                self.in_menu = False
+                self.emit("picked: this way")
+                self.draw_box()
+            return
         if text == "\r":
+            self.submit(self.box.text)
+            return
+        # A short chunk ending in a carriage return submits, as `/bg` and its
+        # Return do on the CLI (appendix D); the 16-byte boundary is the
+        # fake's own, the real one being unmeasured. Longer chunks are pastes.
+        if text.endswith("\r") and len(text) <= SUBMIT_CHUNK and "\x1b" not in text and "\n" not in text[:-1]:
+            self.box.insert(text[:-1])
             self.submit(self.box.text)
             return
         if len(text) > PASTE_CHARS and "\x1b[200~" not in text:
@@ -728,6 +811,8 @@ class Fake:
             if char == "\x03":
                 self.ctrl_c()
                 changed = True
+            elif char == "\x04" and self.dying:
+                self.die()
             elif char in ("\x7f", "\x08"):
                 self.box.backspace()
                 changed = True
@@ -761,7 +846,7 @@ class Fake:
             self.leave()
             return
         self.last_ctrl_c = now
-        self.mode_note = "Press Ctrl-C again to exit"
+        self.mode_note = "Ctrl-C once more leaves"
 
     # -- the probe and the replay ------------------------------------------------------
 
@@ -958,6 +1043,8 @@ def parse_args(argv: list[str]) -> dict:
             args["version"] = True
         elif arg == "--probe":
             args["probe"] = True
+        elif arg == "--save-on-exit":
+            args["save_on_exit"] = True
         elif arg == "--strict-mcp-config" or arg.startswith("--"):
             pass
         else:

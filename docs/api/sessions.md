@@ -124,7 +124,10 @@ property makes such a misreading cost one poll period at most, where a
 snapshot read apart from the series could make it last until the fact
 really moves. A server that reads a fact once per period, keeps what it
 last sent, sends the difference, and fills the snapshot from what it
-last sent, has it.
+last sent, has it. The property holds per field: an event carrying a
+field's change may reach an attaching client before its snapshot, and
+then carries the value the snapshot repeats, so a client applying what it
+receives in order ends holding the right word either way.
 
 Three fields are **one-shots**: `landed`, `reset` and `finished` are sent
 as `true` each time the thing happens and never as `false`. A client acts
@@ -319,7 +322,8 @@ notify. One-shot.
   answer and a local slash command count.
 - before the session is bound there is no transcript to judge by, and a
   fall of `busy` is reported as a finish.
-- sent only after `busy` has fallen for the session.
+- sent only after `busy` has fallen for the session, and, when it comes,
+  within 10 seconds of that fall.
 - accompanied by `unread: true` on the `item` of every row that stands for
   the session, except a row whose chain is still busy, one that is
   backgrounding, and one whose status is `background`. Whether a row is
@@ -347,6 +351,8 @@ holds now with what it held at the last counted finish and never counts
 marks. A file that grew while the fall was being judged is a turn even
 when its new records could not be read in time, since nothing else writes
 it. A fall the file never confirms is dropped, and the person is not told.
+So an exit that leaves the transcript as it was produces no `finished`,
+while one the agent saves on its way out is a grown file and counts.
 A session with no transcript bound yet (a fresh spawn before its first
 submit) has nothing to judge a finish by, which is why the required
 properties have a fall of `busy` reported as a finish until the bind.
@@ -410,8 +416,11 @@ change.
 **Meaning.** The server's reading of its process table for the pty.
 `pid` is the process the server started on the pty (in Collins the shell;
 a server that runs the CLI directly reports the CLI). `running_command`
-says the pty's foreground is something other than that process: a command
-runs in it. `agent_running` says that something is a Claude Code agent.
+says the agent's program, or anything but a shell, runs on the pty: in
+Collins, that the pty's foreground is something other than the shell it
+started; on a server that runs the CLI as the pty's own process, that the
+CLI runs, so it is `true` for the CLI's life there. `agent_running` says
+that what runs is a Claude Code agent.
 `agent_cwd` is the agent's current directory, which moves when the CLI
 enters a worktree, and is what a client's footer and editor follow.
 
@@ -617,7 +626,7 @@ The required properties above, gathered for a test to tick off:
 | --- | --- |
 | `takes_prompt` | false unless the agent runs, by the best reading the server has; `entered` null and `foreign_paste` false then; never true while the box holds text; read from the server's screen model; re-read when `agent_running` flips |
 | `busy` | true within 3 s of a prompt; false within 10 s of a turn's end and of the CLI leaving the pty; a fall by the quiet road only after a second with no sign of work, by the turn-end road once the agent's clear has stood the grace; a rise never held |
-| `finished` | once per confirmed turn of a bound session (a fall of `busy` before the bind), after `busy` fell, with `item.unread` on every row bar a busy chain, a backgrounding row and status `background`; `notify {kind: "finished"}` at Level 2 |
+| `finished` | once per confirmed turn of a bound session (a fall of `busy` before the bind), after `busy` fell and within 10 s of it, with `item.unread` on every row bar a busy chain, a backgrounding row and status `background`; `notify {kind: "finished"}` at Level 2; none for an exit that left the transcript as it was |
 | `model`, `effort`, `permission_mode` | null until the transcript says; a `switch` reflected within one turn |
 | every fact | the snapshot and the events form a single series: the snapshot carries what the events last carried |
 | `agent_cwd`, `agent_running`, `running_command`, `pid` | by the platform's means; null or absent when unreadable; `running_command` false once the agent has exited; `agent_running` re-read at least every 2 s |
@@ -790,10 +799,13 @@ and hints; that row is not part of the box.
   box's start; Backspace deletes the character before the cursor and does
   nothing at the box's start. A single Escape interrupts a running turn,
   so it is no key for editing the box.
-- **A carriage return submits**, provided it arrives in a write of its own
-  after the text (Collins waits 250 ms between the two): a carriage return
-  inside the same chunk as the text is read as part of a paste and becomes
-  a line break.
+- **A carriage return submits** when it arrives in a write of its own
+  after the text (Collins waits 250 ms between the two). What is known of a
+  carriage return inside the same chunk as the text: a four-byte chunk
+  ending in one (`/bg` and its Return, the handoff Collins has typed that
+  way since 2026-07) submits, while a prompt's text with its Return in one
+  chunk is left typed, the Return a line break; the threshold between the
+  two is unmeasured.
 - **Pastes.** Text wrapped in the bracketed-paste markers (`ESC [ 200 ~`
   before, `ESC [ 201 ~` after) is a paste event whatever its size, and so
   is a plain chunk of more than 800 characters. A paste **longer than 800

@@ -2024,7 +2024,7 @@ Family: `core` · Level 1
 
 ### `pty-exited`
 
-A pty's child exited; status is null when it is unknown (a keeper crash).
+A pty's child exited and the pty is gone; status is null when it is unknown (a keeper crash). With `table` true it is the subscription's word that an agent's row left the pty table instead: the CLI exited, the pty lives on with its shell, and status is null.
 
 Family: `core` · Level 1
 

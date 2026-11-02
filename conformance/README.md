@@ -17,7 +17,8 @@ Everything here is MIT (see [LICENSE](LICENSE)), like the pages and unlike the
 rest of Collins. It is Python 3.12 or newer and the standard library alone; it
 imports `collins/api/protocol.py` (the MIT message table) by path and nothing
 else of Collins, so it can be copied out of the repository with that one file
-beside it as `conformance/protocol.py`. Nothing in it reads Collins' service.
+beside it as `conformance/protocol.py` (or named by `CONFORMANCE_PROTOCOL` in
+the environment). Nothing in it reads Collins' service.
 
 ## Running it
 
@@ -26,7 +27,15 @@ python3 -m conformance <socket path> [options]
 ```
 
 The socket is the one `collins-service --print-socket` prints, or a server's
-own. The kit runs on the server's machine: the fake claude it points the
+own. **Run it against a server that holds nothing of value**: the kit spawns
+sessions and shells of its own, writes files in its scratch directory and
+under its sessions' directories, posts and removes a notification, uploads
+one file, and reads and writes state (`names`, `favorites`, `archived` for
+its own session; a `settings` entry written back to its own value). It names
+no pty but its own and sends a server that lists `internal` or `debug`
+nothing of theirs; still, a person's sessions on the same server see its
+rows come and go, so a scratch service is the place for it
+(`scripts/run_conformance.py` in the Collins repository makes one). The kit runs on the server's machine: the fake claude it points the
 server at is a file the server runs, the scratch directory it makes is one the
 server writes in, and the repository it makes for the `git` family is read by
 the server. Over an ssh forward, pass `--fake-claude` and `--scratch` as paths
@@ -39,7 +48,9 @@ on the server's machine and copy the fake there first.
 | `--skip-family F` | Leave a family out (repeatable). `prs` needs the GitHub CLI and the network, `sandbox` bubblewrap. |
 | `--fake-claude PATH` | The fake claude, as a path on the server's machine (default: `conformance/fake_claude.py`). |
 | `--scratch DIR` | A directory the kit may write in (default: a temporary one, removed at the end). |
-| `--replay` | Also write the recorded Claude Code streams under `data/streams/` into a fake session and compare the server's reading with VTE's. |
+| `--replay` | Also write every recorded Claude Code stream under `data/streams/` into a fake session, mark by mark, and compare the server's capture and `takes_prompt` with VTE's reading. |
+| `--vte-bytes` | Fail a query the server answers in another terminal's voice. Without it such an answer is a note: the terminal contract says a server should answer with VTE 0.84.0's bytes and is conformant at the wire otherwise; Collins' own CI passes it, since Collins promises those bytes. |
+| `--spawn-budget SECONDS` | How long the fake's box may take to take a prompt after the spawn (default 5). The fake's own budget, not a property of the pages. |
 | `--with-gh` | Run the `prs` checks that call `gh`: a fetch and a detail of a real pull request of the Collins repository, over the network, holding only that they are answered. |
 | `--only TEXT` | Run only the groups whose name holds TEXT: `level 0`, `terminal`, `sessions`, `level 2`, `families`. |
 | `--json FILE` | Write the results as JSON too. |
