@@ -17,10 +17,11 @@ message type with its fields and bounds; this page is everything else.
 
 ::: tip License
 This specification, the [message reference](./messages), [the terminal
-contract](./terminal), the script that generates the reference, the Python
-module that defines the protocol (`collins/api/protocol.py`), the one that
-connects over ssh (`collins/sshremote.py`) and the terminal stream fixtures
-the contract is measured against are licensed [MIT](#license). Collins itself, the
+contract](./terminal), the [session facts](./sessions) page, the script that
+generates the reference, the Python module that defines the protocol
+(`collins/api/protocol.py`), the one that connects over ssh
+(`collins/sshremote.py`) and the terminal stream fixtures the contract is
+measured against are licensed [MIT](#license). Collins itself, the
 service included, stays GPL-3.0-or-later. A program that talks to
 `collins-service` only through this API is, in the view of Collins'
 authors, an independent work: see [Interoperability](#interoperability).
@@ -30,7 +31,12 @@ authors, an independent work: see [Interoperability](#interoperability).
 The protocol is at version 1 and the service has not shipped in a stable
 release. Until it has, a message's fields can change without the protocol
 number moving. Read the version and the capabilities off the `hello` reply
-and treat anything unexpected as absent, as the Collins client does.
+and treat anything unexpected as absent, as the Collins client does. A second
+implementation of the service changes nothing about this: nothing is stable
+yet, and both projects are still testing. These pages, the reference and,
+once it is published, the conformance kit are kept current with the service
+by the CI gates, so what they say is what `main` does on the day (the
+[session facts](./sessions) page, until the kit, by review alone).
 :::
 
 ## Finding the service
@@ -306,12 +312,16 @@ The sequence the Collins window follows, which any client can:
    `takes_prompt` says the CLI's input box is empty and would take a
    prompt; `busy` and `finished` are the service's reading of the agent's
    activity; `model`, `effort` and `permission_mode` are read off the
-   transcript, null while unknown; `landed`, `reset`, `finished` and
-   `forked` each mark something happening: sent true every time it does, and
-   never false. `landed` comes with every read of the transcript, so expect
-   it often, even from an idle session. Requests a
+   transcript, null while unknown; `landed`, `reset` and `finished` each
+   mark something happening: sent true every time it does, and never
+   false, and `forked` names the id a fork resolved to. `landed` comes
+   with every read of the transcript, so expect
+   it often, even from an idle session. What each fact means, what every
+   server must guarantee of it and what any reading of it off Claude Code
+   contends with is the [session facts](./sessions) page. Requests a
    client makes of a session name its pty: `prompt` to type a prompt in
-   (refused when the box is not empty, so nothing lands mid-sentence),
+   (with `when_empty`, refused when the box is not empty, so nothing lands
+   mid-sentence),
    `switch` for the model or effort, `write` and `send` for raw text,
    `cut` to lift the box's text out, `close` with a mode (`exit` for the
    graceful exit, `background` for the `/bg` handoff, `kill` to force it).
@@ -702,10 +712,14 @@ place and strips, with VTE 0.84.0's reply to each, the redraw it paints an
 attaching client with, the screen model its session facts are read from, the
 active client, and the environment an agent starts in.
 
-**What is still to be written.** These pages specify the messages and the
-terminal, and two things a server needs are not published yet. How it reads a
-session's facts from Claude Code will get a page of its own. A conformance kit
-will test a server against these pages.
+**The session facts.** How a server reads a session's facts from Claude Code,
+and what every server must guarantee of each fact, is the
+[session facts](./sessions) page, with an appendix of the Claude Code
+behaviour the reading rides on.
+
+**What is still to be written.** These pages specify the messages, the
+terminal and the session facts, and one thing a server needs is not published
+yet. A conformance kit will test a server against these pages.
 
 **Where this lives.** This documentation is kept in the Collins repository for
 now, and may move to a repository both projects share once it settles. Every
@@ -734,8 +748,10 @@ from `collins/service/` is a derivative of Collins.
 
 This specification (`docs/api/index.md`), the message reference
 (`docs/api/messages.md`), the terminal contract (`docs/api/terminal.md`),
-the reference's generator (`scripts/gen_api_reference.py`), the protocol
-module (`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`)
+the session facts page and its appendix on Claude Code
+(`docs/api/sessions.md`), the reference's generator
+(`scripts/gen_api_reference.py`), the protocol module
+(`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`)
 and every file of the terminal stream fixtures (`tests/fixtures/streams/`:
 the synthetic scenarios and their golden, the recorded streams of a Claude
 Code session with their marks and goldens, measurements the terminal

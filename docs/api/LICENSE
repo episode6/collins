@@ -3,7 +3,8 @@ MIT License
 Copyright (c) 2026 episode6, Inc.
 
 This license covers the service API specification in this directory
-(index.md, messages.md and terminal.md), the script that generates
+(index.md, messages.md, terminal.md, and sessions.md with its appendix
+describing Claude Code's observable behaviour), the script that generates
 messages.md (scripts/gen_api_reference.py), the protocol module it is
 generated from (collins/api/protocol.py), the module that connects to a
 service over ssh (collins/sshremote.py), and the terminal stream fixtures

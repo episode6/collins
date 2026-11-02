@@ -216,12 +216,20 @@ fields name (`protocol.GIT_BUILDERS`, `STATE_KEYS`, `SERVICE_SETTINGS`,
 there too) (run it after any
 table edit; `tests/test_api_reference.py` fails on a stale copy or an
 unlisted name, and pins
-the MIT files — the three pages, the generator, `protocol.py`,
+the MIT files — the four pages (`index.md`, `messages.md`, `terminal.md`
+and `sessions.md`, the session-facts contract with its appendix on Claude
+Code's observable behaviour, written from the spec and from Claude Code
+as observed before its author read any service module, its later
+corrections made after the author had read six of them for the fixes
+riding its PR, as its header's record of sources says), the generator, `protocol.py`,
 `sshremote.py` and every file of `tests/fixtures/streams/` (the SPDX tag
 on `scenarios.py`, the directory's `LICENSE` for the data files, which
 cannot carry one; the user's relicensing decision of 2026-11-01, the
 files being already distributed with the repository and its source
-packages) — to their SPDX tags and everything else to none; `debian/copyright` and `docs/api/LICENSE` have the
+packages) — to their SPDX tags and everything else to none, holds
+`sessions.md` to naming no Collins module but those two and to describing
+every core `session` and `item` field, and holds every page to citing no
+private design document; `debian/copyright` and `docs/api/LICENSE` have the
 stanza, and the four move together). Keep `protocol.py` standard-library only and free of
 Collins-private references in what the generator prints (a section
 comment's text up to its first colon is a heading of the public spec;

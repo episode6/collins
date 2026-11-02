@@ -17,7 +17,7 @@ read from, the client whose size the pty takes, and the environment the child
 starts in. The [message reference](./messages) has the fields of every
 message named here; [index.md](./) has the frames, the flow control and a
 client's life. The session facts themselves (`takes_prompt`, `busy`, the
-model and effort read off a transcript) are the sessions page's, which
+model and effort read off a transcript) are the [session facts](./sessions) page's, which
 follows this one.
 
 **Normative and informative.** The sections marked *normative* are what a

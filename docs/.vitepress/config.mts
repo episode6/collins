@@ -41,6 +41,7 @@ export default defineConfig({
             { text: 'The service API', link: '/api/' },
             { text: 'Message reference', link: '/api/messages' },
             { text: 'The terminal contract', link: '/api/terminal' },
+            { text: 'Session facts', link: '/api/sessions' },
           ],
         },
       ],

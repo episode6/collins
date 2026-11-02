@@ -83,6 +83,40 @@ downloads of each version, see the
   there and never hear otherwise, so the tab refused the composer and drops until
   it was reopened. What a client is told on attaching and what it hears afterwards
   are now one series, and a wrong reading is corrected within two seconds.
+- **Fixed: a finished turn was announced twice, and an idle repaint once
+  more.** The `finished` field of a running session's `session` event was
+  sent twice per turn and again on every repaint of an idle session, where
+  the row's unread flag and the notification were right; a client acting on
+  the event could not tell a turn from a redraw. It is now sent once per
+  confirmed turn, as the session-facts page requires.
+- **Fixed: a session's busy flag could blink off and on within a
+  second.** Between a turn's end and the next sign of work (a child the
+  turn left running, output arriving every two seconds) the flag fell for
+  as little as 22 ms and rose again, and each blink was a finished turn:
+  a flagged row and a notification for a turn still going. A fall now
+  stands for a second before it is reported, and a sign of work inside
+  that second cancels it silently; a turn's end reaches the row about a
+  second later than before, and a rise is never held.
+- **Fixed: a session whose CLI was killed mid-turn stayed busy for a
+  minute.** The CLI's last progress report kept the row busy for the
+  report's full window after the process was gone, and the kill's turn was
+  never announced. The CLI leaving the terminal now ends the turn the way
+  its own clear does: the row is idle within a few seconds, and a turn
+  whose records were written is announced.
+- **Fixed: a shell drawing the CLI's prompt mark could read as an agent
+  waiting for a prompt.** The box reading checked only that the terminal
+  had a child, so a shell left behind by an exited agent, or any program
+  whose prompt looked like the CLI's, could make a session report an
+  empty input box, and a prompt sent then would have landed in the shell.
+  The reading now takes the service's own word on whether the agent runs,
+  and is re-read the moment that word changes.
+- **Fixed: a window that attached just as the agent came up could keep
+  reading its input box as unusable.** The attach's snapshot read the box
+  before it recorded that the agent was there, so the box stayed reported
+  as not taking a prompt until the agent's next output; and before the
+  agent was recorded, the CLI's own hint in the empty box was reported as
+  typed text. The snapshot records the agent first, and a box with no
+  agent recorded reports no typed text.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's
@@ -97,6 +131,21 @@ downloads of each version, see the
   real VTE and to the service, so the page cannot drift from either. The
   message reference's line on `paint` says what the message does, where it
   cited a rule of a private design document.
+- **The session facts have a contract.** A new MIT page,
+  [Session facts](/api/sessions), says what each field of the `session`
+  event and of a list row means, what every server must guarantee of it
+  (`busy` within 3 s of a prompt and off within 10 s of a turn's end or of
+  the CLI leaving, never a fall under a second, one `finished` per
+  confirmed turn, a session bound to its transcript within 10 s, an
+  attach's snapshot and the events one series, …)
+  and, informatively, what a reading of it contends with, with the numbers
+  the Collins service measured. Its appendix,
+  *Claude Code as observed*, collects the facts about the CLI itself that
+  such a reading rides on, from the transcript's records to the input box's
+  glyphs and the paste folds, each dated with the CLI version it was last
+  confirmed on and none of them promised by Anthropic: a server fails soft
+  when one moves. Written from the spec, not from the service's code, and
+  MIT like the rest of `docs/api/`.
 - **A connection can name its own discovery command.** **Connect to…** has
   an *Advanced* row, *Discovery command*: what runs on the box in place of
   `collins-service --print-socket`, for a server that documents another

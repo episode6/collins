@@ -2951,6 +2951,10 @@ class ServiceCore:
             record.cli_ever_ran = True  # a shell alone from here on is the CLI's leaving, not a startup
             self.publish_pty(pty_id)
             return
+        if self.activity is not None:
+            # The agent is gone: `busy` must not outlive it under a standing
+            # progress hint (§5 ruling 39).
+            self.activity.cli_left(record)
         self._broadcast({"t": "pty-exited", "pty": pty_id, "status": None, "table": True})
         if self.feed is not None and ran:
             self.feed.refresh_running({ran})

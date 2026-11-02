@@ -223,10 +223,48 @@ def test_the_box_facts_move_with_the_screen(server, tmp_path):
     screen = server.core.ptys.get(pty).screen
     assert pump(3, lambda: screen.capture_contents().count(_CLI["mark"]) >= 2)
     client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")  # the CLI's prompt mark, drawn by cat's echo
-    assert pump(3, lambda: any(e.get("takes_prompt") for e in ends.of("session")))
+    assert pump(3, lambda: "\u276f\xa0" in screen.capture_contents())
+    pump(0.3)  # the settle and a margin
+    # A shell alone drawing the mark takes no prompt: no agent has been
+    # recorded on the pty (§5 ruling 40), whatever the screen shows.
+    assert not any(e.get("takes_prompt") for e in ends.of("session"))
+    assert record._sent.get("takes_prompt") is False
+    # The poll that finds the agent re-reads the box at once, with no
+    # settle in between: the change is one `session` event with the
+    # fields that moved.
+    record.session.agent_is_running = lambda: True
+    record.refresh_process_facts()
     moved = [e for e in ends.of("session") if "takes_prompt" in e][-1]
+    assert moved["takes_prompt"] is True
     assert set(moved) >= {"t", "pty", "handle", "takes_prompt"}
     assert "cwd" not in moved  # a changed-fields event, not the snapshot
+
+
+def test_a_snapshot_records_the_agent_before_it_reads_the_box(server, tmp_path):
+    """The verification of PR 648, V2: an attach between the agent
+    appearing and the poll that finds it read the box under the old
+    `agent_running`, then recorded the new one, so the poll saw no flip and
+    `takes_prompt` stuck false with `agent_running` true until the next
+    output. The snapshot's own refresh records the process facts first,
+    and the box read consults them."""
+    along, newcomer = Client(), Client()
+    client_a = server.connect(along.on_output, along.on_event, device="laptop")
+    pty = spawn_agent(client_a, tmp_path)["pty"]
+    client_a.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    screen = server.core.ptys.get(pty).screen
+    assert pump(3, lambda: screen.capture_contents().count(_CLI["mark"]) >= 2)
+    client_a.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")
+    assert pump(3, lambda: "\u276f\xa0" in screen.capture_contents())
+    pump(0.3)
+    assert record._sent.get("agent_running") is False and record._sent.get("takes_prompt") is False
+    # The agent appears; before any poll, a second client attaches.
+    record.session.agent_is_running = lambda: True
+    client_b = server.connect(newcomer.on_output, newcomer.on_event, device="desk")
+    client_b.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert _word(newcomer, "agent_running") is True and _word(newcomer, "takes_prompt") is True
+    assert _word(along, "agent_running") is True and _word(along, "takes_prompt") is True
+    assert record._sent["takes_prompt"] is True
 
 
 def test_a_spawn_in_a_gone_directory_is_the_sessions_fallback(server, tmp_path):
@@ -662,6 +700,9 @@ def test_the_settle_delivers_the_last_change_of_a_burst(server, tmp_path):
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event, device="laptop")
     pty, screen = _ready_agent(server, client, tmp_path)
+    record = server.core.sessions[pty]
+    record.session.agent_is_running = lambda: True  # the box is the agent's (§5 ruling 40)
+    record.refresh_process_facts()
     before = len(ends.of("session"))
     client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")  # the prompt mark: an empty box
     client.send_input(pty, b"half")  # and at once, text in it
@@ -932,6 +973,7 @@ def test_a_cut_seeds_the_box_and_refuses_a_foreign_paste(server, tmp_path):
     pty, screen = _ready_agent(server, client, tmp_path)
     record = server.core.sessions[pty]
     record.session.agent_is_running = lambda: True
+    record.refresh_process_facts()  # recorded, as the box read consults it
     client.send_input(pty, "❯\xa0hello".encode())
     assert pump(3, lambda: "hello" in screen.capture_contents())
     handle = client.request({"t": "cut", "pty": pty})["handle"]
@@ -964,6 +1006,7 @@ def test_a_cut_whose_text_would_not_frame_is_refused_before_the_erase(server, tm
     pty, screen = _ready_agent(server, client, tmp_path)
     record = server.core.sessions[pty]
     record.session.agent_is_running = lambda: True
+    record.refresh_process_facts()  # recorded, as the box read consults it
     client.send_input(pty, "❯\xa0hello there".encode())
     assert pump(3, lambda: "hello there" in screen.capture_contents())
     writes = []

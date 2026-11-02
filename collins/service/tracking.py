@@ -267,6 +267,22 @@ class ServiceActivity:
             for key in self._keys(session):
                 self.tracker.mark(key)
 
+    def cli_left(self, record) -> None:
+        """The CLI left the pty (`ServiceCore.cli_changed`'s falling edge:
+        killed mid-turn, or exited on its own). A standing progress hint
+        kept the pole up for its 60 s window after the process was gone, so
+        `busy` outlived the agent by a minute (§5 ruling 39). The hint's
+        window closes, and the pole finishes with the clear's grace,
+        through the judge as any finish: a killed turn whose records were
+        written counts (the person should look), and a pole already down
+        is a no-op, so a clean exit after an idle turn flags nothing."""
+        session = record.session
+        progress = session.progress
+        if progress is not None:
+            progress.turn_ended()
+        for key in self._keys(session):
+            self.tracker.finish(key, grace_s=PROGRESS_FINISH_GRACE_S)
+
     def input_sent(self, record, text: str) -> None:
         """The session's own write (`Session.write_text`, through its
         host's `input_sent`): an injected prompt, a switch, a close flow's
@@ -318,9 +334,14 @@ class ServiceActivity:
     def _on_finished(self, key: str) -> None:
         record = self._record_by_handle(key)
         if record is not None:
-            # No bound transcript yet to judge by: the edge passes as it
-            # always did for a placeholder.
-            record.send({"finished": True})
+            # The handle's edge is for a placeholder with no transcript to
+            # judge by. Once the id is bound the id's edge is judged and a
+            # counted finish lands on this same record (`_land_finish`
+            # finds it by id), so the handle's edge sends nothing from then
+            # on: it sent a second `finished` per turn and one per idle
+            # repaint (§5 ruling 35).
+            if not record.session.session_id:
+                record.send({"finished": True})
             return
         self.judge.edge(key)
 

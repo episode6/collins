@@ -67,19 +67,21 @@ Copyright: 2026 episode6, Inc.
 License: Expat
 Comment: The service API: the message table every client of collins-service
  speaks, the published specification of it (docs/api/, the terminal
- contract docs/api/terminal.md included), the script that renders the
- message reference from the table, the module that connects to a service
- over ssh, and the terminal stream fixtures the terminal contract is
- measured against (tests/fixtures/streams/: the synthetic scenarios and
- their golden, which are Collins' own measurements of VTE, and the
- recorded streams of a Claude Code session with their marks and goldens,
- relicensed on 2026-11-01 as a deliberate act of the copyright holder, the
- files being already distributed with this repository and its source
- packages). MIT (Expat) so that another development environment can vendor
- the modules or the spec to be a client, or write a server from the spec;
- docs/api/LICENSE, each source file's SPDX tag and
- tests/fixtures/streams/LICENSE say so. The service and the window that
- implement the protocol remain GPL-3.0-or-later.
+ contract docs/api/terminal.md and the session-facts page
+ docs/api/sessions.md with its appendix describing Claude Code's observable
+ behaviour included), the script that renders the message reference from
+ the table, the module that connects to a service over ssh, and the
+ terminal stream fixtures the terminal contract is measured against
+ (tests/fixtures/streams/: the synthetic scenarios and their golden, which
+ are Collins' own measurements of VTE, and the recorded streams of a Claude
+ Code session with their marks and goldens, relicensed on 2026-11-01 as a
+ deliberate act of the copyright holder, the files being already
+ distributed with this repository and its source packages). MIT (Expat) so
+ that another development environment can vendor the modules or the spec
+ to be a client, or write a server from the spec; docs/api/LICENSE, each
+ source file's SPDX tag and tests/fixtures/streams/LICENSE say so. The
+ service and the window that implement the protocol remain
+ GPL-3.0-or-later.
 
 Files: collins/gitpatch.py
        collins/gitmodel.py
