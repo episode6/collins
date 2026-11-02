@@ -141,6 +141,30 @@ PROGRESS_QUIET_S = IDLE_S
 # itself while the user's eyes are on the row.
 PROGRESS_FINISH_GRACE_S = 3.0
 
+# How long a fall of busy stands before it is reported. The session-facts
+# page (docs/api/sessions.md, the spec's §3.4) requires that a quiet shorter
+# than a second never read as a fall: the service fell for 22 to 300 ms between a
+# turn's end and the next sign (a child left alive marking again, output
+# every two seconds), each fall a false finish, a flagged row and a
+# notification (§5 ruling 37). So the sweep reports a fall only once it has
+# stood this long, on both roads down (the idle window lapsing, an armed
+# finish's grace running out): the key reads busy throughout, a mark inside
+# the hold cancels it with nothing reported (an armed finish needs its
+# `resume` first, as inside the grace), and so nothing one-shot (a finish,
+# an unread flag, a notification) ever rides a shorter quiet. What the hold
+# does not promise is a pole that never flickers: rises go out at once, so
+# a reported fall and the next rise can sit closer together than a second
+# (a child sighted again, output landing just as the quiet's second ran
+# out; 37 to 883 ms measured), which the page states as the property and a
+# client smooths for itself if it wants to, nothing one-shot riding a rise
+# (§5 ruling 43). On the turn-end road (an armed finish's grace running
+# out) output and a process sighting do not take the agent's word back,
+# only a `resume` does, so there output can still be arriving as a fall lands
+# and the next rise can follow at once (56 ms measured; §5 ruling 46). The cost
+# is this long on every fall and every notification, inside the page's
+# 10 s.
+FALL_HOLD_S = 1.0
+
 # How long a finish edge the transcript calls a repaint is held before it is
 # dropped, while the tab is asked to re-read its transcript (see FinishLedger
 # and MainWindow._hold_finish). The CLI's turn-end record lands tens of
@@ -190,6 +214,11 @@ class ActivityTracker:
     runs out — the agent's output genuinely stopped coming. An explicit clear()
     is teardown, not a finish: its tab closed or its detach ended, and neither
     should read as "a run just completed".
+
+    A fall the sweep finds is held for FALL_HOLD_S before either callback
+    runs, and a mark inside the hold cancels it silently (see the constant):
+    `is_busy` and `busy` read the key busy throughout. `finish` with no grace
+    and `clear` are not the sweep's and are not held.
     """
 
     def __init__(
@@ -312,7 +341,10 @@ class ActivityTracker:
 
     def _on_sweep(self) -> bool:
         now = self._clock()
-        armed = [sid for sid, deadline in self._pending_finish.items() if deadline <= now]
+        # Either road down lands only once the fall has stood FALL_HOLD_S:
+        # a mark meanwhile moved the deadline (or a resume took the armed
+        # finish back), and nothing was reported (§5 ruling 37).
+        armed = [sid for sid, deadline in self._pending_finish.items() if deadline + FALL_HOLD_S <= now]
         # An armed finish owns its session's ending: the grace is the agent's
         # word being weighed, and a redraw mark on the short window inside it
         # (the prompt box returning) must not land the finish early — that
@@ -320,7 +352,7 @@ class ActivityTracker:
         timed_out = [
             sid
             for sid, deadline in self._deadlines.items()
-            if deadline <= now and sid not in self._pending_finish
+            if deadline + FALL_HOLD_S <= now and sid not in self._pending_finish
         ]
         for session_id in dict.fromkeys(armed + timed_out):
             log.debug(

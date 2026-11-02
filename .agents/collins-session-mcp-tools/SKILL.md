@@ -154,8 +154,12 @@ import it. It holds:
   colon with the §/PR/D references stripped; `_TITLES` renames the odd
   one). After any edit to the table run the script and commit the page:
   `tests/test_api_reference.py` fails on a stale copy. The same test pins
-  the SPDX tag on exactly five files (the two pages, the generator,
-  `protocol.py` and `sshremote.py`): a new module under `collins/api/` is GPL, and nothing
+  the SPDX tag on exactly the MIT files (the pages: `index.md`,
+  `messages.md`, `terminal.md` and `sessions.md`, the session-facts contract and its
+  appendix on Claude Code, written from the spec and from the CLI as
+  observed, its header's record of sources saying what its author had
+  read when; the generator; `protocol.py` and `sshremote.py`): a new
+  module under `collins/api/` is GPL, and nothing
   of the private design spec belongs in a `MessageType.summary`, which
   the public page prints verbatim. The reference also prints what the
   free fields name: `GIT_BUILDERS`, `STATE_KEYS`, `SERVICE_SETTINGS` and

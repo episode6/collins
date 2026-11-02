@@ -259,12 +259,13 @@ for the app Collins grew out of. Released under
 **The service API is MIT.** The protocol `collins-service` speaks over its
 socket is specified in [docs/api](https://episode6.github.io/collins/api/)
 and defined by `collins/api/protocol.py`; the spec (the terminal contract
-included), the module, the script that renders the message reference from
-it, `collins/sshremote.py`, which connects to a service over ssh, and the
-terminal stream fixtures under `tests/fixtures/streams/` that the terminal
-contract is measured against are MIT-licensed
-([docs/api/LICENSE](docs/api/LICENSE)) so that another development
-environment can be a client, or serve the API in place of
+and the page on the session facts with its appendix on Claude Code's
+observable behaviour included), the module, the script that renders the
+message reference from it, `collins/sshremote.py`, which connects to a
+service over ssh, and the terminal stream fixtures under
+`tests/fixtures/streams/` that the terminal contract is measured against
+are MIT-licensed ([docs/api/LICENSE](docs/api/LICENSE)) so that another
+development environment can be a client, or serve the API in place of
 `collins-service`. A program that talks to the service only
 through that documented API is, in our view, an independent work and not a
 derivative of Collins, whatever its own license, and so is a server written
