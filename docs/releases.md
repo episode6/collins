@@ -129,6 +129,11 @@ downloads of each version, see the
   agent was recorded, the CLI's own hint in the empty box was reported as
   typed text. The snapshot records the agent first, and a box with no
   agent recorded reports no typed text.
+- **Fixed: a finished turn could be announced a millisecond before the
+  row's busy flag fell.** A session is tracked under two keys, and the
+  tracker reported them in turn; a client reading the `finished` event
+  could still see the session busy. Every fall is now reported before any
+  finish, as the session-facts page promises.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's

@@ -208,6 +208,34 @@ def test_output_running_out_on_its_own_is_a_finish():
     assert finished == ["a"]
 
 
+def test_every_falls_is_reported_before_any_finish():
+    """§5 ruling 47: a session is tracked under two keys, and a sweep
+    that handled them in turn sent the id's finish before the handle's
+    `busy: false`. Both falls go out first, then the finishes, in the
+    keys' order."""
+    clock, timers, log = FakeClock(), FakeTimers(), []
+    tracker = ActivityTracker(
+        lambda sid, busy: log.append(("change", sid, busy)),
+        on_finished=lambda sid: log.append(("finished", sid)),
+        idle_s=2.0,
+        clock=clock,
+        add_timeout=timers.add,
+        remove_timeout=timers.remove,
+    )
+    tracker.mark("id")
+    tracker.mark("handle")
+    clock.advance(2.5 + FALL_HOLD_S)
+    timers.tick()
+    assert log == [
+        ("change", "id", True),
+        ("change", "handle", True),
+        ("change", "id", False),
+        ("change", "handle", False),
+        ("finished", "id"),
+        ("finished", "handle"),
+    ]
+
+
 def test_an_explicit_clear_is_teardown_not_a_finish():
     # clear() means the tab closed or the detach ended — nothing completed,
     # so nothing should be flagged as freshly done.
