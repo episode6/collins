@@ -19,10 +19,19 @@ the sidebar, the terminal tab, testing, the GPL notices and pull requests;
 the author's memory notes on the CLI; real transcripts, read only; the
 strings of the installed CLI and its --help; the recorded 2.1.288 terminal
 streams under tests/fixtures/streams/; and a headless probe of 2.1.316 on
-a bare pty in a throwaway home (three short prompts in all). Not read: any
-module of the service or of the data layer. Not run: the Collins service;
-where a sentence gives a number for Collins' own reading, the number is
-the spec's or a reviewer's measurement, as the sentence says. The text was
+a bare pty in a throwaway home (three short prompts in all); and the
+reviews of the page on its pull request (Claude's, and the Opus 5.5 review
+and its verification), which quote and cite the service's code and
+measured the service against the page: every number this page gives for
+Collins' own reading that is not the spec's comes from them and is
+labelled as Collins'. Not read for the page: any module of the service or
+of the data layer. After the page's text and its first corrections were
+committed, its author read six modules of the service (tracking,
+activity, core, session, hosting, finish) and the process-tree helper to
+make the four service fixes the spec's decisions ordered; the corrections
+made after that (the verification's items and the decisions on them) were
+written from those decisions and the reviews, and compared by word runs
+against those modules as well. Not run: the Collins service. The text was
 compared by runs of five or more words against the spec's reading of the
 service, the GPL modules' docstrings and comments, the author's memory
 notes and the repository's skills, and the runs that were prose were
@@ -142,11 +151,19 @@ turn. A client that wants "working or not" reads `busy`.
 
 **Required.**
 
-- `false` while no agent runs on the pty, by the server's own
-  `agent_running` reading (the last one it sent, so that the two facts
-  agree; unknown reads as `false`) and not by the pty merely having a
-  child: a shell the agent left behind draws a prompt of its own, whatever
-  it looks like, and a prompt typed then lands in the shell.
+- `false` while no agent runs on the pty, by the best reading the server
+  has: its process table (`agent_running`, the last reading it sent, so
+  that the two facts agree) where it reads one, else whether the pty's
+  foreground is a program other than the shell (`running_command`), else
+  whether the pty has a child at all. A server that cannot read its
+  process table sends `agent_running: null` and is held to the reading it
+  has. Where a server reads `agent_running` or `running_command`, a shell
+  the agent left behind is not the agent, whatever its prompt draws: a
+  prompt typed then lands in the shell.
+- the other box facts follow it: `entered` is null and `foreign_paste`
+  false while the agent is not running, since a screen with no agent has
+  no box to read typed text from (the CLI's hint, drawn before the agent
+  is recorded, is not typed text).
 - never `true` while the box holds text, a stand-in for a paste included.
 - may be `true` while the agent is streaming a reply, since the box is
   empty then; a server is not required to read it `false` mid-turn.
@@ -161,29 +178,20 @@ with cursor movement and partial repaints, so the byte stream never says
 "the box is empty"; the answer is only on the screen, which is why the
 required properties put it on the server's screen model. The appendix's
 [input box](#c-the-input-box) entry gives the marks of an empty box at
-rest: the prompt mark with a no-break space after it, the cursor right
-after them, and nothing else on the row but the CLI's hint. What fools a
-reading is the reason each mark is needed. A permission prompt or a menu
-draws the same mark with an ordinary space, so a reading that ignores the
-space answers `true` under a permission prompt. A cursor sent back to the
-box's start over typed text (Ctrl+A does it) sits where an empty box's
-cursor sits, so the cursor alone proves nothing and the remainder of the
-row has to be read as well. A shell whose prompt happens to draw the same
-mark and space (a shell left behind by an exited agent can) shows every
-mark with no agent there, which is why the first property reads the
-process table and not the screen. The hint is text in that remainder, so a
-reading needs a way to tell it from typed text: it is drawn dim, which
-means the screen model keeps each cell's rendering and not only its
-character, and what dim looks like depends on the colours the active
-client sent. The hint comes in two kinds (the entry says which), and only
-the kind shown at startup has a fixed opening a reading can match, so the
-dim rendering is the general tell and the opening recognises one kind: a
-reading that trusts the opening alone answers `false` on every resting
-session that shows the other kind. Typed text reaches the cursor's row
-(the box wraps onto continuation rows and the cursor stays at the end of
-the text), so the cursor's row is enough to read. Collins re-reads it
-whenever the pty's output settles, and the field follows the screen within
-about 50 ms.
+rest. Four other things the screen can show share some of those marks,
+and a reading has to tell each from an empty box:
+
+| What the screen can show | What it is | What tells it from an empty box |
+| --- | --- | --- |
+| the prompt mark with an ordinary space after it | a menu or a permission prompt, which takes the keys | the no-break space, which the box alone has |
+| the box's marks and the cursor right after them, with text further along the row | a box holding typed text whose cursor was sent to its start (Ctrl+A) | what the row holds past the cursor, not where the cursor is |
+| the box's marks with dim text after them | the CLI's hint, of two kinds (the entry says which) | the dim rendering, which the screen model has to keep per cell and judge against the colours the active client sent; the kind shown at startup also opens with fixed words, the other kind does not, so a reading that matches the words alone answers `false` on every resting session showing the other kind |
+| every mark of an empty box, with no agent on the pty | a shell's own prompt (a shell left behind by an exited agent can draw the same mark and space) | the process table, not the screen: the reason the first required property is what it is |
+
+Typed text reaches the cursor's row (the box wraps onto continuation rows
+and the cursor stays at the end of the text), so the cursor's row is
+enough to read. Collins re-reads it whenever the pty's output settles, and
+the field follows the screen within about 50 ms (Collins' settle).
 
 ### `busy`
 
@@ -202,10 +210,16 @@ it beyond that; the edge that matters for notifications is `finished`.
 - `false` within 10 seconds of the agent's process leaving the pty
   (`running_command` falling), whatever its last progress report said: a
   CLI killed mid-turn, or one that exited on its own, ends busy.
-- never flaps more than once per second. A server meets it by reporting a
-  fall only once it has stood for a second, a rise inside that second
-  cancelling the unreported fall silently; a rise is never held, so the
-  3-second bound is untouched.
+- no fall from a quiet under a second: a fall is reported only after
+  the reading has stood false for one second, and a sign of work inside
+  that second cancels the fall unreported, so every fall a client hears
+  of stood a second of quiet and no one-shot (`finished`, `unread`, a
+  notification) ever follows a shorter one. A rise is never held, so a
+  reported fall may be followed by a rise sooner than a second (a process
+  the agent left running is sighted again; output arrives as the quiet's
+  second runs out), and a client that wants an indicator free of that
+  flicker holds rises itself, which costs it nothing: a rise carries no
+  one-shot.
 - sent on the `session` event for the pty, and mirrored as the `item`
   field `busy` on every row that stands for the session.
 
@@ -248,9 +262,9 @@ side:
   2 seconds, and holds a sighting for 5 seconds).
 - **The submit itself**: nothing need be drawn for a moment after a
   carriage return, so a typed carriage return is taken as a sign on its
-  own (Collins: 2 seconds). Measured, the first output follows a submit
-  within 0.4 seconds, and `busy` rose 2 ms after a typed carriage return
-  and within 0.4 seconds of a `prompt` request, which makes no such mark.
+  own (Collins: 2 seconds). Measured on the Collins service, `busy` rose
+  2 ms after a typed carriage return and within 0.4 seconds of a `prompt`
+  request, which makes no such mark.
 - **A background agent** reports no progress (its environment is
   scrubbed) and runs under the daemon rather than on the pty, so the
   process table says nothing; its spinner is still painted into a pty
@@ -264,10 +278,12 @@ side:
 Two things hold any such combination together. A sign that lapses should
 not end busy while another still stands, or the readings contradict each
 other; Collins keeps one deadline, set by the latest sign, so a lapsed
-clear can end the signs' hold while a live child still stands, and the
-fall hold the required properties ask for is what keeps that from
-reaching a client (falls of 22 to 300 ms were measured before it). And a
-session
+clear can end the signs' hold while a live child still stands. The hold
+on a fall keeps such a quiet from counting as a finish, and the rise that
+follows the next sighting is not held, so a client of Collins can see
+`busy` dip after a turn that left a child running (dips of 37 to 883 ms
+were measured on the service under the hold; before it, falls of 22 to
+300 ms, each then a false finish). And a session
 going busy again withdraws a finish not yet counted, since the pause was
 a tool call's.
 
@@ -289,10 +305,11 @@ notify. One-shot.
 - sent only after `busy` has fallen for the session.
 - accompanied by `unread: true` on the `item` of every row that stands for
   the session, except a row whose chain is still busy, one that is
-  backgrounding, and one whose status is `background`. The server keeps no
-  notion of a row being looked at: the client showing the session clears
-  the flag with `store.flags {unread: false}` once it is set, so a client
-  may see its own row's `unread` flip `true` and then `false`.
+  backgrounding, and one whose status is `background`. Whether a row is
+  being looked at is not the server's to know: it sets the flag on every
+  such row, and the client that is showing the session takes it off
+  (`store.flags {unread: false}`) once it arrives, so a client may see its
+  own row's `unread` go `true` and then `false`.
 - accompanied by a `notify {kind: "finished"}` event where the server
   serves Level 2.
 
@@ -314,8 +331,10 @@ marks. A file that grew while the fall was being judged is a turn even
 when its new records could not be read in time, since nothing else writes
 it. A fall the file never confirms is dropped, and the person is not told.
 A session with no transcript bound yet (a fresh spawn before its first
-submit) has nothing to judge a finish by and gets none. The finish, once
-confirmed, is what sets `unread` and sends the notification.
+submit) has nothing to judge a finish by, which is why the required
+properties have a fall of `busy` reported as a finish until the bind.
+The finish, once confirmed, is what sets `unread` and sends the
+notification.
 
 ### `model`, `effort`, `permission_mode`
 
@@ -409,10 +428,11 @@ wrapper that starts it, such as a sandbox launcher, names it too), so
 the agent is found by descent from the pty's child and by name. The CLI
 changes its own directory when it enters a worktree, while the shell's
 stays put, so `agent_cwd` is the agent process's directory and not the
-pty's; and a wrapper may stand above the agent in its process group, with the agent
-as its child (`claude attach`, the daemon's `claude bg-pty-host`), the
-child being what changes directory, so the agent is the deepest process
-named `claude`, not the first. Whether a command runs is readable from the
+pty's. Nor is the CLI always the process a pty's foreground group is
+headed by: `claude attach` and the daemon's `claude bg-pty-host` run the
+CLI under a wrapper of their own, and the wrapper stays where it started
+while the CLI moves, so the directory a reading wants is the CLI
+process's own, wherever in the group it sits. Whether a command runs is readable from the
 terminal itself: while nothing runs, the terminal's foreground group is
 the shell itself, so `running_command` needs no process walk. Collins
 polls every 2 seconds, which is what the refresh property asks, and
@@ -421,8 +441,9 @@ reports a change on the next `session` event.
 The process table can be misread for an instant, which is why the last
 two properties exist. Between the moment a process replaces its program
 and the moment the new program's arguments are in place, its command line
-reads as empty: the gap was measured at about 0.3 ms, never over 1 ms,
-across three hundred launches, and a reading taken inside it finds no
+reads as empty: Collins measured the gap at about 0.3 ms and never over
+1 ms over three hundred launches of the CLI, when it fixed its own
+snapshot, and a reading taken inside it finds no
 process named `claude` on the pty. A finished process not yet reaped
 reads the same way, so the command line alone does not tell a starting
 agent from a dead one. The re-read bounds the damage to one
@@ -479,9 +500,9 @@ directory and the encoding rule, and that is where the file will appear.
 That directory usually holds older sessions, and two fresh spawns in one
 directory would claim the same file: the two exclusions in the required
 properties exist for those two facts. A `claude -w` launch moves the
-session into the worktree's own directory, and the file can be there
-within a second of the worktree's creation, so in that directory a file's
-age against the launch, not its presence at spawn, says whether it is
+session into the worktree's own directory, and the file can appear as
+soon as the worktree does, so in that directory a file's age against the
+launch, not its presence at spawn, says whether it is
 this session's. A `--continue` launch is the exception the properties
 carve out: its file is the directory's newest existing one. The 10-second
 bound leaves a poll of a second or two ample margin. A search costs a
@@ -579,8 +600,8 @@ The required properties above, gathered for a test to tick off:
 
 | Fact | Property |
 | --- | --- |
-| `takes_prompt` | false unless `agent_running`; never true while the box holds text; read from the server's screen model; re-read when `agent_running` flips |
-| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end and of the CLI leaving the pty; a fall reported only once it has stood for a second |
+| `takes_prompt` | false unless the agent runs, by the best reading the server has; `entered` null and `foreign_paste` false then; never true while the box holds text; read from the server's screen model; re-read when `agent_running` flips |
+| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end and of the CLI leaving the pty; no fall from a quiet under a second, a rise never held |
 | `finished` | once per confirmed turn of a bound session (a fall of `busy` before the bind), after `busy` fell, with `item.unread` on every row bar a busy chain, a backgrounding row and status `background`; `notify {kind: "finished"}` at Level 2 |
 | `model`, `effort`, `permission_mode` | null until the transcript says; a `switch` reflected within one turn |
 | every fact | the snapshot and the events form a single series: the snapshot carries what the events last carried |
@@ -903,8 +924,8 @@ leaves two `user` records: the command, then its output. The output for
 the model opens `Set model to <display name>` (the display name, such as
 `Opus 5.5`, not the id, so the id is read from the command's argument
 until the next reply's record names it) and continues either
-`and saved as your default for new sessions` or `(this session only)`; a
-`/model` that changes nothing opens `Kept model as`. The output for the
+`and saved as your default for new sessions` or `for this session only`;
+a `/model` that changes nothing opens `Kept model as`. The output for the
 effort opens `Set effort level to <level>` and continues
 `(saved as your default for new sessions)` or `(this session only)`,
 possibly with more after it. A switch the CLI did not accept prints
