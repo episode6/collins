@@ -452,7 +452,9 @@ def check_pty_events_and_resize(t: Terminal, notes: list[str]) -> None:
     # On the active client's detach the role passes back, and every attached
     # client hears of a role change through a `pty` event.
     since_first = len(first.events)
-    second.call("detach", pty=t.pty)
+    detached = second.call("detach", pty=t.pty)
+    if not detached.ok:
+        raise CheckFailed(f"the active client's detach: {detached.describe()}")
     back = first.wait_for(
         lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is True, 5.0, since_first
     )

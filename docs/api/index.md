@@ -172,7 +172,7 @@ as `failed`: a newer service may add one.
 
 | Code | Meaning |
 | --- | --- |
-| `unknown` | A message type this peer does not know. |
+| `unknown` | A message type this peer does not know, or a named operation a known type selects by a field (a `git.run` builder) that it does not know. |
 | `invalid` | The type is known and the message is not a valid one of it: a missing or ill-typed field, a bound exceeded, a request without an id. |
 | `direction` | A known type from the peer that may not send it. |
 | `protocol` | The hello's protocol window does not meet this peer's. |
@@ -261,8 +261,13 @@ which is the right answer for a client reaching the socket over an
 [ssh forward](#connecting-over-ssh) from another machine. Bytes that do not
 match are refused `refused`, and that client is remote too: it carries on
 without the extras. Nothing a remote client can do depends on
-the proof, except the service's confinement of a few reads to directories
-it knows: see `fs.stat`, `fs.paste` and `fs.names` in the reference.
+the proof, except the service's confinement of paths: every path an `fs.*`
+request of a client that has not proved local names is held to the roots
+the service knows (its sessions' directories), and one outside them is
+refused `refused` with "The path is outside every root the service knows",
+except for `fs.dirs` and `fs.newdir`, the path picker's, which browse the
+whole filesystem. The reference marks each. `fs.stat` answers whether a
+path is inside a root for any client.
 
 ## A client's life
 

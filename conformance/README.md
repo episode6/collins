@@ -114,7 +114,8 @@ archive with `put-away` and `store.page-archived`, a posted notification and
 `seen`, folder trust, the transcript's tail and export, a refresh.
 
 **The families.** One short check each: `git` (a scratch repository, `git.info`,
-a builder, an unknown builder refused `invalid`), `files` (read, write, `stale`,
+a builder, a builder the server lacks refused `unknown`, an argument of the
+wrong type `invalid`), `files` (read, write, `stale`,
 list, the chunked round trip under a session's directory), `prs` (with
 `--with-gh` only), `sandbox` (a clean refusal of what does not exist), `tools`
 (the blob and upload endpoints), `jobs` (an unknown kind is `invalid`), `usage`

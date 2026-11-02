@@ -396,7 +396,7 @@ def check_chunking(run: Run, notes: list[str]) -> None:
     except CheckFailed as failure:
         if not local and "outside" in str(failure):
             raise CheckSkipped(
-                "a remote client's `fs.write` outside the server's roots was refused; "
+                "a client that has not proved local is confined to the server's roots, as the page says; "
                 "the `files` check writes under a session's directory instead"
             ) from failure
         raise

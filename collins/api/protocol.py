@@ -93,7 +93,8 @@ Error codes
 The codes this module and the service send (`ERRORS`); a receiver accepts
 any code shaped like one, since a newer peer may add codes behind a cap:
 
-- ``unknown``: a message type this peer does not know.
+- ``unknown``: a message type, or a named operation a known type selects by a
+  field (a `git.run` builder), this peer does not know.
 - ``invalid``: the type is known and the message is not a valid one of it
   (a missing or ill-typed field, a bound exceeded, a request without an id).
 - ``direction``: a known type from the peer that may not send it.
@@ -2606,7 +2607,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.trash",
-        "Move files to the trash on the service's machine.",
+        "Move files to the trash on the service's machine. Confined to the service's roots for a client "
+        "that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {"paths": _req(Field(K_LIST, low=1, high=REPO_PATHS_MAX, item=_PATH))},
@@ -2619,7 +2621,8 @@ _TABLE: tuple[MessageType, ...] = (
     # -- files over the API (§3.23, PR-2.3): the editor's files
     MessageType(
         "fs.read",
-        "A file's text off the service's machine, with the mtime the save that follows expects.",
+        "A file's text off the service's machine, with the mtime the save that follows expects. Confined "
+        "to the service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2644,7 +2647,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.write",
-        "Write a file's text on the service's machine, refused stale when its mtime moved.",
+        "Write a file's text on the service's machine, refused stale when its mtime moved. Confined to the "
+        "service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2668,7 +2672,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.watch",
-        "Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the service.",
+        "Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the "
+        "service. Confined to the service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2690,7 +2695,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.unwatch",
-        "Stop a watch of this client's, by its handle.",
+        "Stop a watch of this client's, by its handle. Confined to the service's roots for a client that "
+        "has not proved local.",
         family=CAP_FILES, level=3,
         request=_request({"handle": _req(_HANDLE)}),
     ),
@@ -2718,7 +2724,8 @@ _TABLE: tuple[MessageType, ...] = (
     # -- the tree, quick open and roots (§3.23, PR-2.4)
     MessageType(
         "fs.stat",
-        "What is at a path on the service's machine, and whether it is inside a root.",
+        "What is at a path on the service's machine, and whether it is inside a root. Any path, for any "
+        "client.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2742,7 +2749,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.list",
-        "A directory's entries in the tree's order, with the ignored names marked.",
+        "A directory's entries in the tree's order, with the ignored names marked. Confined to the "
+        "service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2765,7 +2773,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.walk",
-        "Every file under a root, relative and breadth-first, for quick open.",
+        "Every file under a root, relative and breadth-first, for quick open. Confined to the service's "
+        "roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {"root": _req(_PATH), "hidden": _req(_BOOL)},
@@ -2780,7 +2789,8 @@ _TABLE: tuple[MessageType, ...] = (
     # -- file operations (§3.23, PR-2.5)
     MessageType(
         "fs.rename",
-        "Rename a file or folder in place on the service's machine, never over anything.",
+        "Rename a file or folder in place on the service's machine, never over anything. Confined to the "
+        "service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2802,7 +2812,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.paste",
-        "Copy (or move, for a cut) files into a folder on the service's machine, never over anything.",
+        "Copy (or move, for a cut) files into a folder on the service's machine, never over anything. "
+        "Confined to the service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2826,13 +2837,15 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.mkdir",
-        "Make one folder on the service's machine, inside a root, never over anything.",
+        "Make one folder on the service's machine, inside a root, never over anything. Confined to the "
+        "service's roots for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request({"path": _req(_PATH), "root": _req(_PATH)}),
     ),
     MessageType(
         "fs.names",
-        "The non-directory names in a root, for the bare root-name links.",
+        "The non-directory names in a root, for the bare root-name links. Confined to the service's roots "
+        "for a client that has not proved local.",
         family=CAP_FILES, level=3,
         request=_request(
             {"root": _req(_PATH)},
@@ -2850,7 +2863,8 @@ _TABLE: tuple[MessageType, ...] = (
     # `fs.stat`'s ground, and never a field that unconfines a confined one
     MessageType(
         "fs.dirs",
-        "A folder's subfolders on the service's machine, anywhere: the path picker's listing.",
+        "A folder's subfolders on the service's machine, anywhere: the path picker's listing. Unconfined: "
+        "the whole filesystem, for every client.",
         family=CAP_FILES, level=3,
         request=_request(
             {
@@ -2874,7 +2888,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.newdir",
-        "Make one folder on the service's machine under any folder that is there: the picker's New folder.",
+        "Make one folder on the service's machine under any folder that is there: the picker's New folder. "
+        "Unconfined: the whole filesystem, for every client.",
         family=CAP_FILES, level=3,
         request=_request(
             {"path": _req(_HOME_PATH)},
@@ -3395,7 +3410,12 @@ CONFORMANCE_FAMILIES: Mapping[str, Conformance] = {
     CAP_FILES: Conformance(
         "Files",
         "The editor's files, the file tree, quick open, the path picker and a project's icon.",
-        ("`GET /api/blob?kind=icon`.",),
+        (
+            "`GET /api/blob?kind=icon`.",
+            "Every path an `fs.*` request of a client that has not proved local names is confined to the "
+            "roots the server knows (its sessions' directories) and refused `refused` outside them, except "
+            "`fs.dirs` and `fs.newdir`, which browse the whole filesystem.",
+        ),
         session_fields=("touched_files",),
     ),
     CAP_PRS: Conformance(

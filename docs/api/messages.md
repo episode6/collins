@@ -172,6 +172,7 @@ The editor's files, the file tree, quick open, the path picker and a project's i
 **Also:**
 
 - `GET /api/blob?kind=icon`.
+- Every path an `fs.*` request of a client that has not proved local names is confined to the roots the server knows (its sessions' directories) and refused `refused` outside them, except `fs.dirs` and `fs.newdir`, which browse the whole filesystem.
 
 ### Family `prs`: Pull requests
 
@@ -3133,7 +3134,7 @@ Family: `git` · Level 3
 
 ### `fs.trash`
 
-Move files to the trash on the service's machine.
+Move files to the trash on the service's machine. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3156,7 +3157,7 @@ Family: `files` · Level 3
 
 ### `fs.read`
 
-A file's text off the service's machine, with the mtime the save that follows expects.
+A file's text off the service's machine, with the mtime the save that follows expects. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3183,7 +3184,7 @@ Family: `files` · Level 3
 
 ### `fs.write`
 
-Write a file's text on the service's machine, refused stale when its mtime moved.
+Write a file's text on the service's machine, refused stale when its mtime moved. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3210,7 +3211,7 @@ Family: `files` · Level 3
 
 ### `fs.watch`
 
-Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the service.
+Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the service. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3231,7 +3232,7 @@ No fields.
 
 ### `fs.unwatch`
 
-Stop a watch of this client's, by its handle.
+Stop a watch of this client's, by its handle. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3284,7 +3285,7 @@ Family: `files` · Level 3
 
 ### `fs.stat`
 
-What is at a path on the service's machine, and whether it is inside a root.
+What is at a path on the service's machine, and whether it is inside a root. Any path, for any client.
 
 Family: `files` · Level 3
 
@@ -3309,7 +3310,7 @@ Family: `files` · Level 3
 
 ### `fs.list`
 
-A directory's entries in the tree's order, with the ignored names marked.
+A directory's entries in the tree's order, with the ignored names marked. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3337,7 +3338,7 @@ Family: `files` · Level 3
 
 ### `fs.walk`
 
-Every file under a root, relative and breadth-first, for quick open.
+Every file under a root, relative and breadth-first, for quick open. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3363,7 +3364,7 @@ Family: `files` · Level 3
 
 ### `fs.rename`
 
-Rename a file or folder in place on the service's machine, never over anything.
+Rename a file or folder in place on the service's machine, never over anything. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3385,7 +3386,7 @@ Family: `files` · Level 3
 
 ### `fs.paste`
 
-Copy (or move, for a cut) files into a folder on the service's machine, never over anything.
+Copy (or move, for a cut) files into a folder on the service's machine, never over anything. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3415,7 +3416,7 @@ Family: `files` · Level 3
 
 ### `fs.mkdir`
 
-Make one folder on the service's machine, inside a root, never over anything.
+Make one folder on the service's machine, inside a root, never over anything. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3434,7 +3435,7 @@ No fields.
 
 ### `fs.names`
 
-The non-directory names in a root, for the bare root-name links.
+The non-directory names in a root, for the bare root-name links. Confined to the service's roots for a client that has not proved local.
 
 Family: `files` · Level 3
 
@@ -3459,7 +3460,7 @@ Family: `files` · Level 3
 
 ### `fs.dirs`
 
-A folder's subfolders on the service's machine, anywhere: the path picker's listing.
+A folder's subfolders on the service's machine, anywhere: the path picker's listing. Unconfined: the whole filesystem, for every client.
 
 Family: `files` · Level 3
 
@@ -3486,7 +3487,7 @@ Family: `files` · Level 3
 
 ### `fs.newdir`
 
-Make one folder on the service's machine under any folder that is there: the picker's New folder.
+Make one folder on the service's machine under any folder that is there: the picker's New folder. Unconfined: the whole filesystem, for every client.
 
 Family: `files` · Level 3
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 
 from .. import client as apiclient
 from .. import ws
@@ -75,9 +76,11 @@ def check_git(run: Run, client: apiclient.Client, notes: list[str]) -> None:
     if not reply.ok or reply.get("status") != 0 or not (reply.get("stdout") or "").strip():
         raise CheckFailed(f"git.run head_abbrev_argv: {reply.describe()}")
     reply = client.call("git.run", cwd=repo, builder="kit_no_such_builder", args={})
-    if reply.ok or reply.error not in run.p.ERRORS:
-        raise CheckFailed(f"git.run with a builder name the server has no builder for: {reply.describe()}")
-    notes.append(f"a builder the server lacks is refused `{reply.error}` (the pages name no code for it)")
+    if reply.ok or reply.error != "unknown":
+        raise CheckFailed(
+            f"git.run with a builder name the server has no builder for: {reply.describe()}, "
+            "expected `unknown` (a named operation a known type selects that the server does not know)"
+        )
     reply = client.call(
         "git.run", cwd=repo, builder="log_argv", args={"range_args": ["HEAD"], "limit": "ten"}
     )
@@ -113,9 +116,14 @@ def check_files(run: Run, client: apiclient.Client, notes: list[str]) -> None:
         or read.get("binary") is not False
     ):
         raise CheckFailed(f"fs.read after the write: {read.describe()}")
+    time.sleep(0.05)  # past the file system's timestamp granularity, so the mtime moves
     reply = client.call("fs.write", path=path, text="two\n", expect_mtime=mtime)
     if not reply.ok:
         raise CheckFailed(f"fs.write with the mtime the read answered: {reply.describe()}")
+    if reply["mtime"] == mtime:
+        raise CheckFailed(
+            "the second write's mtime did not move: the server's mtimes cannot tell two writes apart"
+        )
     stale = client.call("fs.write", path=path, text="three\n", expect_mtime=mtime)
     if stale.ok or stale.error != "stale":
         raise CheckFailed(f"fs.write with a moved mtime: {stale.describe()}, expected `stale`")
