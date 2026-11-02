@@ -39,7 +39,22 @@ def test_transport_numbers_are_the_specs():
 
 
 def test_capabilities_and_error_codes_are_closed():
-    assert p.CAPABILITIES == {"local", "debug", "git", "files"}
+    assert p.CAPABILITIES == {
+        "local",
+        "debug",
+        "git",
+        "files",
+        "prs",
+        "sandbox",
+        "tools",
+        "jobs",
+        "usage",
+        "background",
+        "shells",
+        "composer",
+        "internal",
+    }
+    assert len(p.CAPABILITIES) <= p.CAPS_MAX
     assert p.ERRORS == {
         "unknown",
         "invalid",
@@ -51,6 +66,232 @@ def test_capabilities_and_error_codes_are_closed():
         "failed",
         "stale",
     }
+
+
+# Who serves what (server-side spec §3.1 with its §5 rulings), written out
+# rather than derived: a type that moves is a deliberate edit here too, and a
+# type's family is this table, never its name's prefix.
+LEVELS = {
+    0: {"hello", "local", "subscribe", "service.status"},
+    1: {
+        "spawn", "attach", "detach", "pty.info", "pty.capture", "prompt", "write", "paint", "close",
+        "store.flags", "state.set", "state.get", "resolver.arm", "pty", "pty-exited", "session", "item",
+        "rows", "resize", "focus", "theme", "ack",
+    },
+    2: {
+        "store.rename", "store.regenerate-name", "store.favorite", "store.archive",
+        "store.archive-project", "store.trash", "store.delete", "store.refresh", "store.show-archived",
+        "store.page-archived", "store.lookup", "store.add-project", "store.keep-projects",
+        "store.forget-project", "store.move-project", "store.forget", "store.transcript-tail",
+        "store.transcript-export", "trust.check", "trust.grant", "put-away", "forgotten",
+        "notify", "notify.post", "notify.remove", "notify.clear", "notify.green", "notify.rekey",
+        "notify.test", "seen",
+    },
+}
+FAMILIES = {
+    "git": {"git.run", "git.info", "git.sizes", "git.watch", "git.unwatch", "git-changed", "git.plan"},
+    "files": {
+        "fs.read", "fs.write", "fs.watch", "fs.unwatch", "file-changed", "dir-changed", "fs.stat", "fs.list",
+        "fs.walk", "fs.rename", "fs.paste", "fs.mkdir", "fs.names", "fs.dirs", "fs.newdir", "fs.trash",
+    },
+    "prs": {
+        "pr", "pr-status", "pr.set", "pr.fetch", "pr.sweep", "pr.detail", "pr.threads", "pr.blob",
+        "pr.action", "pr.comment", "pr.review", "pr.thread", "prs.restore",
+    },
+    "sandbox": {
+        "sandbox", "sandbox.plan", "sandbox.grants", "sandbox.allow", "sandbox.revoke", "sandbox.tools",
+        "sandbox.restart", "sandbox.derive", "sandbox.drop", "sandbox.forget",
+    },
+    "tools": {"tool", "tool-reply", "diff.notes", "diff.set-notes"},
+    "jobs": {"job.start", "job.cancel", "job"},
+    "usage": {"usage.get", "models.get", "models.defaults", "icon.save"},
+    "background": {"store.forward"},
+    "shells": {"panel.key", "panel.history", "clear"},
+    "composer": {"cut", "cut.cancel", "draft.restore", "send", "switch", "mention", "composer"},
+    "internal": {
+        "transcript.update", "transcript.set", "transcript.relocate", "cwd.settle", "shells.follow",
+        "finish.witness", "baseline.absorb", "baseline.cmdlines", "restart.worktreeless", "close.nudge",
+        "close.end", "shells", "focus.terminal", "service.restart", "cli.check",
+    },
+    "debug": {
+        "debug.session.get", "debug.session.set", "debug.session.call", "debug.screen", "debug.pty",
+        "debug.local", "debug.sandbox",
+    },
+}
+
+
+def test_every_type_has_the_family_and_level_the_spec_assigns():
+    for level, names in LEVELS.items():
+        for name in names:
+            assert (p.TYPES[name].family, p.TYPES[name].level) == (p.FAMILY_CORE, level), name
+    for family, names in FAMILIES.items():
+        for name in names:
+            assert (p.TYPES[name].family, p.TYPES[name].level) == (family, p.LEVEL_FAMILY), name
+    assigned = [name for names in (*LEVELS.values(), *FAMILIES.values()) for name in names]
+    assert sorted(assigned) == sorted(p.TYPES)
+
+
+def test_a_family_is_a_cap_and_a_level_goes_with_its_family():
+    served = {p.FAMILY_CORE} | (p.CAPABILITIES - {p.CAP_LOCAL})
+    assert {entry.family for entry in p.TYPES.values()} == served
+    assert p.LEVEL_FAMILY == 3
+    for entry in p.TYPES.values():
+        assert (entry.level < p.LEVEL_FAMILY) == (entry.family == p.FAMILY_CORE), entry.name
+    assert set(p.CONFORMANCE_LEVELS) == {0, 1, 2}
+    assert set(p.CONFORMANCE_FAMILIES) == served - {p.FAMILY_CORE}
+
+
+def test_what_a_level_or_family_covers_inside_a_message_exists():
+    spawn = p.TYPES["spawn"].request.fields
+    assert set(p.SPAWN_CORE_FIELDS) | set(p.SPAWN_SANDBOX_FIELDS) <= set(spawn)
+    assert not set(p.SPAWN_CORE_FIELDS) & set(p.SPAWN_SANDBOX_FIELDS)
+    assert "provider" in p.SPAWN_CORE_FIELDS
+    assert {"sandboxed", "box"} <= set(p.TYPES["pty"].event.fields)
+    assert "plan" in p.TYPES["pty.info"].request.reply
+
+
+# Where every state key and `service.status` field belongs (§3.1), written out
+# for the same reason as the types' table.
+STATE_KEY_HOMES = {
+    1: {"settings", "service_id"},
+    2: {
+        "names", "generated_names", "cli_titles", "emojis", "favorites", "archived", "archived_at",
+        "archived_projects", "project_order", "virtual_projects", "project_worktree", "session_drafts",
+        "new_chat_drafts", "expanded_groups", "notifications",
+    },
+    "sandbox": {
+        "project_sandbox", "sandboxed_sessions", "sandbox_grants", "sandbox_project_grants", "sandbox_tools",
+    },
+    "prs": {"session_prs"},
+    "background": {"session_forwards", "pending_detaches"},
+    "tools": {"session_attachments", "diff_notes", "pending_diffs"},
+    "internal": {"process_baselines", "resume_on_start", "ptys", "pty_next_id", "inflight_copies"},
+}
+STATUS_FIELD_HOMES = {
+    0: {"version", "protocol", "ptys", "busy", "clients", "started", "pid", "cli", "home"},
+    "sandbox": {"sandbox", "live"},
+    "prs": {"gh"},
+    "internal": {"keeper", "keeper_mismatch", "keeper_unread", "keeper_held", "unkept"},
+}
+SESSION_FIELD_HOMES = {
+    1: {
+        "pty", "handle", "session", "cwd", "agent_cwd", "pid", "takes_prompt", "agent_running",
+        "running_command", "busy", "finished", "model", "effort", "permission_mode", "transcript_path",
+        "landed", "reset",
+    },
+    "sandbox": {"sandboxed", "sandbox_box", "sandbox_plan_path", "defaults_owed", "can_restart"},
+    "prs": {"prs"},
+    "tools": {"attachments"},
+    "files": {"touched_files"},
+    "composer": {"entered", "foreign_paste", "prompt_block"},
+    "internal": {
+        "fork", "forked", "provider", "options", "continue_recent", "resolver_cwd", "initial_command",
+        "worktree_launch", "new_chat_prompt", "shells_follow_armed", "closing", "unstarted", "lookup_empty",
+        "ledger_armed",
+    },
+}
+ITEM_FIELD_HOMES = {
+    1: {
+        "session", "path", "cwd", "resume_cwd", "display_name", "subtitle", "preview", "mtime", "created",
+        "size", "status", "busy", "unread", "running", "removed", "project", "cli_title", "provider", "state",
+        "syncing",
+    },
+    2: {"favorite"},
+    "background": {"background", "backgrounding", "can_background", "forward"},
+}
+
+
+def _conformance_entries():
+    yield from p.CONFORMANCE_LEVELS.items()
+    yield from p.CONFORMANCE_FAMILIES.items()
+
+
+def test_every_state_key_has_the_one_home_the_spec_gives_it():
+    homes = {home: set(entry.state_keys) for home, entry in _conformance_entries() if entry.state_keys}
+    assert homes == STATE_KEY_HOMES
+    listed = [key for entry in dict(_conformance_entries()).values() for key in entry.state_keys]
+    assert sorted(listed) == sorted(p.STATE_KEYS)
+
+
+def test_every_status_field_has_the_one_home_the_spec_gives_it():
+    homes = {home: set(entry.status_fields) for home, entry in _conformance_entries() if entry.status_fields}
+    assert homes == STATUS_FIELD_HOMES
+    listed = [name for entry in dict(_conformance_entries()).values() for name in entry.status_fields]
+    reply = p.TYPES["service.status"].request.reply
+    assert sorted(listed) == sorted(reply)
+    assert {name for name, spec in reply.items() if spec.required} == {"version", "protocol"}
+
+
+def test_every_session_field_has_the_one_home_the_spec_gives_it():
+    entries = _conformance_entries()
+    homes = {home: set(entry.session_fields) for home, entry in entries if entry.session_fields}
+    assert homes == SESSION_FIELD_HOMES
+    listed = [name for entry in dict(_conformance_entries()).values() for name in entry.session_fields]
+    assert sorted(listed) == sorted(p.TYPES["session"].event.fields)
+
+
+def test_every_item_field_has_the_one_home_the_spec_gives_it():
+    homes = {home: set(entry.item_fields) for home, entry in _conformance_entries() if entry.item_fields}
+    assert homes == ITEM_FIELD_HOMES
+    listed = [name for entry in dict(_conformance_entries()).values() for name in entry.item_fields]
+    assert sorted(listed) == sorted(p.TYPES["item"].event.fields)
+
+
+def test_what_a_clear_promises_is_the_shells():
+    assert p.TYPES["clear"].family == p.CAP_SHELLS
+    assert p.TYPES["clear"].summary.startswith("Wipe a shell's screen and scrollback.")
+    assert "not promised" in p.TYPES["clear"].summary
+
+
+def test_the_clients_list_and_the_servers_agree():
+    """D3: `OPTIONAL_TYPES` says what a client may leave out and `family`
+    what a server may, and this explicit table is where the first list lands
+    in the second. "No Collins client sends this" in an entry's text is no
+    rule: `sandbox.forget` says it and stays in `sandbox`, being an operation
+    of the sandbox host that any client may call."""
+    assert {name: p.TYPES[name].family for name in p.OPTIONAL_TYPES} == {
+        "composer": "composer",
+        "shells": "internal",
+        "shells.follow": "internal",
+        "panel.key": "shells",
+        "panel.history": "shells",
+        "focus.terminal": "internal",
+        "resolver.arm": p.FAMILY_CORE,
+        "transcript.update": "internal",
+        "transcript.set": "internal",
+        "transcript.relocate": "internal",
+        "cwd.settle": "internal",
+        "finish.witness": "internal",
+        "baseline.absorb": "internal",
+        "baseline.cmdlines": "internal",
+        "prs.restore": "prs",
+        "sandbox.forget": "sandbox",
+    }
+    assert p.TYPES["resolver.arm"].level == 1
+
+
+def test_the_hello_reply_may_name_the_implementation():
+    assert p.IMPLEMENTATION == "collins-service"
+    assert p.IMPLEMENTATION_MAX == 64
+    spec = p.TYPES["hello"].request.reply["implementation"]
+    assert spec.high == 64 and not spec.required
+    long = {**REPLIES["hello"], "implementation": "x" * 65}
+    assert isinstance(p.validate_response({"re": 1, "ok": True, **long}, "hello"), p.Refusal)
+    without = {key: value for key, value in REPLIES["hello"].items() if key != "implementation"}
+    assert not isinstance(p.validate_response({"re": 1, "ok": True, **without}, "hello"), p.Refusal)
+
+
+def test_spawn_says_what_the_window_sends_as_its_provider():
+    spec = p.TYPES["spawn"].request.fields["provider"]
+    assert spec.high == p.SHORT_MAX and not spec.required
+    message = {"t": "spawn", "id": 1, "kind": "agent", "cwd": "/srv", "provider": "claude"}
+    assert p.validate(message, p.CLIENT).get("provider") == "claude"
+
+
+def test_the_matched_refusal_sentences_are_the_specs():
+    assert p.PTY_GONE_MSGID == "no such pty"
+    assert p.ALREADY_RUNNING_MSGID == "This session is already running in the Collins service"
+    assert p.FOLDER_GONE_MSGID == "The folder is not there"
 
 
 def test_seen_cap_mirrors_the_history_cap():
@@ -411,6 +652,7 @@ SAMPLES = {
         "kind": "agent",
         "cwd": "/home/u/project",
         "session": ID,
+        "provider": "claude",
         "prompt": "Fix the build\nplease",
         "model": "claude-opus-5-5",
         "effort": "high",
@@ -780,6 +1022,7 @@ REPLIES = {
         "version": "0.2.0",
         "service_id": ID,
         "host": "box",
+        "implementation": "collins-service",
         "caps": ["local"],
         "local_proof": {"path": "/run/user/1000/collins/x/local-proof", "length": 32},
     },

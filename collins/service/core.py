@@ -716,7 +716,7 @@ class ServiceCore:
             return handler(message, client)
         except KeyError:
             return protocol.refuse(
-                message.id, protocol.ERROR_GONE, "no such pty: {pty}", {"pty": message.get("pty")}
+                message.id, protocol.ERROR_GONE, protocol.PTY_GONE_MSGID, {"pty": message.get("pty")}
             )
         except Exception:
             # One request's failure is that request's (rule 4): the service

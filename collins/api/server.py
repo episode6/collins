@@ -853,10 +853,9 @@ class ApiServer:
             self.core.client_connected(client)
         connection.client = client
         connection.channel = channel
-        # `git`: this service serves git.*, fs.trash, git-changed and the
-        # blob GET (PR-2.1); a client installs its git transport only on
-        # seeing it, and runs git locally against an older service.
-        caps = [protocol.CAP_LOCAL, protocol.CAP_GIT, protocol.CAP_FILES]
+        # This service serves every family; `debug` only when it was started
+        # with the debug API on.
+        caps = sorted(protocol.CAPABILITIES - {protocol.CAP_DEBUG})
         if self.debug:
             caps.append(protocol.CAP_DEBUG)
         state = getattr(self.core, "state", None)
@@ -868,6 +867,7 @@ class ApiServer:
             version=self.version,
             service_id=service_id,
             host=socket.gethostname()[: protocol.HOST_MAX],
+            implementation=protocol.IMPLEMENTATION,
             caps=caps,
             local_proof={"path": self.proof_file, "length": len(self.proof)},
         )

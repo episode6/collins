@@ -139,6 +139,18 @@ def test_an_agent_spawn_builds_a_session_and_answers_its_handle(server, tmp_path
     assert pump(2, lambda: _CLI["mark"] in server.core.ptys.get(pty).screen.capture_contents())
 
 
+def test_a_request_for_a_pty_that_is_not_there_says_the_published_sentence(server):
+    """The window takes the pty as ended on this `gone` and only on it, so
+    the sentence is a constant of the protocol."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "attach", "pty": 999, "cols": 80, "rows": 24})
+    assert refused.value.error == protocol.ERROR_GONE
+    assert refused.value.msgid == protocol.PTY_GONE_MSGID
+    assert refused.value.details == {"pty": 999}
+
+
 def test_the_service_assembles_every_launch_from_its_own_cli(server, tmp_path):
     """PR-3.0 item 1: no client sends a command. A fresh start with its
     options, a resume, a fork and a --continue are each typed from the

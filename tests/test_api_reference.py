@@ -59,6 +59,52 @@ def test_index_names_every_error_code_and_capability():
         assert f"`{cap}`" in text, cap
 
 
+def test_the_reference_says_who_serves_each_type():
+    text = _read("docs", "api", "messages.md")
+    assert text.index("## Conformance\n") < text.index("## Message types\n")
+    for entry in p.TYPES.values():
+        section = text.split(f"### `{entry.name}`\n", 1)[1]
+        assert section.lstrip().split("\n\n", 2)[1] == f"Family: `{entry.family}` · Level {entry.level}"
+    for level in p.CONFORMANCE_LEVELS:
+        assert f"### Level {level}: " in text, level
+    for family in p.CONFORMANCE_FAMILIES:
+        assert f"### Family `{family}`: " in text, family
+    for name, _meaning in gen.MATCHED_MSGIDS:
+        assert f"`{getattr(p, name)}`" in text, name
+    section = text.split("## Conformance\n", 1)[1].split("## Message types\n", 1)[0]
+    for key in p.STATE_KEYS:
+        assert f"`{key}`" in section, key
+    for name in p.TYPES["service.status"].request.reply:
+        assert f"`{name}`" in section, name
+
+
+def test_the_prose_has_a_section_for_a_server_and_reads_the_license_for_one():
+    text = _read("docs", "api", "index.md")
+    section = text.split("## Implementing a server\n", 1)[1].split("\n## ", 1)[0]
+    for name in (*p.CONFORMANCE_FAMILIES.keys() - {p.CAP_DEBUG}, "core", "unknown", "implementation"):
+        assert f"`{name}`" in section, name
+    interoperability = " ".join(text.split("## Interoperability\n", 1)[1].split("\n## ", 1)[0].split())
+    assert "implements the *service's* side of this API" in interoperability
+    assert "a derivative of Collins" in interoperability
+
+
+def test_the_prose_keeps_a_server_author_out_of_the_services_code():
+    """The worked examples are the client's, and both sections say what a
+    server author reads."""
+    text = _read("docs", "api", "index.md")
+    clean_room = (
+        "A server author who wants the [Interoperability](#interoperability) section's reading writes "
+        "from the MIT pages alone and reads neither `collins/api/server.py` nor `collins/service/`."
+    )
+    for heading in ("## Writing a client\n", "## Implementing a server\n"):
+        section = text.split(heading, 1)[1].split("\n## ", 1)[0]
+        assert clean_room in " ".join(section.split()), heading
+    examples = text.split("## Writing a client\n", 1)[1].split("A server author", 1)[0]
+    assert "collins/api/server.py" not in examples
+    for module in ("collins/api/client.py", "collins/connection.py", "collins/sshforward.py"):
+        assert module in examples, module
+
+
 def test_the_git_builders_table_is_the_registry():
     assert set(p.GIT_BUILDERS) == set(gitops.BUILDERS)
     for name, entry in gitops.BUILDERS.items():
