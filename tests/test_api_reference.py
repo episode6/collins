@@ -5,8 +5,13 @@ collins/api/protocol.py by scripts/gen_api_reference.py; a table edit that
 forgets to regenerate it fails here. The prose half, docs/api/index.md,
 names every error code and capability, and both pages stay free of the
 angle-bracket placeholders that break the VitePress build outside a code
-span. All five MIT-licensed source files carry their SPDX tag, since the rest of
-the repository is GPL and a reader of any one of them must be able to tell.
+span. Every MIT-licensed file carries its SPDX tag (the terminal stream
+fixtures' data files, which cannot, are covered by the LICENSE file beside
+them), since the rest of the repository is GPL and a reader of any one of
+them must be able to tell; the list here, docs/api/LICENSE and
+debian/copyright move together. The terminal contract's tables parse in
+the page's own notation, so scripts/check_termstream_answers.py can hold
+every row to VTE.
 """
 
 import ast
@@ -14,6 +19,9 @@ import importlib.util
 import inspect
 import os
 import re
+import sys
+
+import pytest
 
 from collins import gitloads, gitmodel, gitops, mcptools, state
 from collins.api import protocol as p
@@ -25,6 +33,29 @@ _PATH = os.path.join(ROOT, "scripts", "gen_api_reference.py")
 _spec = importlib.util.spec_from_file_location("gen_api_reference", _PATH)
 gen = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gen)
+
+_TC_PATH = os.path.join(ROOT, "scripts", "termcontract.py")
+_tc_spec = importlib.util.spec_from_file_location("termcontract", _TC_PATH)
+termcontract = importlib.util.module_from_spec(_tc_spec)
+sys.modules.setdefault("termcontract", termcontract)  # its dataclasses look the module up
+_tc_spec.loader.exec_module(termcontract)
+
+FIXTURES = os.path.join(ROOT, "tests", "fixtures", "streams")
+# The MIT files, as docs/api/LICENSE and debian/copyright list them: the
+# three pages, the generator, the two modules, and every file under the
+# stream fixtures (scenarios.py with a tag of its own, the data files under
+# the directory's LICENSE).
+MIT_SOURCES = (
+    ("docs", "api", "index.md"),
+    ("docs", "api", "messages.md"),
+    ("docs", "api", "terminal.md"),
+    ("scripts", "gen_api_reference.py"),
+    ("collins", "api", "protocol.py"),
+    ("collins", "sshremote.py"),
+    ("tests", "fixtures", "streams", "scenarios.py"),
+)
+MIT_PYTHON = {"collins/api/protocol.py", "collins/sshremote.py", "scripts/gen_api_reference.py",
+              "tests/fixtures/streams/scenarios.py"}  # fmt: skip
 
 
 def _read(*parts: str) -> str:
@@ -103,6 +134,24 @@ def test_the_prose_keeps_a_server_author_out_of_the_services_code():
     assert "collins/api/server.py" not in examples
     for module in ("collins/api/client.py", "collins/connection.py", "collins/sshforward.py"):
         assert module in examples, module
+
+
+PRIVATE_REFERENCE = re.compile(
+    r"\brule \d+\b|\brulings?\b|§|\bPR-[0-9S]|\bPR \d+\b|\bD\d{1,2}\b|\bF\d{1,2}\b"
+)
+MIT_PAGES = ("index.md", "messages.md", "terminal.md")
+
+
+@pytest.mark.parametrize("page", MIT_PAGES)
+def test_the_pages_cite_no_private_spec(page):
+    """The pages are read by a server author who has no design spec: a
+    summary that said "(rule 2)", a D-number, an F-number or a PR reference
+    means nothing to them. The generator strips the section titles'
+    references; the summaries, the field descriptions and the two prose
+    pages are held here."""
+    for number, line in enumerate(_read("docs", "api", page).splitlines(), 1):
+        match = PRIVATE_REFERENCE.search(line)
+        assert match is None, f"docs/api/{page}:{number} cites the private spec: {match.group(0)!r}"
 
 
 def test_the_git_builders_table_is_the_registry():
@@ -204,22 +253,43 @@ def _outside_code(markdown: str) -> str:
 
 
 def test_pages_keep_angle_brackets_in_code():
-    for page in ("index.md", "messages.md"):
+    for page in ("index.md", "messages.md", "terminal.md"):
         prose = _outside_code(_read("docs", "api", page))
         assert not re.search(r"<[A-Za-z]", prose), page
 
 
 def test_mit_files_carry_their_spdx_tag():
-    for path in (
-        ("docs", "api", "index.md"),
-        ("docs", "api", "messages.md"),
-        ("scripts", "gen_api_reference.py"),
-        ("collins", "api", "protocol.py"),
-        ("collins", "sshremote.py"),
-    ):
+    for path in MIT_SOURCES:
         head = _read(*path)[:600]
         assert "SPDX-License-Identifier: MIT" in head, path
     assert "MIT License" in _read("docs", "api", "LICENSE")
+    license_text = _read("docs", "api", "LICENSE")
+    for name in ("terminal.md", "tests/fixtures/streams/", "collins/sshremote.py"):
+        assert name in license_text, name
+    stanza = _read("debian", "copyright").split("Files: collins/api/protocol.py", 1)[1].split("\n\n", 1)[0]
+    for name in ("docs/api/*", "scripts/gen_api_reference.py", "tests/fixtures/streams/*", "License: Expat"):
+        assert name in stanza, name
+
+
+def test_the_stream_fixtures_are_mit_as_a_directory():
+    """Every file under tests/fixtures/streams/ is MIT (§8 (2) and (3) of
+    the server-side spec): the one Python file by its tag, the data files
+    by the directory's LICENSE, and nothing else is there, so a new kind of
+    file lands under a licence somebody chose."""
+    entries = sorted(os.listdir(FIXTURES))
+    names = [name for name in entries if os.path.isfile(os.path.join(FIXTURES, name))]
+    # A subdirectory would be covered by debian/copyright's glob but by no
+    # pin here, so none is allowed but Python's cache.
+    assert [name for name in entries if name not in names] in ([], ["__pycache__"])
+    assert "LICENSE" in names and "scenarios.py" in names
+    assert "MIT License" in _read("tests", "fixtures", "streams", "LICENSE")
+    for name in names:
+        if name in ("LICENSE", "scenarios.py"):
+            continue
+        assert name.endswith((".bin", ".marks.json", ".golden.json")), name
+    recorded = {name[: -len(".bin")] for name in names if name.endswith(".bin")}
+    for session in recorded:
+        assert f"{session}.marks.json" in names and f"{session}.golden.json" in names, session
 
 
 def test_no_other_source_file_claims_mit():
@@ -233,8 +303,82 @@ def test_no_other_source_file_claims_mit():
                     continue
                 path = os.path.join(root, name)
                 rel = os.path.relpath(path, ROOT)
-                if rel in ("collins/api/protocol.py", "collins/sshremote.py", "scripts/gen_api_reference.py"):
+                if rel in MIT_PYTHON:
                     continue
                 with open(path, encoding="utf-8") as handle:
                     head = handle.read(600)
                 assert "SPDX-License-Identifier: MIT" not in head, rel
+
+
+def test_the_terminal_page_names_no_collins_module_but_two_and_links_relatively():
+    """§3.5: a move of the MIT pages is a copy, so the terminal contract
+    names no module of Collins but protocol.py and sshremote.py, and every
+    link in it is relative. And it quotes nothing of the service: not even
+    its modules' names."""
+    text = _read("docs", "api", "terminal.md")
+    for match in re.finditer(r"collins/[A-Za-z0-9_./]+", text):
+        assert match.group(0) in ("collins/api/protocol.py", "collins/sshremote.py"), match.group(0)
+    assert "termstream" not in text and "termscreen" not in text and "ptyserver" not in text
+    for target in re.findall(r"\]\(([^)]+)\)", text):
+        assert target.startswith(("./", "#")), target
+    assert "SPDX-License-Identifier: MIT" in text[:200]
+
+
+def test_the_terminal_page_tables_parse_in_their_notation():
+    """The three tables of docs/api/terminal.md parse with
+    scripts/termcontract.py: every query and reply is a row of tokens, every
+    placeholder is one the check knows a class for, and the answered table
+    holds the queries the contract promises. The answers check (e2e) then
+    holds each row to VTE; this is the cheap half that fails first."""
+    tables = termcontract.tables(_read("docs", "api", "terminal.md"))
+    answered = tables[termcontract.ANSWERED]
+    queries = {termcontract.render(row.query, {"n": "7", "i": "3"}) for row in answered}
+    for promised in (b"\x1b[c", b"\x1b[>c", b"\x1b[=c", b"\x1b[>q", b"\x1b[5n", b"\x1b[6n", b"\x1b[?6n",
+                     b"\x1b[?996n", b"\x1b[?7$p", b"\x1b[7$p", b"\x1b[18t", b"\x1b[14t", b"\x1b[21t",
+                     b"\x1b]10;?\x1b\\", b"\x1b]11;?\x1b\\", b"\x1b]12;?\x1b\\", b"\x1b]4;3;?\x1b\\",
+                     b"\x1bP+q544e\x1b\\", b"\x1bP$qm\x1b\\"):  # fmt: skip
+        assert promised in queries, promised
+    for row in answered:
+        assert row.reply is not None
+        for name in termcontract.placeholders(row.reply):
+            assert name in termcontract.CLASSES, name
+        # A query's placeholder is answered back: the reply names it too.
+        assert set(termcontract.placeholders(row.query)) <= set(termcontract.placeholders(row.reply))
+    silent = {termcontract.render(row.query, {}) for row in tables[termcontract.SILENT]}
+    assert {b"\x1b[?u", b"\x1b[16t", b"\x1b[?4m", b"\x05"} <= silent
+    passed = {termcontract.render(row.query, {}) for row in tables[termcontract.PASSED]}
+    assert b"\x1b]9;4;1;50\x1b\\" in passed
+    assert not (passed & queries) and not (passed & silent) and not (silent & queries)
+
+
+def test_the_notation_is_exact():
+    parse = termcontract.parse
+    assert termcontract.render(parse("CSI ?61;1;21;22;28c"), {}) == b"\x1b[?61;1;21;22;28c"
+    assert termcontract.render(parse("DCS !|7E565445 ST"), {}) == b"\x1bP!|7E565445\x1b\\"
+    assert termcontract.render(parse("OSC 4 ; <i> ; ? ST"), {"i": "9"}) == b"\x1b]4;9;?\x1b\\"
+    assert termcontract.render(parse("CSI > c"), {}) == b"\x1b[>c"
+    assert termcontract.render(parse("DCS $q SP q ST"), {}) == b"\x1bP$q q\x1b\\"
+    pattern = termcontract.pattern(parse("CSI ?<n>;<s>$y"), {"n": "2004"})
+    assert pattern.fullmatch(b"\x1b[?2004;2$y") and not pattern.fullmatch(b"\x1b[?2005;2$y")
+    assert termcontract.placeholders(parse("OSC 10;rgb:<rrrr>/<gggg>/<bbbb> ST")) == ["rrrr", "gggg", "bbbb"]
+    indented = _read("docs", "api", "terminal.md").replace("\n| `CSI 0 c` |", "\n | `CSI 0 c` |", 1)
+    try:
+        termcontract.tables(indented)
+    except termcontract.NotationError as exc:
+        assert "does not start with a pipe" in str(exc)
+    else:
+        raise AssertionError("an indented row parsed")
+    for bad in ("CSI <nope> c", "CSI \x07", "", "OSC ü"):
+        try:
+            parse(bad)
+        except termcontract.NotationError:
+            continue
+        raise AssertionError(bad)
+    try:
+        termcontract.render(parse("CSI <n> $ p"), {})
+    except termcontract.NotationError:
+        pass
+    else:
+        raise AssertionError("a placeholder with no value rendered")
+    cells = termcontract._cells("| `DCS !\\|7E565445 ST` | a \\| b | `x` |")
+    assert cells == ("`DCS !|7E565445 ST`", "a | b", "`x`")

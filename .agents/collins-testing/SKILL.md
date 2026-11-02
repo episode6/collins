@@ -493,7 +493,21 @@ a tab running a real CLI, kill the foreground process group
   VTE's answers up to a sentinel (`CSI 5 n` fed last; its `CSI 0 n` is the
   last commit), so nothing waits on a timer. `get_cursor_position()` counts
   rows from the top of the buffer, not the screen: take a fresh terminal
-  before comparing a cursor.
+  before comparing a cursor. It also reads the published terminal
+  contract, `docs/api/terminal.md` (`--table PATH` names another copy):
+  `scripts/termcontract.py` (GTK-free) parses the page's three tables in
+  the page's own notation (`CSI ?61;1;21;22;28c`, a `<name>` placeholder
+  per value the row explains, `\|` for a pipe), and the check holds every
+  answered row to VTE (one reply, matching the row's pattern, each query
+  placeholder tried with a few sample values and every OSC query with both
+  terminators) and to the filter (the same reply, the query stripped),
+  every silent row to no answer from either, and every pass-through row to
+  the filter forwarding it untouched; and it fails when a query of its own
+  table is not a row of the page. So a change to the page's bytes, or to
+  the filter's, fails here, and a row that does not parse fails
+  `tests/test_api_reference.py` first. The page is MIT and written from
+  the spec and from measurements, never from `termstream.py`: when the two
+  disagree, measure VTE before deciding which is wrong.
 - `scripts/check_termscreen_parity.py` holds a real VTE to the termscreen
   goldens (`tests/fixtures/streams/*.golden.json`): rows, cursor, every
   drawn cell read one at a time through `Vte.Format.HTML` (a row-level

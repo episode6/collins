@@ -3,10 +3,14 @@ MIT License
 Copyright (c) 2026 episode6, Inc.
 
 This license covers the service API specification in this directory
-(index.md and messages.md), the script that generates messages.md
-(scripts/gen_api_reference.py), the protocol module it is generated from
-(collins/api/protocol.py) and the module that connects to a service over
-ssh (collins/sshremote.py). Everything else in Collins is licensed
+(index.md, messages.md and terminal.md), the script that generates
+messages.md (scripts/gen_api_reference.py), the protocol module it is
+generated from (collins/api/protocol.py), the module that connects to a
+service over ssh (collins/sshremote.py), and the terminal stream fixtures
+the terminal contract is measured against: every file under
+tests/fixtures/streams/ (the synthetic scenarios and their golden, the
+recorded streams with their marks and goldens; that directory's own LICENSE
+file says the same). Everything else in Collins is licensed
 GPL-3.0-or-later; see the LICENSE file at the repository root.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

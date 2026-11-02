@@ -16,10 +16,11 @@ script can be a client too. The [message reference](./messages) lists every
 message type with its fields and bounds; this page is everything else.
 
 ::: tip License
-This specification, the [message reference](./messages), the script that
-generates it, the Python module that defines the protocol
-(`collins/api/protocol.py`) and the one that connects over ssh
-(`collins/sshremote.py`) are licensed [MIT](#license). Collins itself, the
+This specification, the [message reference](./messages), [the terminal
+contract](./terminal), the script that generates the reference, the Python
+module that defines the protocol (`collins/api/protocol.py`), the one that
+connects over ssh (`collins/sshremote.py`) and the terminal stream fixtures
+the contract is measured against are licensed [MIT](#license). Collins itself, the
 service included, stays GPL-3.0-or-later. A program that talks to
 `collins-service` only through this API is, in the view of Collins'
 authors, an independent work: see [Interoperability](#interoperability).
@@ -278,12 +279,17 @@ The sequence the Collins window follows, which any client can:
    client (the one whose size the pty takes) and, when it is not, the
    active client's `device` for a "Sized for …" notice, and the terminal
    modes the redraw turns on. The redraw follows as `0x01` frames flagged
-   `0x01`, the last also `0x02`, then live output. A second client may
+   `0x01`, the last also `0x02`, then live output. [The terminal
+   contract](./terminal) says what the redraw is, what your terminal must
+   not send back in answer to it, and what the service has done to the
+   stream before you see it. A second client may
    attach to the same pty; both see the output, and the active one's
    `resize` events size the pty. Send `resize` when your grid changes,
    `focus` when your view of the pty gains or loses focus, `theme` when
-   your colours change, and `0x02` frames for what the user types.
-   `detach` stops the output; the pty keeps running.
+   your colours change, and `0x02` frames for what the user types. An
+   input frame is written to its pty whether or not you have attached;
+   `attach` is about output. `detach` stops the output; the pty keeps
+   running.
 5. **`spawn`** to start something new: `kind: "agent"` with a `cwd` and,
    optionally, the session to resume, a `prompt` to hand the CLI, `model`,
    `effort`, `permission_mode`, `worktree`, `sandbox` and the rest of the
@@ -690,10 +696,16 @@ no transcript, so the row's transcript actions are hidden. And a few refusals
 are matched by their exact sentence, which
 [Conformance](./messages#refusal-sentences-a-client-matches) lists.
 
-**What is still to be written.** These pages specify the messages, and three
-things a server needs are not published yet. What a Level 1 server has to do to
-a terminal stream will get a page of its own. So will how it reads a session's
-facts from Claude Code. A conformance kit will test a server against these pages.
+**The terminal.** What a Level 1 server has to do to a terminal stream is
+[The terminal contract](./terminal): the queries it answers in the child's
+place and strips, with VTE 0.84.0's reply to each, the redraw it paints an
+attaching client with, the screen model its session facts are read from, the
+active client, and the environment an agent starts in.
+
+**What is still to be written.** These pages specify the messages and the
+terminal, and two things a server needs are not published yet. How it reads a
+session's facts from Claude Code will get a page of its own. A conformance kit
+will test a server against these pages.
 
 **Where this lives.** This documentation is kept in the Collins repository for
 now, and may move to a repository both projects share once it settles. Every
@@ -721,9 +733,13 @@ from `collins/service/` is a derivative of Collins.
 ## License
 
 This specification (`docs/api/index.md`), the message reference
-(`docs/api/messages.md`), its generator (`scripts/gen_api_reference.py`),
-the protocol module (`collins/api/protocol.py`) and the ssh module
-(`collins/sshremote.py`) are:
+(`docs/api/messages.md`), the terminal contract (`docs/api/terminal.md`),
+the reference's generator (`scripts/gen_api_reference.py`), the protocol
+module (`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`)
+and every file of the terminal stream fixtures (`tests/fixtures/streams/`:
+the synthetic scenarios and their golden, the recorded streams of a Claude
+Code session with their marks and goldens, measurements the terminal
+contract rests on) are:
 
 ```
 MIT License

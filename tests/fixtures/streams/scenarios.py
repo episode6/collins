@@ -1,8 +1,37 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 episode6, Inc.
+#
+# Unlike the rest of the Collins test suite (GPL-3.0-or-later), this file
+# and every file beside it are MIT-licensed: they are the measurements of
+# VTE the terminal contract of the service API (docs/api/terminal.md) rests
+# on, published so another implementation can be held to the same readings.
+# The LICENSE file in this directory has the text and covers the data files,
+# which cannot carry a header.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 """The termscreen fixtures: recorded streams, synthetic streams, goldens.
 
 Shared by `tests/test_termscreen.py` (the model against the goldens) and
 `scripts/check_termscreen_parity.py` (a real VTE against the same goldens,
 which also writes them). GTK-free; not a package, both import it by path.
+MIT, with everything in this directory (docs/api/LICENSE; the SPDX tag above
+is pinned by `tests/test_api_reference.py`).
 
 A recorded session is `<session>.bin` with `<session>.marks.json` beside it
 (the offsets its scenarios end at, as `scripts/spike_split_3_screen_model.py

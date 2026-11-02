@@ -17,23 +17,51 @@ collects what VTE commits, and compares it with what
 - a client's colours (dark and light, a cursor colour) mirrored into the
   responder's state;
 - the cursor report in origin mode and at a pending wrap;
-- a round of queries closed by DA1, answered in the order asked (F11).
+- a round of queries closed by DA1, answered in the order asked (F11);
+- every row of the published terminal contract's three tables
+  (`docs/api/terminal.md`, the server-side API spec's PR-S3; `--table PATH`
+  names another copy), read through `scripts/termcontract.py`: an answered
+  row gets exactly one reply from VTE matching the row's pattern and the
+  same reply from the responder with the query stripped, each query
+  placeholder tried with a few sample values, every OSC query with both
+  terminators, and the grid placeholders (`<rows>`, `<cols>`, `<row>`,
+  `<col>`, `<height>`, `<width>`, `<vte>`) bound to the terminal's own
+  values, the cursor placed off the diagonal first, so a swapped pair fails; a silent row gets nothing from
+  either; a pass-through row is forwarded untouched and unanswered by the
+  responder; and every query of this script's own table is a row of the
+  page (two exceptions below, stated in the page's prose). A row's notes
+  column is prose and is not checked. So the page cannot drift from VTE or
+  from the responder: the decision of PR-S3 was to parse the page rather
+  than generate it from a data file, since its notation is a few tokens;
+- a sweep of pens for DECRQSS: each attribute, each colour spelling and
+  the underline colour, VTE's answer against the responder's, with the one
+  divergence the page states (a `38;5`/`48;5` index under 16: VTE says
+  `38:5:n`, the responder the named colour) pinned as the exception.
 
 A query VTE answers is collected up to a sentinel: ``CSI 5 n`` is fed last
 and its ``CSI 0 n`` is the last answer committed (F3), so no timing is
 involved. Nothing Collins-shaped runs: no App, no session, no state.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
-        python3 scripts/check_termstream_answers.py
+        python3 scripts/check_termstream_answers.py [--table docs/api/terminal.md]
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
+import itertools
 import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+
+import termcontract  # noqa: E402
+
+TABLE_PATH = os.path.join(ROOT, "docs", "api", "terminal.md")
+if "--table" in sys.argv:
+    TABLE_PATH = sys.argv[sys.argv.index("--table") + 1]
 
 import gi  # noqa: E402
 
@@ -42,7 +70,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, GLib, Gtk, Vte  # noqa: E402
 
-from collins.service import termstream  # noqa: E402
+from collins.service import termscreen, termstream  # noqa: E402
 from collins.service.termstream import StreamFilter, TerminalState, rgb16  # noqa: E402
 
 DEADLINE_S = 100
@@ -288,6 +316,151 @@ expected = vte_answers(RIS + ROUND)
 got = StreamFilter(state_for_vte()).feed(RIS + ROUND).replies
 check("a round closed by DA1, in order", got == expected, f"{got!r} != VTE {expected!r}")
 check("…and DA1's answer is the round's last", got[-1:] == [b"\x1b[?61;1;21;22;28c"], repr(got))
+
+# -- the published terminal contract's tables, row by row
+# A query placeholder is tried with each of these; the reply's copy of it
+# must be the same value. The rest of a reply's placeholders match their
+# class (termcontract.CLASSES).
+QUERY_SAMPLES = {
+    "n": ("2004", "2026", "1016", "9999", "25", "4", "20", "2"),
+    "i": ("0", "1", "244", "255"),
+}
+# Queries of TABLE the page states in prose rather than as a row.
+NOT_A_ROW = {
+    "OSC 4 two",  # several `<i> ; ?` pairs in one query: "one reply each", in the OSC 4 row's notes
+    "XTGETTCAP TN upper",  # the hex's case echoed: in the XTGETTCAP row's notes
+}
+
+
+def with_bel(parts):
+    """*parts* with a final ST replaced by BEL, for an OSC query's other
+    terminator; None when the spelling does not end in ST."""
+    if not parts or not isinstance(parts[-1], bytes) or not parts[-1].endswith(ST):
+        return None
+    return [*parts[:-1], parts[-1][: -len(ST)] + BEL]
+
+
+def assignments(parts):
+    names = sorted(set(termcontract.placeholders(parts)))
+    for name in names:
+        if name not in QUERY_SAMPLES:
+            raise termcontract.NotationError(f"no samples for a query's <{name}>")
+    for values in itertools.product(*(QUERY_SAMPLES[name] for name in names)):
+        yield dict(zip(names, values, strict=True))
+
+
+def spelled(data: bytes) -> str:
+    return repr(data)
+
+
+with open(TABLE_PATH, encoding="utf-8") as handle:
+    page_tables = termcontract.tables(handle.read())
+page_queries: set[bytes] = set()
+term = fresh_terminal()
+# The reply placeholders that name the terminal's geometry or identity are
+# bound to this terminal's values (the cursor is at 1;1 after RIS), so that
+# `CSI 8;<cols>;<rows>t` does not pass as `CSI 8;<rows>;<cols>t`.
+# The cursor is placed off the diagonal first, so that `<row>;<col>` cannot
+# pass swapped either; the responder gets a screen model so its cursor
+# follows the same move.
+PLACE = CSI + b"3;7H"
+GRID = {
+    "rows": str(base_state.rows),
+    "cols": str(base_state.cols),
+    "row": "3",
+    "col": "7",
+    "height": str(base_state.rows * base_state.cell_height),
+    "width": str(base_state.cols * base_state.cell_width),
+    "vte": "8400",
+}
+for row in page_tables[termcontract.ANSWERED]:
+    for values in assignments(row.query):
+        variants = [(row.query, row.reply)]
+        if row.query[0].startswith(termcontract.NAMED["OSC"]) and with_bel(row.query):
+            variants.append((with_bel(row.query), with_bel(row.reply)))
+        for query_parts, reply_parts in variants:
+            query = termcontract.render(query_parts, values)
+            page_queries.add(query)
+            wanted = termcontract.pattern(reply_parts, {**GRID, **values})
+            name = f"page: {' '.join(row.cells[0].split())} {values if values else ''}".rstrip()
+            expected = vte_answers(RIS + PLACE + query)
+            check(
+                f"{name}: VTE answers as the page says",
+                len(expected) == 1 and wanted.fullmatch(expected[0]) is not None,
+                f"VTE {expected!r} vs {wanted.pattern!r}",
+            )
+            model = termscreen.Screen(base_state.cols, base_state.rows)
+            out = StreamFilter(state_for_vte(), screen=model).feed(RIS + PLACE + query)
+            detail = f"{out.replies!r} != {expected!r}"
+            check(f"{name}: the responder answers as VTE", out.replies == expected, detail)
+            check(f"{name}: stripped", out.forward == RIS + PLACE, repr(out.forward))
+for row in page_tables[termcontract.SILENT]:
+    query = termcontract.render(row.query, {})
+    page_queries.add(query)
+    name = f"page, silent: {' '.join(row.cells[0].split())}"
+    expected = vte_answers(RIS + query)
+    check(f"{name}: VTE answers nothing", expected == [], repr(expected))
+    out = StreamFilter(state_for_vte()).feed(RIS + query)
+    silent = (out.replies, out.forward) == ([], RIS)
+    check(f"{name}: the responder answers nothing and strips", silent, repr(out))
+for row in page_tables[termcontract.PASSED]:
+    query = termcontract.render(row.query, {})
+    name = f"page, passed through: {' '.join(row.cells[0].split())}"
+    out = StreamFilter(state_for_vte()).feed(RIS + query)
+    passed = (out.replies, out.forward) == ([], RIS + query)
+    check(f"{name}: forwarded untouched, unanswered", passed, repr(out))
+    check(f"{name}: not a row the page answers", query not in page_queries)
+for name, query in TABLE:
+    if name in NOT_A_ROW:
+        continue
+    check(f"page covers {name}", query in page_queries, f"{query!r} is no row of {TABLE_PATH}")
+
+# -- DECRQSS over a sweep of pens: VTE's answer, the responder's, and the
+# one divergence the page states (a 38;5 / 48;5 index under 16 is VTE's
+# `38:5:n`, the responder's named colour).
+DECRQSS = DCS + b"$qm" + ST
+PENS = [
+    b"1", b"2", b"3", b"4", b"4:3", b"4:4", b"4:5", b"21", b"5", b"7", b"8", b"9", b"53",
+    b"31", b"37", b"91", b"97", b"44", b"47", b"104", b"107",
+    b"38;5;16", b"38;5;200", b"38:5:16", b"48;5;16", b"48;5;231", b"48:5:100",
+    b"38;2;10;20;30", b"38:2::10:20:30", b"48;2;1;2;3", b"48:2::1:2:3",
+    b"58;5;9", b"4;58;5;3", b"4;58;2;7;8;9", b"4;58:2::7:8:9", b"58;5;3;24",
+    b"1;3;4;7;31;44", b"1;38;5;196;48;2;0;0;0;58;5;21",
+]  # fmt: skip
+LOW_PALETTE = [b"38;5;%d" % i for i in (0, 1, 7, 8, 15)] + [b"48;5;%d" % i for i in (0, 3, 9, 15)]
+LOW_PALETTE += [b"38:5:1", b"48:5:12", b"1;38;5;2;48;5;9"]
+
+
+def named_colour(reply: bytes) -> bytes:
+    """VTE's DECRQSS reply with each `38:5:n` / `48:5:n` under 16 spelled
+    as the named colour: what the page says the responder answers."""
+    import re
+
+    def swap(match):
+        base, index = int(match.group(1)), int(match.group(2))
+        if index >= 16:
+            return match.group(0)
+        named = (base - 8 if index < 8 else base + 52) + (index % 8)
+        return b"%d" % named
+
+    return re.sub(rb"(38|48):5:(\d+)", swap, reply)
+
+
+for pen in PENS + LOW_PALETTE:
+    data = RIS + CSI + pen + b"m" + DECRQSS
+    expected = vte_answers(data)
+    # The pen is the screen model's: the responder answers DECRQSS from the
+    # model it is given, as the service gives it one.
+    model = termscreen.Screen(base_state.cols, base_state.rows)
+    got = StreamFilter(state_for_vte(), screen=model).feed(data).replies
+    name = f"DECRQSS after SGR {pen.decode()}"
+    if pen in LOW_PALETTE:
+        diverges = expected != got and got == [named_colour(reply) for reply in expected]
+        check(f"{name}: the stated divergence, exactly", diverges, f"{got!r} vs VTE {expected!r}")
+    else:
+        check(f"{name}: answered as VTE", got == expected, f"{got!r} != VTE {expected!r}")
+        check(f"{name}: one reply", len(expected) == 1, repr(expected))
+term.feed(RIS)
 
 print(f"{len(failures)} failure(s)" if failures else "all ok", flush=True)
 os._exit(1 if failures else 0)
