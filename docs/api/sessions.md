@@ -33,8 +33,9 @@ the session module's process and box readings (not its resolver or its
 close flows), the hosting module's facts, snapshot and refreshes, the
 finish judge, and the process-tree helper's agent walk. The hunks
 committed after that were written with those read: the takes_prompt
-table and required properties, the busy properties and the paragraph
-after the signs, the finished properties' unread sentence and the
+table and required properties, the busy properties, the submit sign's
+measured sentence and the paragraph after the signs, the finished
+properties' unread sentence and the
 unbound case, the process-facts paragraphs, the resolver's sentence on a
 worktree's file, the checklist rows, the form of a switch's output in
 the appendix, the wrapper sentence of the agents entry, and this record.
@@ -295,9 +296,11 @@ quiet road the hold keeps such a quiet from counting as a finish; on the
 turn-end road the clear's grace, once stood, is not taken back by output
 or by a sighting, only by a new report; and the rise that follows a
 sighting or output is not held on either road, so a client of Collins
-can see `busy` dip after a turn that left a child running (dips of 37 to
-883 ms were measured on the service against a stand-in CLI under the
-hold; before it, falls of 22 to 300 ms, each then a false finish). And a session
+can see `busy` dip after a turn that left a child running (dips of 211
+to 1926 ms were measured on the service against a stand-in CLI under the
+hold after such a turn, and dips of 37 to 47 ms on the quiet road under
+output arriving just past the window; before the hold, falls of 22 to
+300 ms, each then a false finish). And a session
 going busy again withdraws a finish not yet counted, since the pause was
 a tool call's.
 
@@ -443,7 +446,8 @@ the agent is found by descent from the pty's child and by name. The CLI
 changes its own directory when it enters a worktree, while the shell's
 stays put, so `agent_cwd` is the agent process's own directory: not the
 pty's, and not that of a wrapper the agent may run under (the appendix's
-[agents](#k-claude-agents-json) entry names two). Whether a command runs is readable from the
+[agents](#k-claude-agents-json) entry names the daemon's, and says what a
+pty attached to a background agent reports instead). Whether a command runs is readable from the
 terminal itself: while nothing runs, the terminal's foreground group is
 the shell itself, so `running_command` needs no process walk. Collins
 polls every 2 seconds, which is what the refresh property asks, and
@@ -984,11 +988,12 @@ milliseconds), `name` and `status` (`idle` or `busy`). On 2.1.316 the
 array lists interactive sessions too (`kind: "interactive"`); a background
 agent's element (`kind: "background"`) also carries an `id`, which is what
 `attach` takes (an element on earlier versions carried a `state` too, not
-seen on 2.1.316). `--all` includes completed ones. A background agent
-runs under a wrapper process of the daemon's, `claude bg-pty-host`, and
-`claude attach` is itself a wrapper in the pty it is typed into, the
-agent its child; a wrapper keeps the directory it started in while the
-agent moves into a worktree (seen on 2.1.226). The listing is how a
+seen on 2.1.316). `--all` includes completed ones. A background agent is
+a child of the daemon's `claude bg-pty-host`, not of any pty, and a pty
+in which `claude attach` was typed holds that process alone, childless
+(seen on 2.1.226): a reading of such a pty's process table sees the
+attach and never the agent, so `agent_running` is true by its name and
+`agent_cwd` is the directory the attach was typed in. The listing is how a
 server tells a session that has become a background agent from one that
 has not, and, apart from the agent's spinner, the only busy reading a
 server has for one, since the daemon scrubs its agents' environment and
