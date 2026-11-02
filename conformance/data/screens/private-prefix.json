@@ -1,0 +1,12 @@
+{
+ "scenario": "private-prefix",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YRtbPjV1YhtbPHVjG1s+NDsybWQbWz80bWUbWz0xOzF1ZhtbPjBxZxtbP3Vn",
+ "capture": "abcdefgg",
+ "cursor": [
+  8,
+  0
+ ],
+ "alternate": false
+}

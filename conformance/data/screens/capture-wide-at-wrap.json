@@ -1,0 +1,12 @@
+{
+ "scenario": "capture-wide-at-wrap",
+ "cols": 120,
+ "rows": 40,
+ "stream": "dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnbml6XmnKzoqp54DQpuZXh0",
+ "capture": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv日本語x\nnext",
+ "cursor": [
+  4,
+  2
+ ],
+ "alternate": false
+}

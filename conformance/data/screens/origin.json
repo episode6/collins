@@ -1,0 +1,12 @@
+{
+ "scenario": "origin",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s1OzEwchtbPzZoG1sxOzFIdG9wG1syMDsxSGNsYW1wZWQbWz82bBtbMTsxSGhvbWUbW3I=",
+ "capture": "home\n\n\n\ntop\n\n\n\n\nclamped",
+ "cursor": [
+  0,
+  0
+ ],
+ "alternate": false
+}

@@ -1,0 +1,12 @@
+{
+ "scenario": "faint-colours",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1syOzM4OzU7MTk2bWN1YmUbWzBtIBtbMjszODs1OzI0MG1ncmV5G1swbSAbWzI7OTFtYnJpZ2h0G1swbSAbWzI7N21pbnZlcnNlG1swbSAbWzE7Mm1ib2xkZmFpbnQbWzBtIBtbMjszODs1OzNtbG93G1swbSAbWzI7NDFtZmFpbnRvbnJlZBtbMG0gG1sxOzMxbWJvbGRyZWQbWzBtIBtbOG1jb25jZWFsZWQbWzBtIBtbNW1ibGluaxtbMG0gG1s1M21vdmVybGluZRtbMG0=",
+ "capture": "cube grey bright inverse boldfaint low faintonred boldred concealed blink overline",
+ "cursor": [
+  82,
+  0
+ ],
+ "alternate": false
+}

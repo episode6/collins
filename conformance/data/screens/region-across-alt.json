@@ -1,0 +1,12 @@
+{
+ "scenario": "region-across-alt",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s/MTA0OWgbWzM7NnIbWz8xMDQ5bBtbSEwwDQpMMQ0KTDINCkwzDQpMNA0KTDUNCkw2DQpMNw0KTDgNCkw5DQpMMTANCkwxMQ0K",
+ "capture": "L0\nL1\nL9\nL10\nL11",
+ "cursor": [
+  0,
+  5
+ ],
+ "alternate": false
+}

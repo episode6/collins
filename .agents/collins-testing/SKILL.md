@@ -566,3 +566,63 @@ tag is in the image job's step summary of any recent run.
 
 Related skills: `capture-screenshots` (the launch/staging recipe these checks
 share), `collins-gtk-sharp-edges`.
+
+## The conformance kit
+
+`conformance/` is the kit that holds a server of the published API to
+`docs/api/` (server-side spec §3.6): MIT like the pages, Python 3.12 and the
+standard library alone, importing `collins/api/protocol.py` by path and
+nothing else of Collins. **Clean room:** nothing under it reads, quotes or
+paraphrases `collins/service/`, `providers.py`, `activity.py`,
+`sessions.py`, `transcript.py` or `proctree.py`; its checks are written
+from the four pages, and where a check would need something the pages do
+not say, that is a finding about the pages, not a licence to read the
+code. Its fake claude (`conformance/fake_claude.py`) draws the input box and
+writes the transcript from the appendix of `sessions.md` alone, so the
+appendix is what the kit tests.
+
+```bash
+python3 scripts/run_conformance.py                       # a scratch service of this checkout, every level and claimed family
+python3 scripts/run_conformance.py --skip-family prs --skip-family sandbox   # the CI job's shape (no gh, no bwrap)
+python3 scripts/run_conformance.py --service-only        # a service to run the kit against by hand
+python3 -m conformance <socket> [--level N] [--family F] [--only GROUP] [--replay]
+python3 -m unittest discover -s conformance/tests -t .   # the kit's own tests (stdlib unittest)
+```
+
+`scripts/run_conformance.py` (GPL) is the Collins side: a scratch tree with
+a scratch `HOME` (the fake writes `~/.claude/projects/...`, which is then
+the service's projects directory), the fake installed as `claude` in a
+directory `claude_cli_path` names and first on the service's `PATH`,
+`COLLINS_KEEPER=none`, the service through `e2e_service.start_service()`,
+then the kit as a subprocess. The real `claude` is never started; the
+title and icon runs are off in the scratch state. The kit's groups: `level
+0` (the wire), `terminal` (a probe inside a `shells` pty, or the fake's
+`probe` prompt: every query of `terminal.md`'s tables, the redraw, the
+active client, every published scenario's capture and cursor against VTE's
+reading), `sessions` (the fake: takes_prompt, busy's two roads, one
+finished per turn, the bind, switch, die, close), `level 2`, `families`.
+
+**The data** (`conformance/data/`) and its gates: `queries.json` is the
+page's three tables in the page's notation (`tests/test_conformance_data.py`
+parses the page with `scripts/termcontract.py` and compares);
+`decrqm-modes.json` and `vte-palette.json` are measurements of VTE 0.84
+written by `scripts/check_conformance_data.py --write` (headless; the same
+script without `--write` is the e2e check that re-measures them);
+`screens/*.json` is every synthetic scenario's bytes with VTE's capture and
+cursor, written by `scripts/check_termscreen_parity.py --write` from the
+goldens (a `@` in a scenario's name is `__` in the file's);
+`streams/` is the recorded fixtures copied by the same `--write`. A
+scenario added to `tests/fixtures/streams/scenarios.py` needs that `--write`
+run, or `tests/test_conformance_data.py` fails.
+
+**Reading a fail against the service.** The `conformance` CI job runs the
+kit against this checkout's service, so a fail there is the most valuable
+thing the kit finds: report it with the bytes and a reproduction; never
+soften the check to pass. The kit prints what it saw against what the page
+says; the first question is which of the two is wrong. Four facts the
+checks already get right and a reader may doubt: OSC 9;4 carries an empty
+percent field (`9;4;3;`); the `Try "` hint is drawn with cursor movement
+between its words; a transcript opens with metadata records that carry no
+timestamp or cwd, and none exists before the first submit; a fall of `busy`
+takes one of two roads (a quiet under a second ends nothing; a progress
+clear ends the turn while output flows, and a rise may follow at once).

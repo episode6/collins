@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-31. Full change history: git log for this file.
+fork. Last modified: 2026-11-02. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -483,3 +483,12 @@ file fails a PR rather than a software center: the RPM spec's `%check`,
 `debian/rules` (runs on Launchpad's builders), and `scripts/build_deb.sh`
 (runs in ci.yml's `packaging` job on every PR) — all with the same
 `appstreamcli validate --no-net --override releases-not-in-order=info`.
+
+## The conformance kit in the sdist
+
+`conformance/` (the MIT conformance kit for the service API; see its README)
+is part of the source distribution and of nothing else: `MANIFEST.in`
+grafts it into the sdist, the wheel's `packages.find` leaves it out, and
+`scripts/verify_wheel_data.py` checks both. The system packages install the
+wheel's tree and so do not carry it; the PPA and COPR source packages take
+the whole tree, where `debian/copyright`'s Expat stanza names it.

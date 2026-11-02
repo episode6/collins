@@ -226,8 +226,9 @@ terminal it believes it is in (see [the spawn
 environment](#the-spawn-environment-normative)). The session facts of the
 sessions page assume the CLI behaved as it does under VTE. The DECRQM mode
 table, VTE 0.84's answer for every private and ANSI mode in its default
-state, ships as data with the conformance kit; until then the check that
-re-measures it is Collins' own.
+state, ships as data with the conformance kit (`conformance/data/decrqm-modes.json`),
+which holds a server's answers to it; Collins' own check re-measures it
+against VTE.
 
 ## An attach's redraw (normative)
 
@@ -584,6 +585,6 @@ Claude Code 2.1.288 sessions, the byte offsets at which their scenarios end,
 and for each offset a golden of what VTE 0.84 displayed there (row text,
 cursor, the colour and attributes of every drawn cell, which rows
 soft-wrapped, the scrollback, and the input-box readings), and the generator of 135 synthetic scenarios with its
-golden. The conformance kit, when it ships, carries the same scenarios as
-expected capture text and cursor per scenario, so an implementer compares
-a model against VTE's reading without VTE.
+golden. The conformance kit carries the same scenarios as expected capture
+text and cursor per scenario (`conformance/data/screens/`), so an implementer
+compares a model against VTE's reading without VTE.

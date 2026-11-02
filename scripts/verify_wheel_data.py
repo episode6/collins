@@ -18,7 +18,9 @@ missing from what PyPI serves.
 
 The wheel's console scripts are checked too: `collins`, `collins-service`
 and `collins-keeper`, the three commands the systemd user units and the
-system packages name.
+system packages name. And the conformance kit (conformance/, MIT, spec D12)
+is in the sdist and not in the wheel: a server author gets it with the
+source, an installed app does not carry it.
 
 Usage: python3 scripts/verify_wheel_data.py [dist-dir]   (default: dist/)
 """
@@ -106,6 +108,26 @@ def check_scripts(label: str, archive: zipfile.ZipFile, names: set[str]) -> list
     ]
 
 
+# The conformance kit's pieces the sdist must carry (MANIFEST.in grafts the
+# tree), none of which may appear in the wheel.
+KIT_IN_SDIST = {
+    "conformance/__main__.py",
+    "conformance/fake_claude.py",
+    "conformance/README.md",
+    "conformance/LICENSE",
+    "conformance/data/queries.json",
+    "conformance/data/decrqm-modes.json",
+    "conformance/kit/client.py",
+}
+
+
+def check_kit(label: str, names: set[str], in_sdist: bool) -> list[str]:
+    kit = {name for name in names if name.startswith("conformance/")}
+    if in_sdist:
+        return [f"{label}: missing {name}" for name in sorted(KIT_IN_SDIST - names)]
+    return [f"{label}: ships the conformance kit ({sorted(kit)[0]} ...)"] if kit else []
+
+
 def main(argv: list[str]) -> int:
     dist = Path(argv[1]) if len(argv) > 1 else ROOT / "dist"
     wheels = sorted(dist.glob("*.whl"))
@@ -120,11 +142,13 @@ def main(argv: list[str]) -> int:
             names = set(archive.namelist())
             problems += check(wheel.name, names, wanted)
             problems += check_scripts(wheel.name, archive, names)
+            problems += check_kit(wheel.name, names, in_sdist=False)
     for sdist in sdists:
         with tarfile.open(sdist) as tar:
             # Entries are prefixed with the sdist's own <name>-<version>/ dir.
             names = {name.split("/", 1)[-1] for name in tar.getnames()}
         problems += check(sdist.name, names, wanted)
+        problems += check_kit(sdist.name, names, in_sdist=True)
 
     if problems:
         print("\n".join(problems), file=sys.stderr)

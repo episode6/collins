@@ -164,6 +164,16 @@ forever** (rejected uploads included); COPR does not.
 
 ## CI
 
+**The conformance kit ships in the sdist, not the wheel.** `conformance/`
+(MIT, server-side spec D12) is a product for a server author, not something
+the app imports: `MANIFEST.in` grafts it into the sdist, `packages.find`
+(`collins*`) keeps it out of the wheel, and `scripts/verify_wheel_data.py`
+asserts both (its `__main__.py`, `fake_claude.py`, `README.md`, `LICENSE` and
+`data/queries.json` in the sdist; no `conformance/` name in the wheel). The
+`.deb`, RPM and AUR packages install the wheel's tree and so carry none of
+it; the PPA and COPR source packages take the whole tree and so do, under
+the `conformance/*` stanza of `debian/copyright`.
+
 `.github/workflows/ci.yml` on pushes to `main`/`release/**` and PRs: `image`
 (reusable `ci-image.yml`: builds/pushes the three GHCR tags only when the
 Dockerfile hash has no tag yet), `lint` (bare runner, `ruff==0.16.4` pinned),
@@ -176,7 +186,11 @@ name the main-branch ruleset requires, `packaging` (`python3 -m build
 `build_deb.sh`), `ppa-source` (noble in the noble packaging image, resolute in
 full; unsigned, checks the upload set exists), `rpm` (Fedora image: SRPM,
 rpmlint, rebuild with `%check` = desktop-file + AppStream validation, `dnf
-install`, path assertions), `verify-versions`, `docs` (bare runner, Node 22:
+install`, path assertions), `conformance` (the full image: the kit's own
+unit tests, then `scripts/run_conformance.py --skip-family prs --skip-family
+sandbox`, the kit against a scratch service of the checkout with
+`COLLINS_KEEPER=none` and the fake claude as its `claude`; no gh and no
+bubblewrap on the runner, so those two families are left out), `verify-versions`, `docs` (bare runner, Node 22:
 `npm run docs:build` in `docs/`, the same build `docs.yml` deploys from —
 here so a broken page fails the PR, since the deploy only runs on push to
 main and its red run appears in no PR's checks).

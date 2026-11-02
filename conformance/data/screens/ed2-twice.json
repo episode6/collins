@@ -1,0 +1,12 @@
+{
+ "scenario": "ed2-twice",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YQ0KYhtbMkobWzJK",
+ "capture": "a\nb",
+ "cursor": [
+  1,
+  1
+ ],
+ "alternate": false
+}

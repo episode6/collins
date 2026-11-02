@@ -1,0 +1,12 @@
+{
+ "scenario": "cursor-moves",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1sxMDsxMEh4G1szQXkbWzJCehtbNUR3G1syRXYbWzFGdRtbMjBHdBtbNWRzG1s5OTs5OTlIchtbMTsxSHEbWzE1YHA=",
+ "capture": "q             p\n\n\n\n                    s\n\n          y\n\n       w   z\nu        x         t\nv\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                       r",
+ "cursor": [
+  15,
+  0
+ ],
+ "alternate": false
+}

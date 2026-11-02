@@ -1,0 +1,12 @@
+{
+ "scenario": "then-tab-stops@after",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1szZxtbMTs1SBtIG1sxOzIxSBtIDWEJYglj",
+ "capture": "a\tb\tc",
+ "cursor": [
+  21,
+  0
+ ],
+ "alternate": false
+}

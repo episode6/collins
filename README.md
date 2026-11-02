@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-01. Full change history: git log for this file.
+fork. Last modified: 2026-11-02. Full change history: git log for this file.
 -->
 
 # Collins
@@ -264,9 +264,10 @@ observable behaviour included), the module, the script that renders the
 message reference from it, `collins/sshremote.py`, which connects to a
 service over ssh, and the terminal stream fixtures under
 `tests/fixtures/streams/` that the terminal contract is measured against
+and the conformance kit under `conformance/` that holds a server to the spec
 are MIT-licensed ([docs/api/LICENSE](docs/api/LICENSE)) so that another
 development environment can be a client, or serve the API in place of
-`collins-service`. A program that talks to the service only
+`collins-service` and test that it does. A program that talks to the service only
 through that documented API is, in our view, an independent work and not a
 derivative of Collins, whatever its own license, and so is a server written
 from the spec; the service and the window themselves stay GPL.

@@ -354,7 +354,14 @@ class ActivityTracker:
             for sid, deadline in self._deadlines.items()
             if deadline + FALL_HOLD_S <= now and sid not in self._pending_finish
         ]
-        for session_id in dict.fromkeys(armed + timed_out):
+        # Every key's fall is reported before any key's finish (§5 ruling
+        # 47): a session is tracked under its id and its handle, and with
+        # the keys handled in turn the id's finish went out on the wire a
+        # millisecond before the handle's `busy: false`, where the facts
+        # page promises a client reading `finished` has been told `busy`
+        # fell.
+        falling = list(dict.fromkeys(armed + timed_out))
+        for session_id in falling:
             log.debug(
                 "activity: %s finished (%s)",
                 session_id,
@@ -363,7 +370,8 @@ class ActivityTracker:
             self._deadlines.pop(session_id, None)
             self._pending_finish.pop(session_id, None)
             self._on_change(session_id, False)
-            if self._on_finished is not None:
+        if self._on_finished is not None:
+            for session_id in falling:
                 self._on_finished(session_id)
         if not self._deadlines:
             self._sweep = None

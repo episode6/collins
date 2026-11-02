@@ -1,0 +1,12 @@
+{
+ "scenario": "ed3-clears-scrollback",
+ "cols": 120,
+ "rows": 40,
+ "stream": "Z29uZSAxDQpnb25lIDINCmdvbmUgMw0KZ29uZSA0DQpnb25lIDUNCmdvbmUgNg0KZ29uZSA3DQpnb25lIDgNCmdvbmUgOQ0KZ29uZSAxMA0KZ29uZSAxMQ0KZ29uZSAxMg0KZ29uZSAxMw0KZ29uZSAxNA0KZ29uZSAxNQ0KZ29uZSAxNg0KZ29uZSAxNw0KZ29uZSAxOA0KZ29uZSAxOQ0KZ29uZSAyMA0KZ29uZSAyMQ0KZ29uZSAyMg0KZ29uZSAyMw0KZ29uZSAyNA0KZ29uZSAyNQ0KZ29uZSAyNg0KZ29uZSAyNw0KZ29uZSAyOA0KZ29uZSAyOQ0KZ29uZSAzMA0KZ29uZSAzMQ0KZ29uZSAzMg0KZ29uZSAzMw0KZ29uZSAzNA0KZ29uZSAzNQ0KZ29uZSAzNg0KZ29uZSAzNw0KZ29uZSAzOA0KZ29uZSAzOQ0KZ29uZSA0MA0KZ29uZSA0MQ0KZ29uZSA0Mg0KZ29uZSA0Mw0KZ29uZSA0NA0KZ29uZSA0NQ0KZ29uZSA0Ng0KZ29uZSA0Nw0KZ29uZSA0OA0KZ29uZSA0OQ0KG1szSnN0aWxs",
+ "capture": "gone 11\ngone 12\ngone 13\ngone 14\ngone 15\ngone 16\ngone 17\ngone 18\ngone 19\ngone 20\ngone 21\ngone 22\ngone 23\ngone 24\ngone 25\ngone 26\ngone 27\ngone 28\ngone 29\ngone 30\ngone 31\ngone 32\ngone 33\ngone 34\ngone 35\ngone 36\ngone 37\ngone 38\ngone 39\ngone 40\ngone 41\ngone 42\ngone 43\ngone 44\ngone 45\ngone 46\ngone 47\ngone 48\ngone 49\nstill",
+ "cursor": [
+  5,
+  39
+ ],
+ "alternate": false
+}

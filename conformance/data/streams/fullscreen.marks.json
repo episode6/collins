@@ -1,0 +1,42 @@
+[
+ {
+  "name": "startup",
+  "offset": 1791
+ },
+ {
+  "name": "typed",
+  "offset": 2867
+ },
+ {
+  "name": "typed-wrapped",
+  "offset": 14428
+ },
+ {
+  "name": "cjk-emoji",
+  "offset": 27132
+ },
+ {
+  "name": "cleared",
+  "offset": 28701
+ },
+ {
+  "name": "streamed-turn",
+  "offset": 34121
+ },
+ {
+  "name": "permission",
+  "offset": 42374
+ },
+ {
+  "name": "permission-diff",
+  "offset": 51043
+ },
+ {
+  "name": "tool-diff",
+  "offset": 55753
+ },
+ {
+  "name": "exit",
+  "offset": 56280
+ }
+]

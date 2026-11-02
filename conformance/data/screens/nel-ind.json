@@ -1,0 +1,12 @@
+{
+ "scenario": "nel-ind",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YRtFYhtEYxtNZA==",
+ "capture": "a\nb d\n c",
+ "cursor": [
+  3,
+  1
+ ],
+ "alternate": false
+}

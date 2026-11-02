@@ -637,10 +637,22 @@ ruff check collins/ tests/                  # CI pins ruff 0.16.4; rules E F W I
 bash .agents/capture-screenshots/scripts/with-headless-display.sh \
     python3 scripts/run_e2e.py [--only NAME] [--shard N/5] # e2e checks behind a headless compositor
 python3 scripts/verify_versions.py          # every version copy agrees
+python3 scripts/run_conformance.py          # the conformance kit (conformance/) against a scratch service of this checkout
 python3 -m collins.service.main --app-id X  # a service by hand (--check, --print-socket too)
 ./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug)
 ./scripts/install-service.sh                # pipx-install this checkout's service; stops every running service first
 ```
+
+**A change to a family's wire behaviour updates, in the same PR, the message
+table (and so the reference), the affected MIT page (`docs/api/`) and the
+conformance kit's checks or data (`conformance/`); the gates are
+`tests/test_api_reference.py`, `tests/test_conformance_data.py`, the
+`conformance` CI job (the kit against the service, `scripts/run_conformance.py`),
+`tests/test_conformance_data.py` (the kit's data against the goldens and the page) and the two VTE checks (`check_termstream_answers.py`,
+`check_conformance_data.py`).** The kit is MIT and clean-room: nothing under
+`conformance/` reads or paraphrases `collins/service/`, `providers.py`,
+`activity.py` or `sessions.py`; it tests what the pages say, and a check the
+pages cannot support is a finding about the pages.
 
 GTK apps are single-instance per application id: launching with an id that is
 already running only activates the existing window. Never test against the
@@ -701,7 +713,7 @@ spec's `%changelog`.
 | Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `service/notifications` `remotenotify` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
 | Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `modelcatalog` `usage` `usagepanel` `tokenrefresh` `tokensettings` `service/tokenuse` `service/jobs` `jobclient` `welcome` `welcomegate` `clisetup` `remotecli` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |
 | Preferences dialog, keybindings, themes, translations | `prefs` `prefslayout` `prefssearch` `keybindings` `keymap` `keybindingsdialog` `themes` `i18n` `po/` | `collins-preferences-keybindings-i18n` |
-| Testing: unit suite rules, e2e checks, shims, headless probes, the families walker and the `caps_drop` stub | `tests/` `scripts/check_*.py` `scripts/run_e2e.py` `scripts/stub_server.py` | `collins-testing` |
+| Testing: unit suite rules, e2e checks, shims, headless probes, the families walker and the `caps_drop` stub, the conformance kit (MIT, `conformance/`: the client, its fake claude, its data, the CI job that runs it against the service) | `tests/` `scripts/check_*.py` `scripts/run_e2e.py` `scripts/stub_server.py` `conformance/` `scripts/run_conformance.py` `scripts/check_conformance_data.py` | `collins-testing` |
 | Packaging and CI: wheel, deb, rpm, PPA, COPR, AUR, the CI image, versions | `pyproject.toml` `debian/` `packaging/` `.github/` `scripts/` | `collins-packaging-and-ci` |
 | GTK / libadwaita / VTE / CSS traps that are not feature-specific | — | `collins-gtk-sharp-edges` |
 

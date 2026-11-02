@@ -1,0 +1,12 @@
+{
+ "scenario": "scroll-past-screen",
+ "cols": 120,
+ "rows": 40,
+ "stream": "bjENCm4yDQpuMw0KbjQNCm41DQpuNg0KbjcNCm44DQpuOQ0KbjEwDQpuMTENCm4xMg0KbjEzDQpuMTQNCm4xNQ0KbjE2DQpuMTcNCm4xOA0KbjE5DQpuMjANCm4yMQ0KbjIyDQpuMjMNCm4yNA0KbjI1DQpuMjYNCm4yNw0KbjI4DQpuMjkNCm4zMA0KbjMxDQpuMzINCm4zMw0KbjM0DQpuMzUNCm4zNg0KbjM3DQpuMzgNCm4zOQ0KbjQwDQpuNDENCm40Mg0KbjQzDQpuNDQNCm40NQ0KbjQ2DQpuNDcNCm40OA0KbjQ5DQpuNTANCm41MQ0KbjUyDQpuNTMNCm41NA0KbjU1DQpuNTYNCm41Nw0KbjU4DQpuNTkNCm42MA0KbjYxDQpuNjINCm42Mw0KbjY0DQpuNjUNCm42Ng0KbjY3DQpuNjgNCm42OQ0KbjcwDQpuNzENCm43Mg0KbjczDQpuNzQNCm43NQ0Kbjc2DQpuNzcNCm43OA0Kbjc5DQpuODANCm44MQ0KbjgyDQpuODMNCm44NA0Kbjg1DQpuODYNCm44Nw0Kbjg4DQpuODkNCm45MA0KbjkxDQpuOTINCm45Mw0Kbjk0DQp0YWls",
+ "capture": "n1\nn2\nn3\nn4\nn5\nn6\nn7\nn8\nn9\nn10\nn11\nn12\nn13\nn14\nn15\nn16\nn17\nn18\nn19\nn20\nn21\nn22\nn23\nn24\nn25\nn26\nn27\nn28\nn29\nn30\nn31\nn32\nn33\nn34\nn35\nn36\nn37\nn38\nn39\nn40\nn41\nn42\nn43\nn44\nn45\nn46\nn47\nn48\nn49\nn50\nn51\nn52\nn53\nn54\nn55\nn56\nn57\nn58\nn59\nn60\nn61\nn62\nn63\nn64\nn65\nn66\nn67\nn68\nn69\nn70\nn71\nn72\nn73\nn74\nn75\nn76\nn77\nn78\nn79\nn80\nn81\nn82\nn83\nn84\nn85\nn86\nn87\nn88\nn89\nn90\nn91\nn92\nn93\nn94\ntail",
+ "cursor": [
+  4,
+  39
+ ],
+ "alternate": false
+}

@@ -1,0 +1,12 @@
+{
+ "scenario": "decorations",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s1ODoyOjoyMDA6MTAwOjUwbRtbNG1jb2xvdXJlZBtbMG0gG1s1ODo1OjE5Njs0OjNtY3ViZRtbMG0gG1s1M21vdmVyG1swbSAbWzVtYmxpbmsbWzBtIBtbOG1oaWRkZW4bWzBtIBtbNDs1ODsyOzE3OzM0OzUxbXNlbWkbWzBtIBtbNTg6Mjo6MToyOjNtbm8gbGluZRtbMG0=",
+ "capture": "coloured cube over blink hidden semi no line",
+ "cursor": [
+  44,
+  0
+ ],
+ "alternate": false
+}

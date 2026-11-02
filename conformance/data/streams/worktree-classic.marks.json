@@ -1,0 +1,14 @@
+[
+ {
+  "name": "startup",
+  "offset": 2340
+ },
+ {
+  "name": "worktree-exit",
+  "offset": 3679
+ },
+ {
+  "name": "after-dialog",
+  "offset": 4010
+ }
+]

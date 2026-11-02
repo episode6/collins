@@ -1,0 +1,6 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+# The source distribution carries the conformance kit (conformance/, MIT: a
+# server author's tool, see its README); the wheel does not (pyproject.toml's
+# packages.find takes collins* alone). scripts/verify_wheel_data.py checks.
+graft conformance
+global-exclude __pycache__ *.py[cod]

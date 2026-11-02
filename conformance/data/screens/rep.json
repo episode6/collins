@@ -1,0 +1,12 @@
+{
+ "scenario": "rep",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YWIbWzVifBtbMjsxSOaXpRtbMmJ8",
+ "capture": "abbbbbb|\n日日日|",
+ "cursor": [
+  7,
+  1
+ ],
+ "alternate": false
+}

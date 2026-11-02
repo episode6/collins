@@ -20,9 +20,9 @@ This specification, the [message reference](./messages), [the terminal
 contract](./terminal), the [session facts](./sessions) page, the script that
 generates the reference, the Python module that defines the protocol
 (`collins/api/protocol.py`), the one that connects over ssh
-(`collins/sshremote.py`) and the terminal stream fixtures the contract is
-measured against are licensed [MIT](#license). Collins itself, the
-service included, stays GPL-3.0-or-later. A program that talks to
+(`collins/sshremote.py`), the terminal stream fixtures the contract is
+measured against and the conformance kit are licensed [MIT](#license).
+Collins itself, the service included, stays GPL-3.0-or-later. A program that talks to
 `collins-service` only through this API is, in the view of Collins'
 authors, an independent work: see [Interoperability](#interoperability).
 :::
@@ -33,10 +33,9 @@ release. Until it has, a message's fields can change without the protocol
 number moving. Read the version and the capabilities off the `hello` reply
 and treat anything unexpected as absent, as the Collins client does. A second
 implementation of the service changes nothing about this: nothing is stable
-yet, and both projects are still testing. These pages, the reference and,
-once it is published, the conformance kit are kept current with the service
-by the CI gates, so what they say is what `main` does on the day (the
-[session facts](./sessions) page, until the kit, by review alone).
+yet, and both projects are still testing. These pages, the reference and the
+conformance kit are kept current with the service by the CI gates, so what
+they say is what `main` does on the day.
 :::
 
 ## Finding the service
@@ -173,7 +172,7 @@ as `failed`: a newer service may add one.
 
 | Code | Meaning |
 | --- | --- |
-| `unknown` | A message type this peer does not know. |
+| `unknown` | A message type this peer does not know, or a named operation a known type selects by a field (a `git.run` builder) that it does not know. |
 | `invalid` | The type is known and the message is not a valid one of it: a missing or ill-typed field, a bound exceeded, a request without an id. |
 | `direction` | A known type from the peer that may not send it. |
 | `protocol` | The hello's protocol window does not meet this peer's. |
@@ -262,8 +261,13 @@ which is the right answer for a client reaching the socket over an
 [ssh forward](#connecting-over-ssh) from another machine. Bytes that do not
 match are refused `refused`, and that client is remote too: it carries on
 without the extras. Nothing a remote client can do depends on
-the proof, except the service's confinement of a few reads to directories
-it knows: see `fs.stat`, `fs.paste` and `fs.names` in the reference.
+the proof, except the service's confinement of paths: every path an `fs.*`
+request of a client that has not proved local names is held to the roots
+the service knows (its sessions' directories), and one outside them is
+refused `refused` with "The path is outside every root the service knows",
+except for `fs.dirs` and `fs.newdir`, the path picker's, which browse the
+whole filesystem. The reference marks each. `fs.stat` answers whether a
+path is inside a root for any client.
 
 ## A client's life
 
@@ -273,11 +277,12 @@ The sequence the Collins window follows, which any client can:
 2. **`local`**, when the proof is readable.
 3. **`subscribe`**. The service sends its snapshot as ordinary events on
    the same connection, *before* the reply: an `item` per session with a
-   sidebar row, a `pty` per live pty, a `pr` per session with PR records,
-   a `state.set` per shared state key (a large map entry by entry), a
-   `notify` per notification row and a `diff.notes` per session with marks
-   on its diff, then `rows` (the sidebar's projection). The reply, carrying
-   the counts of `item` and `pty` events sent, marks the snapshot complete.
+   sidebar row, a `pty` per live pty, a `session` per live agent pty, a
+   `pr` per session with PR records, a `state.set` per shared state key (a
+   large map entry by entry), a `notify` per notification row, a
+   `diff.notes` per session with marks on its diff, and `rows` (the
+   sidebar's projection), in no promised order. The reply, carrying the
+   counts of `item` and `pty` events sent, marks the snapshot complete.
    From then on every change arrives as the same events: an `item` carries
    only the fields that moved, a `state.set` one key or entry.
 4. **`attach {pty, cols, rows}`** to show a pty. The reply names the grid
@@ -717,9 +722,24 @@ and what every server must guarantee of each fact, is the
 [session facts](./sessions) page, with an appendix of the Claude Code
 behaviour the reading rides on.
 
-**What is still to be written.** These pages specify the messages, the
-terminal and the session facts, and one thing a server needs is not published
-yet. A conformance kit will test a server against these pages.
+**The conformance kit.** A server is tested against these pages with the
+conformance kit, `conformance/` in the Collins repository
+([its README](https://github.com/episode6/collins/tree/main/conformance)): a
+client, MIT like these pages and standard-library Python, that says hello,
+reads the families you claim, and runs the checks of every level and claimed
+family, from the wire to the session facts, against a fake Claude Code it
+points your server at. Run it on the server's machine:
+
+```bash
+python3 -m conformance <socket path>      # every level and every claimed family
+python3 -m conformance <socket path> --level 1 --skip-family prs
+```
+
+Each check passes, fails with what it saw against what these pages say, or is
+skipped with the reason, and the exit status is 1 when any failed. Collins runs
+it against its own service in CI, so a failure against `collins-service` on
+`main` is a finding about the service or about these pages. The kit's README
+says what each level proves and does not.
 
 **Where this lives.** This documentation is kept in the Collins repository for
 now, and may move to a repository both projects share once it settles. Every
@@ -751,11 +771,12 @@ This specification (`docs/api/index.md`), the message reference
 the session facts page and its appendix on Claude Code
 (`docs/api/sessions.md`), the reference's generator
 (`scripts/gen_api_reference.py`), the protocol module
-(`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`)
-and every file of the terminal stream fixtures (`tests/fixtures/streams/`:
+(`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`),
+every file of the terminal stream fixtures (`tests/fixtures/streams/`:
 the synthetic scenarios and their golden, the recorded streams of a Claude
 Code session with their marks and goldens, measurements the terminal
-contract rests on) are:
+contract rests on) and every file of the conformance kit (`conformance/`)
+are:
 
 ```
 MIT License

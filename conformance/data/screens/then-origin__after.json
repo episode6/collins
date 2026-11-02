@@ -1,0 +1,12 @@
+{
+ "scenario": "then-origin@after",
+ "cols": 120,
+ "rows": 40,
+ "stream": "G1s1OzEwchtbPzZoG1sxOzFIdG9wG1syOzFIbmV4dA==",
+ "capture": "\n\n\n\ntop\nnext",
+ "cursor": [
+  4,
+  5
+ ],
+ "alternate": false
+}

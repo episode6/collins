@@ -1,0 +1,12 @@
+{
+ "scenario": "tabs",
+ "cols": 120,
+ "rows": 40,
+ "stream": "YQliCQljDQobWzVDeAl5DQp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6CXEJcg==",
+ "capture": "a\tb\t\tc\n     x\ty\nzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\tqr",
+ "cursor": [
+  1,
+  3
+ ],
+ "alternate": false
+}
