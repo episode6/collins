@@ -139,6 +139,9 @@ downloads of each version, see the
   allows a close with the mode alone. A bare `exit` now types the agent's
   own exit keys and a bare `background` its handoff command; `text` is
   still typed instead when a client sends it.
+- **The `/bg` handoff types its command and its Return a beat apart**, as
+  a prompt is typed, so the handoff submits whatever length the CLI reads
+  as a paste; the Ctrl+C pair of a graceful exit still goes in one write.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's

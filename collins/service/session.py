@@ -2690,7 +2690,11 @@ class Session:
         Raw keystrokes, exactly as the provider spells them: a control byte
         for Claude's Ctrl+C Ctrl+C, and for a typed command like /bg the
         Enter that submits it — carriage return in a raw-mode TUI, not
-        newline. A plain exit gets a short budget — the user already said to
+        newline. A typed command goes as `post_prompt` sends a prompt, the
+        text first and its Return a beat later, so the handoff submits
+        whatever length the CLI reads as a paste (§5 ruling 57); the Ctrl+C
+        pair stays one write, as `graceful_exit` requires. A plain exit
+        gets a short budget — the user already said to
         end the session, so a CLI that hasn't gone by then gets terminated
         rather than holding the tab (or a quit) hostage. A /bg handoff keeps
         a much longer one: forking the background agent takes real time, and
@@ -2702,7 +2706,10 @@ class Session:
         self._close_ticks = 0
         self._close_backgrounding = backgrounding
         self._force_close = force_close
-        self.write_text(exit_text)
+        if exit_text.endswith("\r") and exit_text[:-1]:
+            self.post_prompt(exit_text[:-1])
+        else:
+            self.write_text(exit_text)
         self.scheduler.timeout_add(CLOSE_POLL_MS, self._poll_close)
 
     def end_close(self) -> None:

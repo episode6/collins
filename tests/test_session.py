@@ -1429,6 +1429,22 @@ def test_a_close_exits_and_nudges_on_budget(closing):
     assert forced == [True] and clock.pending() == pending
 
 
+def test_a_typed_close_command_submits_a_beat_later_and_the_pair_goes_whole(closing):
+    """§5 ruling 57: a /bg and its Return in one chunk could read as a
+    paste past the CLI's threshold, so the text goes first and the Return
+    a beat later, as a prompt does; the Ctrl+C pair stays one write."""
+    session, term, host, clock, forced = closing
+    session.begin_close("/bg\r", True, lambda: forced.append(True))
+    assert term.writes == ["/bg"]
+    clock.advance(session_mod.PROMPT_SUBMIT_MS)
+    assert term.writes == ["/bg", "\r"]
+    session.end_close()
+    term.writes.clear()
+    session.begin_close("\x03\x03", False, lambda: forced.append(True))
+    clock.advance(session_mod.PROMPT_SUBMIT_MS)
+    assert term.writes == ["\x03\x03"]
+
+
 def test_a_handoff_gets_the_longer_budget(closing):
     session, term, host, clock, forced = closing
     session.begin_close("/bg\r", True, lambda: forced.append(True))
