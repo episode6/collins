@@ -245,20 +245,28 @@ def check_shells(run: Run, client: apiclient.Client, notes: list[str]) -> None:
     attach = client.attach(pty, COLS, ROWS)
     if not attach.ok:
         raise CheckFailed(f"attach: {attach.describe()}")
-    if not client.wait_until(lambda: client.output_len(pty) > 0, 15.0):
-        raise CheckFailed("the shell wrote nothing within 15 s")
-    client.send_input(pty, b"echo kit-shell-marker\r")
-    if client.wait_output(pty, b"kit-shell-marker", 10.0) < 0:
-        raise CheckFailed("the shell did not echo what was typed")
-    client.wait_until(
-        lambda: "kit-shell-marker" in (client.call("pty.capture", pty=pty).get("text") or ""), 5.0
-    )
+    # The shell's prompt, drawn and quiet, before anything is typed: a line
+    # typed earlier sits in the terminal's cooked-mode buffer, echoed on the
+    # screen before the shell has read it, and a `clear` sent then runs
+    # before the command does. The marker is computed by the shell, so what
+    # the kit waits for is the command's output and never the echo of what
+    # it typed.
+    if not client.wait_quiet(pty, 0.5, 15.0):
+        raise CheckFailed("the shell did not draw its prompt and go quiet within 15 s")
+    client.send_input(pty, b"echo kit-shell-$((40+2))-marker\r")
+    if client.wait_output(pty, b"kit-shell-42-marker", 10.0) < 0:
+        raise CheckFailed("the shell did not run what was typed")
+    if not client.wait_until(
+        lambda: "kit-shell-42-marker" in (client.call("pty.capture", pty=pty).get("text") or ""), 5.0
+    ):
+        raise CheckFailed("the command's output is not in pty.capture")
+    client.wait_quiet(pty, 0.3, 5.0)
     start = client.output_len(pty)
     reply = client.call("clear", pty=pty)
     if not reply.ok:
         raise CheckFailed(f"clear: {reply.describe()}")
     if not client.wait_until(
-        lambda: "kit-shell-marker" not in (client.call("pty.capture", pty=pty).get("text") or ""), 5.0
+        lambda: "kit-shell-42-marker" not in (client.call("pty.capture", pty=pty).get("text") or ""), 5.0
     ):
         capture = client.call("pty.capture", pty=pty).get("text") or ""
         received = bytes(client.output[pty])[start:]

@@ -92,10 +92,9 @@ class Terminal:
             raise CheckFailed("the first client to attach is not the active one")
         self.probe = Probe(self.client, self.pty)
         if self.kind == "shell":
-            # The shell's prompt, then the probe typed into it.
-            if not self.client.wait_until(lambda: self.client.output_len(self.pty) > 0, SPAWN_WAIT_S):
-                raise CheckFailed("the shell wrote nothing within 20 s")
-            time.sleep(0.3)
+            # The shell's prompt, drawn and quiet, then the probe typed into it.
+            if not self.client.wait_quiet(self.pty, 0.5, SPAWN_WAIT_S):
+                raise CheckFailed("the shell did not draw its prompt and go quiet within 20 s")
             command = f"python3 {shell_quote(fake)} --probe\r"
             self.client.send_input(self.pty, command.encode())
         else:
@@ -400,10 +399,23 @@ def check_attach_redraw(t: Terminal, notes: list[str]) -> None:
     second.close()
 
 
+def grid_of(t: Terminal, client: apiclient.Client) -> tuple[int, int] | None:
+    """The pty's grid as `pty.info` reports it, read without typing: the
+    probe types through the group's client, and a client that types takes
+    the active role (terminal.md), so while another client holds the role
+    the grid is read this way. None when the reply carries no grid."""
+    reply = client.call("pty.info", pty=t.pty)
+    if not reply.ok or reply.get("cols") is None or reply.get("rows") is None:
+        return None
+    return reply["cols"], reply["rows"]
+
+
 def check_pty_events_and_resize(t: Terminal, notes: list[str]) -> None:
     """The active client's resize moves the grid and every attached client
     hears; another client's resize is remembered, not applied; `focus`
-    takes the role; a detach passes it back."""
+    takes the role; a detach passes it back. While the other client holds
+    the role the grid is read with `pty.info`, since a probe query types
+    through the first client and typing takes the role."""
     run = t.run
     first = t.client
     second = run.client("conformance-watcher")
@@ -443,11 +455,15 @@ def check_pty_events_and_resize(t: Terminal, notes: list[str]) -> None:
     if lost.get("sized_for") != second.device:
         raise CheckFailed(f"the `pty` event names sized_for {lost.get('sized_for')!r}, not {second.device!r}")
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and t.probe.size() != (90, 30):
+    grid_now = grid_of(t, second)
+    while time.monotonic() < deadline and grid_now not in (None, (90, 30)):
         time.sleep(0.2)
-    if t.probe.size() != (90, 30):
+        grid_now = grid_of(t, second)
+    if grid_now is None:
+        notes.append("pty.info carries no grid: whether the remembered grid was applied is not checked")
+    elif grid_now != (90, 30):
         raise CheckFailed(
-            f"the new active client's remembered grid 90x30 was not applied: the pty is {t.probe.size()}"
+            f"the new active client's remembered grid 90x30 was not applied: the pty is {grid_now}"
         )
     # On the active client's detach the role passes back, and every attached
     # client hears of a role change through a `pty` event.

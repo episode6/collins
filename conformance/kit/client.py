@@ -418,6 +418,24 @@ class Client:
         self.wait_until(check, timeout)
         return found[0]
 
+    def wait_quiet(self, pty: int, quiet_s: float, timeout: float) -> bool:
+        """Pump until the pty has written something and then nothing for
+        *quiet_s*: a just-spawned shell has drawn its prompt and taken the
+        terminal, so a line typed now is read by the shell and not left in
+        the terminal's cooked-mode buffer, where its echo would show on the
+        screen before the shell has seen it."""
+        deadline = time.monotonic() + timeout
+        last_len = -1
+        last_change = time.monotonic()
+        while time.monotonic() < deadline:
+            length = self.output_len(pty)
+            if length != last_len:
+                last_len, last_change = length, time.monotonic()
+            elif length > 0 and time.monotonic() - last_change >= quiet_s:
+                return True
+            self.primary.pump(0.05)
+        return False
+
     def output_text(self, pty: int) -> str:
         return bytes(self.output.get(pty, b"")).decode("utf-8", "replace")
 
