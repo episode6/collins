@@ -157,8 +157,12 @@ PROGRESS_FINISH_GRACE_S = 3.0
 # (a child sighted again, output landing just as the quiet's second ran
 # out; 37 to 883 ms measured), which the page states as the property and a
 # client smooths for itself if it wants to, nothing one-shot riding a rise
-# (§5 ruling 43). The cost is this long on every fall and every
-# notification, inside the page's 10 s.
+# (§5 ruling 43). On the turn-end road (an armed finish's grace running
+# out) output and a process sighting do not take the agent's word back,
+# only a `resume` does, so there output can still be arriving as a fall lands
+# and the next rise can follow at once (56 ms measured; §5 ruling 46). The cost
+# is this long on every fall and every notification, inside the page's
+# 10 s.
 FALL_HOLD_S = 1.0
 
 # How long a finish edge the transcript calls a repaint is held before it is

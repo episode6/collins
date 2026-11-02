@@ -26,11 +26,19 @@ measured the service against the page: every number this page gives for
 Collins' own reading that is not the spec's comes from them and is
 labelled as Collins'. The page's text and its first corrections were
 written before its author had read any module of the service or of the
-data layer. The author then read six modules of the service (tracking,
-activity, core, session, hosting, finish) and the process-tree helper to
-make the four service fixes, and the corrections committed after that
-were written with those modules read. Not run: the Collins service. The
-text was
+data layer. The author then read, to make the four service fixes: the
+service's tracking module (its wiring, feeds and verdicts), the activity
+module (the tracker class and its constants), the core's CLI-left edge,
+the session module's process and box readings (not its resolver or its
+close flows), the hosting module's facts, snapshot and refreshes, the
+finish judge, and the process-tree helper's agent walk. The hunks
+committed after that were written with those read: the takes_prompt
+table and required properties, the busy properties and the paragraph
+after the signs, the finished properties' unread sentence and the
+unbound case, the process-facts paragraphs, the resolver's sentence on a
+worktree's file, the checklist rows, the form of a switch's output in
+the appendix, the wrapper sentence of the agents entry, and this record.
+Not run: the Collins service. The text was
 compared by runs of five or more words against the spec's reading of the
 service, the GPL modules' docstrings and comments, the author's memory
 notes and the repository's skills, and the runs that were prose were
@@ -209,16 +217,21 @@ it beyond that; the edge that matters for notifications is `finished`.
 - `false` within 10 seconds of the agent's process leaving the pty
   (`running_command` falling), whatever its last progress report said: a
   CLI killed mid-turn, or one that exited on its own, ends busy.
-- no fall from a quiet under a second: a fall is reported only after
-  the reading has stood false for one second, and a sign of work inside
-  that second cancels the fall unreported, so every fall a client hears
-  of stood a second of quiet and no one-shot (`finished`, `unread`, a
-  notification) ever follows a shorter one. A rise is never held, so a
-  reported fall may be followed by a rise sooner than a second (a process
-  the agent left running is sighted again; output arrives as the quiet's
-  second runs out), and a client that wants an indicator free of that
-  flicker holds rises itself, which costs it nothing: a rise carries no
-  one-shot.
+- a fall of `busy` is one of two, and the server says which road it took
+  only by its timing. On the quiet road a fall is reported only after no
+  sign of work has stood for one second, a sign inside that second
+  cancelling the unreported fall, so no fall and no one-shot (`finished`,
+  `unread`, a notification) ever follows a shorter quiet. On the turn-end
+  road the agent's own report that its turn ended (a progress clear) ends
+  `busy` on the agent's word once it has stood the server's grace
+  (Collins: 4 s from the clear, the 3 s grace plus the hold), and neither
+  output nor a sighting of a process the agent left running takes that
+  word back, only a new progress report does; so on this road a fall may
+  land with output still flowing and a rise may follow it at once
+  (56 ms, measured on the Collins service against a stand-in CLI). A rise
+  is never held on either road, so a client that wants a flicker-free
+  indicator holds rises itself, which costs it nothing since a rise
+  carries no one-shot.
 - sent on the `session` event for the pty, and mirrored as the `item`
   field `busy` on every row that stands for the session.
 
@@ -277,12 +290,14 @@ side:
 Two things hold any such combination together. A sign that lapses should
 not end busy while another still stands, or the readings contradict each
 other; Collins keeps one deadline, set by the latest sign, so a lapsed
-clear can end the signs' hold while a live child still stands. The hold
-on a fall keeps such a quiet from counting as a finish, and the rise that
-follows the next sighting is not held, so a client of Collins can see
-`busy` dip after a turn that left a child running (dips of 37 to 883 ms
-were measured on the service against a stand-in CLI under the hold;
-before it, falls of 22 to 300 ms, each then a false finish). And a session
+clear can end the signs' hold while a live child still stands. On the
+quiet road the hold keeps such a quiet from counting as a finish; on the
+turn-end road the clear's grace, once stood, is not taken back by output
+or by a sighting, only by a new report; and the rise that follows a
+sighting or output is not held on either road, so a client of Collins
+can see `busy` dip after a turn that left a child running (dips of 37 to
+883 ms were measured on the service against a stand-in CLI under the
+hold; before it, falls of 22 to 300 ms, each then a false finish). And a session
 going busy again withdraws a finish not yet counted, since the pause was
 a tool call's.
 
@@ -597,7 +612,7 @@ The required properties above, gathered for a test to tick off:
 | Fact | Property |
 | --- | --- |
 | `takes_prompt` | false unless the agent runs, by the best reading the server has; `entered` null and `foreign_paste` false then; never true while the box holds text; read from the server's screen model; re-read when `agent_running` flips |
-| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end and of the CLI leaving the pty; no fall from a quiet under a second, a rise never held |
+| `busy` | true within 3 s of a prompt; false within 10 s of a turn's end and of the CLI leaving the pty; a fall by the quiet road only after a second with no sign of work, by the turn-end road once the agent's clear has stood the grace; a rise never held |
 | `finished` | once per confirmed turn of a bound session (a fall of `busy` before the bind), after `busy` fell, with `item.unread` on every row bar a busy chain, a backgrounding row and status `background`; `notify {kind: "finished"}` at Level 2 |
 | `model`, `effort`, `permission_mode` | null until the transcript says; a `switch` reflected within one turn |
 | every fact | the snapshot and the events form a single series: the snapshot carries what the events last carried |
