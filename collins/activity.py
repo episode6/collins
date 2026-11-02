@@ -142,16 +142,23 @@ PROGRESS_QUIET_S = IDLE_S
 PROGRESS_FINISH_GRACE_S = 3.0
 
 # How long a fall of busy stands before it is reported. The session-facts
-# page (docs/api/sessions.md, the spec's §3.4) requires `busy` never to flap
-# more than once a second, and the service fell for 22 to 300 ms between a
+# page (docs/api/sessions.md, the spec's §3.4) requires that a quiet shorter
+# than a second never read as a fall: the service fell for 22 to 300 ms between a
 # turn's end and the next sign (a child left alive marking again, output
 # every two seconds), each fall a false finish, a flagged row and a
 # notification (§5 ruling 37). So the sweep reports a fall only once it has
 # stood this long, on both roads down (the idle window lapsing, an armed
 # finish's grace running out): the key reads busy throughout, a mark inside
 # the hold cancels it with nothing reported (an armed finish needs its
-# `resume` first, as inside the grace), and a rise is never held. The cost is
-# this long on every fall and every notification, inside the page's 10 s.
+# `resume` first, as inside the grace), and so nothing one-shot (a finish,
+# an unread flag, a notification) ever rides a shorter quiet. What the hold
+# does not promise is a pole that never flickers: rises go out at once, so
+# a reported fall and the next rise can sit closer together than a second
+# (a child sighted again, output landing just as the quiet's second ran
+# out; 37 to 883 ms measured), which the page states as the property and a
+# client smooths for itself if it wants to, nothing one-shot riding a rise
+# (§5 ruling 43). The cost is this long on every fall and every
+# notification, inside the page's 10 s.
 FALL_HOLD_S = 1.0
 
 # How long a finish edge the transcript calls a repaint is held before it is
