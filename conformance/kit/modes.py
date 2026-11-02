@@ -4,147 +4,182 @@
 # Part of the conformance kit for the Collins service API (conformance/),
 # licensed MIT like the specification it tests (see conformance/LICENSE),
 # unlike the rest of Collins. Standard library only.
-"""What an attach reply's `modes` list should hold after a stream.
+"""The kit's reference for an attach reply's `modes`, from docs/api/terminal.md.
 
-docs/api/terminal.md: `modes` is the set of modes the redraw moves off a
-fresh terminal's defaults, each as the bytes between `CSI` and the end of
-its sequence, less `?3`, `?25`, `?1048` and the alternate-screen modes,
-which the redraw handles itself; the kitty keyboard flags are a stack
-whose base and pushed entries the redraw asserts in order. This module
-follows the mode sets and resets, the kitty stack and modifyOtherKeys
-through a byte stream, and names the expected list, with the defaults
-taken from the DECRQM table the kit ships (a mode whose default state is
-"set" is off its default when reset, and the other way round).
+The page says what the list holds: the modes the redraw moves off a fresh
+terminal's defaults, on or off, each written as the bytes between `CSI` and
+the end of its sequence (`"?1004h"`, `"7l"`, `">5u"`); `?3`, `?25`, `?1048`
+and the alternate-screen modes left out, since the redraw handles them
+itself; the kitty keyboard flags as a stack whose base and pushed entries
+the redraw asserts in order; `RIS` clearing everything; `DECSTR` resetting
+the modes and forgetting the region. This module reads a byte stream for
+exactly that and answers what the list should be, so a check can hold a
+server's reply to it. It is written from the page and the page's own
+examples; a fresh terminal's defaults come from the DECRQM table the kit
+ships (`data/decrqm-modes.json`), where a state of 1 or 3 is "set on a
+fresh terminal" and 2 or 4 "reset".
 
-It is a reading of the page, not of any terminal's code: a small CSI
-tokenizer, enough for the published scenarios.
+The reading is deliberately small: the handful of control functions that
+change what `modes` says, found by one regular expression over the stream,
+dispatched by their final byte. Everything else in the stream is passed
+over.
 """
 
 from __future__ import annotations
 
 import re
 
-CSI_RE = re.compile(rb"\x1b\[([?>=<!]?)([0-9;:]*)([\x20-\x2f]*)([\x40-\x7e])")
-HANDLED_ELSEWHERE = {"?3", "?25", "?1048", "?47", "?1047", "?1049"}
+# One regular expression finds what this module reads: a control sequence
+# (CSI, with an optional private marker, parameters, intermediates and the
+# final byte) or the two-byte RIS.
+CONTROL = re.compile(
+    rb"\x1b(?:c|\[(?P<marker>[?>=<!]?)(?P<params>[0-9;:]*)(?P<inter>[\x20-\x2f]*)(?P<final>[\x40-\x7e]))"
+)
+
+# The modes the redraw handles itself and the list never names (terminal.md,
+# "An attach's redraw").
+LEFT_OUT = frozenset({"?3", "?25", "?1048", "?47", "?1047", "?1049"})
+
+KITTY_STACK_MAX = 32  # entries Collins keeps, per the page's informative half
 
 
-class ModeTracker:
-    def __init__(self, decrqm: dict) -> None:
-        self.private_defaults = {int(k): v for k, v in decrqm.get("private", {}).items()}
-        self.ansi_defaults = {int(k): v for k, v in decrqm.get("ansi", {}).items()}
-        self.reset()
+def fresh_terminal(decrqm_table: dict) -> dict[str, bool]:
+    """Which modes are on and off on a fresh terminal, keyed as the page
+    writes a mode (`"?1004"`, `"4"`), from VTE's DECRQM answers: 1 and 3
+    are set, 2 and 4 reset; a mode the table lacks is unknown and absent."""
+    picture: dict[str, bool] = {}
+    for section, prefix in (("private", "?"), ("ansi", "")):
+        for number, state in decrqm_table.get(section, {}).items():
+            picture[f"{prefix}{int(number)}"] = state in (1, 3)
+    return picture
 
-    def reset(self) -> None:
-        self.private: dict[int, bool] = {}
-        self.ansi: dict[int, bool] = {}
-        self.kitty_base = 0
-        self.kitty_stack: list[int] = []
-        self.modify_other_keys = 0
-        self.region_top = 1  # the scroll region's top row (DECSTBM), for a cursor report in origin mode
+
+def _numbers(params: bytes) -> list[int]:
+    return [int(part) for part in re.split(rb"[;:]", params) if part.isdigit()]
+
+
+class ExpectedModes:
+    """Feed it the bytes a pty saw; ask it what `modes` must list."""
+
+    def __init__(self, decrqm_table: dict) -> None:
+        self._fresh = fresh_terminal(decrqm_table)
+        self.asserted: dict[str, bool] = {}  # every mode the stream set or reset, as the page keys it
+        self.kitty: list[int] = [0]  # [0] the flags in force with nothing pushed; the rest, pushed entries
+        self.other_keys = 0  # the modifyOtherKeys level
+        self.scroll_top = 1  # DECSTBM's top row, which a cursor report in origin mode counts from
+
+    # -- reading ------------------------------------------------------------------
 
     def feed(self, data: bytes) -> None:
-        position = 0
-        while True:
-            esc = data.find(b"\x1b", position)
-            if esc < 0:
-                return
-            if data[esc : esc + 2] == b"\x1bc":
-                self.reset()
-                position = esc + 2
+        for match in CONTROL.finditer(data):
+            if match.group("marker") is None:  # RIS
+                self._reset_everything()
                 continue
-            match = CSI_RE.match(data, esc)
-            if match is None:
-                position = esc + 1
-                continue
-            prefix, params, intermediate, final = (
-                match.group(1).decode(),
-                match.group(2).decode(),
-                match.group(3).decode(),
-                match.group(4).decode(),
-            )
-            position = match.end()
-            if (intermediate == "!" or prefix == "!") and final == "p":  # DECSTR: modes to their defaults
-                self.private.clear()
-                self.ansi.clear()
-                self.region_top = 1
-                continue
-            if intermediate:
-                continue
-            if final == "r" and prefix == "":
-                numbers = [int(x) for x in params.split(";") if x.isdigit()]
-                self.region_top = numbers[0] if numbers and numbers[0] > 0 else 1
-                continue
-            if final in ("h", "l") and prefix in ("", "?"):
-                on = final == "h"
-                for part in params.split(";"):
-                    if part.isdigit():
-                        (self.private if prefix == "?" else self.ansi)[int(part)] = on
-            elif final == "u":
-                numbers = [int(x) for x in re.split(r"[;:]", params) if x.isdigit()]
-                if prefix == ">":
-                    if len(self.kitty_stack) < 32:
-                        self.kitty_stack.append(numbers[0] if numbers else 0)
-                elif prefix == "<":
-                    count = numbers[0] if numbers else 1
-                    for _ in range(count):
-                        if self.kitty_stack:
-                            self.kitty_stack.pop()
-                elif prefix == "=":
-                    flags = numbers[0] if numbers else 0
-                    mode = numbers[1] if len(numbers) > 1 else 1
-                    current = self.kitty_stack[-1] if self.kitty_stack else self.kitty_base
-                    if mode == 1:
-                        value = flags
-                    elif mode == 2:
-                        value = current | flags
-                    else:
-                        value = current & ~flags
-                    if self.kitty_stack:
-                        self.kitty_stack[-1] = value
-                    else:
-                        self.kitty_base = value
-            elif final == "m" and prefix == ">":
-                numbers = [int(x) for x in params.split(";") if x.isdigit()]
-                if numbers[:1] == [4]:
-                    self.modify_other_keys = numbers[1] if len(numbers) > 1 else 0
+            handler = self._HANDLERS.get(match.group("final"))
+            if handler is not None:
+                handler(self, match.group("marker"), match.group("params"), match.group("inter"))
 
-    def _default_on(self, defaults: dict[int, int], mode: int) -> bool | None:
-        """Whether the mode is set on a fresh terminal: True, False, or None
-        for a mode VTE does not know (its reset is nothing to assert)."""
-        state = defaults.get(mode)
-        if state is None:
-            return None
-        if state in (1, 3):
-            return True
-        return False
+    def _reset_everything(self) -> None:
+        self.asserted.clear()
+        self.kitty = [0]
+        self.other_keys = 0
+        self.scroll_top = 1
+
+    def _set_or_reset(self, marker: bytes, params: bytes, inter: bytes, on: bool) -> None:
+        if inter or marker not in (b"", b"?"):
+            return
+        prefix = marker.decode()
+        for number in _numbers(params):
+            self.asserted[f"{prefix}{number}"] = on
+
+    def _mode_h(self, marker, params, inter) -> None:
+        self._set_or_reset(marker, params, inter, True)
+
+    def _mode_l(self, marker, params, inter) -> None:
+        self._set_or_reset(marker, params, inter, False)
+
+    def _soft_reset(self, marker, params, inter) -> None:
+        # `CSI ! p` is DECSTR: the modes back to their defaults, the region forgotten.
+        if marker == b"!" or inter == b"!":
+            self.asserted.clear()
+            self.scroll_top = 1
+
+    def _region(self, marker, params, inter) -> None:
+        if marker or inter:
+            return
+        numbers = _numbers(params)
+        self.scroll_top = numbers[0] if numbers and numbers[0] > 0 else 1
+
+    def _kitty(self, marker, params, inter) -> None:
+        if inter:
+            return
+        numbers = _numbers(params)
+        if marker == b">":  # push
+            if len(self.kitty) - 1 < KITTY_STACK_MAX:
+                self.kitty.append(numbers[0] if numbers else 0)
+        elif marker == b"<":  # pop
+            for _ in range(numbers[0] if numbers else 1):
+                if len(self.kitty) > 1:
+                    self.kitty.pop()
+        elif marker == b"=":  # set the flags in force: the top entry, or the base
+            flags = numbers[0] if numbers else 0
+            how = numbers[1] if len(numbers) > 1 else 1
+            current = self.kitty[-1]
+            self.kitty[-1] = {1: flags, 2: current | flags}.get(how, current & ~flags)
+
+    def _other_keys(self, marker, params, inter) -> None:
+        if marker == b">" and not inter:
+            numbers = _numbers(params)
+            if numbers[:1] == [4]:
+                self.other_keys = numbers[1] if len(numbers) > 1 else 0
+
+    _HANDLERS = {
+        b"h": _mode_h,
+        b"l": _mode_l,
+        b"p": _soft_reset,
+        b"r": _region,
+        b"u": _kitty,
+        b"m": _other_keys,
+    }
+
+    # -- answering ----------------------------------------------------------------
+
+    def origin_mode(self) -> bool:
+        return self.asserted.get("?6", self._fresh.get("?6", False))
+
+    def picture_now(self) -> dict[str, bool]:
+        """The modes as the stream left them: a fresh terminal's, overlaid
+        with what the stream asserted."""
+        now = dict(self._fresh)
+        now.update(self.asserted)
+        return now
 
     def expected(self) -> set[str]:
-        out: set[str] = set()
-        for mode, on in self.private.items():
-            label = f"?{mode}"
-            if label in HANDLED_ELSEWHERE:
-                continue
-            default = self._default_on(self.private_defaults, mode)
-            if default is None and not on:
-                continue
-            if default is None or on != default:
-                out.add(f"{label}{'h' if on else 'l'}")
-        for mode, on in self.ansi.items():
-            default = self._default_on(self.ansi_defaults, mode)
-            if default is None and not on:
-                continue
-            if default is None or on != default:
-                out.add(f"{mode}{'h' if on else 'l'}")
-        if self.kitty_base:
-            out.add(f"={self.kitty_base}u")
-        for entry in self.kitty_stack:
-            out.add(f">{entry}u")
-        if self.modify_other_keys:
-            out.add(f">4;{self.modify_other_keys}m")
-        return out
+        """What `modes` must list: every mode whose state now differs from a
+        fresh terminal's (a mode VTE does not know counts only when set, since
+        its reset is nothing to assert), spelled as the page spells them, less
+        the ones the redraw handles itself; then the kitty flags, base first
+        and pushed entries after, and modifyOtherKeys when set."""
+        now = self.picture_now()
+        moved = {
+            label
+            for label, on in now.items()
+            if label in self.asserted
+            and label not in LEFT_OUT
+            and (on != self._fresh[label] if label in self._fresh else on)
+        }
+        listing = {f"{label}{'h' if now[label] else 'l'}" for label in moved}
+        base, *pushed = self.kitty
+        if base:
+            listing.add(f"={base}u")
+        listing.update(f">{entry}u" for entry in pushed)
+        if self.other_keys:
+            listing.add(f">4;{self.other_keys}m")
+        return listing
 
 
-def expected_modes(data: bytes, decrqm: dict) -> set[str]:
-    tracker = ModeTracker(decrqm)
-    tracker.feed(data)
-    return tracker.expected()
+def modes_after(data: bytes, decrqm_table: dict) -> set[str]:
+    """The `modes` list a server should answer an attach with after *data*."""
+    reference = ExpectedModes(decrqm_table)
+    reference.feed(data)
+    return reference.expected()

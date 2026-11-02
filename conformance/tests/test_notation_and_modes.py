@@ -60,7 +60,7 @@ class ModeTests(unittest.TestCase):
     DECRQM = {"private": {"7": 1, "25": 1, "1004": 2, "2004": 2, "6": 2, "1049": 2}, "ansi": {"4": 2}}
 
     def expected(self, data: bytes) -> set:
-        return modes.expected_modes(data, self.DECRQM)
+        return modes.modes_after(data, self.DECRQM)
 
     def test_a_mode_set_off_its_default_is_listed_and_one_at_its_default_is_not(self):
         self.assertEqual(self.expected(b"\x1b[?2004h\x1b[?1004h\x1b[?7h"), {"?2004h", "?1004h"})
@@ -88,12 +88,15 @@ class ModeTests(unittest.TestCase):
         self.assertEqual(self.expected(b"\x1b[>5u\x1b[>1u"), {">5u", ">1u"})
 
     def test_the_region_top_for_a_cursor_report_in_origin_mode(self):
-        tracker = modes.ModeTracker(self.DECRQM)
-        tracker.feed(b"\x1b[5;10r\x1b[?6h")
-        self.assertEqual(tracker.region_top, 5)
-        self.assertTrue(tracker.private.get(6))
-        tracker.feed(b"\x1b[r")
-        self.assertEqual(tracker.region_top, 1)
+        reference = modes.ExpectedModes(self.DECRQM)
+        reference.feed(b"\x1b[5;10r\x1b[?6h")
+        self.assertEqual(reference.scroll_top, 5)
+        self.assertTrue(reference.origin_mode())
+        reference.feed(b"\x1b[r")
+        self.assertEqual(reference.scroll_top, 1)
+        self.assertTrue(reference.origin_mode(), "a region reset leaves origin mode as it was")
+        reference.feed(b"\x1b[?6l")
+        self.assertFalse(reference.origin_mode())
 
 
 if __name__ == "__main__":

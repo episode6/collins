@@ -27,7 +27,7 @@ import re
 import time
 
 from .. import client as apiclient
-from .. import modes as modetrack
+from .. import modes as modesref
 from .. import notation
 from ..probe import Probe
 from ..reporter import CheckFailed, CheckSkipped
@@ -570,15 +570,15 @@ def check_screens(t: Terminal, notes: list[str]) -> None:
         label = scenario["scenario"]
         # A fresh terminal, its history blanked, then the scenario.
         t.probe.paint(b"\x1bc\x1b[3J" + stream)
-        tracker = modetrack.ModeTracker(t.decrqm)
-        tracker.feed(stream)
+        reference = modesref.ExpectedModes(t.decrqm)
+        reference.feed(stream)
         cursor = t.probe.query(b"\x1b[6n")
         match = CPR.fullmatch(cursor)
         want_col, want_row = scenario["cursor"]
         expected_col = min(want_col, COLS - 1) + 1  # a pending wrap reports the last column
         expected_row = want_row + 1
-        if tracker.private.get(6):
-            expected_row = max(expected_row - (tracker.region_top - 1), 1)
+        if reference.origin_mode():
+            expected_row = max(expected_row - (reference.scroll_top - 1), 1)
         if match is None:
             failures.append(f"{label}: no CPR answer ({notation.describe(cursor)})")
         elif (int(match.group(1)), int(match.group(2))) != (expected_row, expected_col):
@@ -602,7 +602,7 @@ def check_screens(t: Terminal, notes: list[str]) -> None:
         if second.wait_redraw(t.pty, 10.0, redraws_before + 1) is None:
             failures.append(f"{label}: no redraw within 10 s of the attach")
         got_modes = set(reply.get("modes") or [])
-        want_modes = tracker.expected()
+        want_modes = reference.expected()
         if got_modes != want_modes:
             failures.append(f"{label}: modes {sorted(got_modes)}, expected {sorted(want_modes)}")
         second.call("detach", pty=t.pty)
