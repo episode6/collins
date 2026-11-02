@@ -681,8 +681,9 @@ def check_die(run: Run, notes: list[str]) -> None:
     fell = [when for when, value in s.busy_events(since) if value is False][0]
     notes.append(f"busy fell {fell - left_at:.1f} s after the agent left")
     pty_gone = any(pty_ended(e, s.pty) for e in client.events[since:])
-    if not pty_gone and s.facts().get("agent_running") is True:
-        raise CheckFailed("agent_running stayed true after the agent left")
+    # The page allows a poll period of 2 s for agent_running to be re-read.
+    if not pty_gone and not client.wait_until(lambda: s.facts().get("agent_running") is not True, 3.0):
+        raise CheckFailed("agent_running stayed true 3 s after the agent left")
     if s.id is None:
         s.id = s.facts().get("session")
     if s.id and run.known_session and s.id == run.known_session:
@@ -705,6 +706,7 @@ def check_shell_alone(run: Run, notes: list[str]) -> None:
     if s is None:
         raise CheckSkipped("the agent-leaving check did not leave a session")
     client = s.client
+    outcome: BaseException | None = None
     try:
         if s.pty_gone:
             raise CheckSkipped("the pty ended with the agent: no shell was left to read")
@@ -726,13 +728,21 @@ def check_shell_alone(run: Run, notes: list[str]) -> None:
                 "takes_prompt is not false after the agent left and the shell, drawing the box's mark, "
                 "has the pty"
             )
+    except (CheckFailed, CheckSkipped) as reading:
+        outcome = reading
     finally:
-        if not s.pty_gone:
-            client.call("close", pty=s.pty, mode="kill")
-            if client.wait_for(lambda e: pty_ended(e, s.pty), 15.0, s.since) is None:
-                notes.append("no `pty-exited` after close {mode: kill}")
-        client.close()
         run.died = None
+    # The kill is an assertion of its own, whatever the reading did: the one
+    # hold on an agent pty's `close {mode: kill}` the kit makes.
+    killed = True
+    if not s.pty_gone:
+        reply = client.call("close", pty=s.pty, mode="kill")
+        killed = reply.ok and client.wait_for(lambda e: pty_ended(e, s.pty), 15.0, s.since) is not None
+    client.close()
+    if not killed:
+        raise CheckFailed("no `pty-exited` within 15 s of close {mode: kill} on the agent's pty")
+    if outcome is not None:
+        raise outcome
 
 
 def check_populated_snapshot(run: Run, notes: list[str]) -> None:
