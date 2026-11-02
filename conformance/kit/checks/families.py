@@ -148,6 +148,9 @@ def check_prs(run: Run, client: apiclient.Client, notes: list[str]) -> None:
     run.need("prs")
     if not run.options.with_gh:
         raise CheckSkipped("--with-gh not given (the checks need the GitHub CLI and the network)")
+    # A real pull request of the Collins repository, the kit's own: the check
+    # reaches GitHub through the server's `gh`, and holds only that the
+    # requests are answered, not what the PR looks like.
     reply = client.call("pr.fetch", urls=["https://github.com/episode6/collins/pull/1"], timeout=60)
     if not reply.ok:
         raise CheckFailed(f"pr.fetch: {reply.describe()}")

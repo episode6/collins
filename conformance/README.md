@@ -40,7 +40,7 @@ on the server's machine and copy the fake there first.
 | `--fake-claude PATH` | The fake claude, as a path on the server's machine (default: `conformance/fake_claude.py`). |
 | `--scratch DIR` | A directory the kit may write in (default: a temporary one, removed at the end). |
 | `--replay` | Also write the recorded Claude Code streams under `data/streams/` into a fake session and compare the server's reading with VTE's. |
-| `--with-gh` | Run the `prs` checks that call `gh`. |
+| `--with-gh` | Run the `prs` checks that call `gh`: a fetch and a detail of a real pull request of the Collins repository, over the network, holding only that they are answered. |
 | `--only TEXT` | Run only the groups whose name holds TEXT: `level 0`, `terminal`, `sessions`, `level 2`, `families`. |
 | `--json FILE` | Write the results as JSON too. |
 | `-v` | Group headings and a traceback on a crash. |

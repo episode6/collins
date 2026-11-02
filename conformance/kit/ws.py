@@ -173,7 +173,10 @@ class WebSocket:
 
     def _read_exact(self, count: int) -> bytes:
         while len(self._buffer) < count:
-            chunk = self._sock.recv(65536) if self._sock is not None else b""
+            sock = self._sock  # bound once: `abort` on another thread may clear it mid-read
+            if sock is None:
+                raise Closed(self.close_code, self.close_reason)
+            chunk = sock.recv(65536)
             if not chunk:
                 raise Closed(self.close_code, self.close_reason)
             self._buffer += chunk

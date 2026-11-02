@@ -21,8 +21,8 @@ contract](./terminal), the [session facts](./sessions) page, the script that
 generates the reference, the Python module that defines the protocol
 (`collins/api/protocol.py`), the one that connects over ssh
 (`collins/sshremote.py`), the terminal stream fixtures the contract is
-measured against and the conformance kit are licensed [MIT](#license). Collins itself, the
-service included, stays GPL-3.0-or-later. A program that talks to
+measured against and the conformance kit are licensed [MIT](#license).
+Collins itself, the service included, stays GPL-3.0-or-later. A program that talks to
 `collins-service` only through this API is, in the view of Collins'
 authors, an independent work: see [Interoperability](#interoperability).
 :::
@@ -770,7 +770,7 @@ This specification (`docs/api/index.md`), the message reference
 the session facts page and its appendix on Claude Code
 (`docs/api/sessions.md`), the reference's generator
 (`scripts/gen_api_reference.py`), the protocol module
-(`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`)
+(`collins/api/protocol.py`), the ssh module (`collins/sshremote.py`),
 every file of the terminal stream fixtures (`tests/fixtures/streams/`:
 the synthetic scenarios and their golden, the recorded streams of a Claude
 Code session with their marks and goldens, measurements the terminal
