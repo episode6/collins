@@ -59,10 +59,21 @@ the forward is a connection of its own: under a user's ControlMaster the
 forward would live in the mux master, killing this child would end nothing,
 and the ServerAlive options would be the master's.
 
+A server that is not `collins-service` documents its own discovery command:
+pass it as *command* to `print_socket`. It must print the socket's path as the
+last line of stdout and exit 0, or exit non-zero. It runs verbatim, through the
+far login shell as ``exec <command>``, so it is one program and its arguments,
+as ``exec`` takes them: no leading ``VAR=value`` (write ``env VAR=value
+program``), no shell builtin, no pipeline.
+
 A pid file beside each forward's socket names the ssh child, this client
 and the socket, so a forward left by a client that crashed is ended before
 the socket is bound again (`end_stale_forward`) and by a sweep at the next
-launch (`sweep_orphans`).
+launch (`sweep_orphans`). The checks on a recorded pid are POSIX: `os.kill`
+with signal 0 for "is it there", ``/proc/<pid>/cmdline`` where that exists and
+``ps -o args=`` elsewhere for "is it still that forward". Whatever those
+answer that cannot be read as the forward's own command line is "not ours",
+and nothing is signalled.
 """
 
 from __future__ import annotations
@@ -72,11 +83,13 @@ import json
 import logging
 import os
 import re
+import shlex
 import signal
 import stat
 import subprocess
 import threading
 import time
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -92,14 +105,17 @@ SHELL_EXIT_NOT_FOUND = 127  # the remote shell found no collins-service
 DETAIL_MAX = 240
 STOP_WAIT_S = 2.0
 PID_FILE_MAX = 4096
+PROC_DIR = "/proc"  # where a process's command line can be read, on a system that has one
+PS = "ps"  # where it has not
+PS_TIMEOUT_S = 2.0
 
 # Why a `print_socket` failed (`PrintSocketResult.failure`).
 NO_SSH = "no-ssh"  # no ssh program on this machine
 TIMED_OUT = "timed-out"  # no answer within the timeout
 OS_ERROR = "os-error"  # ssh could not be run; `detail` says why
 CONNECT_FAILED = "connect-failed"  # ssh exit 255: no route, a refused key, an unknown host key
-REMOTE_FAILED = "remote-failed"  # collins-service failed; `code` is its exit
-NOT_ON_PATH = "not-on-path"  # exit 127, and the remote shell named collins-service
+REMOTE_FAILED = "remote-failed"  # the remote command failed; `code` is its exit
+NOT_ON_PATH = "not-on-path"  # exit 127, and the remote shell named the command's program
 NO_SHELL = "no-shell"  # exit 127 otherwise: the login shell itself is missing
 BAD_PATH = "bad-path"  # exit 0 and a line that is no socket path
 HANDOVER = "handover"  # exit 0 and nothing printed: a startup file took the shell over
@@ -117,12 +133,19 @@ HANDOVER = "handover"  # exit 0 and nothing printed: a startup file took the she
 # first: an interactive rc may hand the shell on (`exec zsh`, `exec fish`,
 # auto-tmux where chsh is refused) before the command runs — exit 0, no path —
 # and `-lc` never reads it. A `-lic` that still prints no path is reported as
-# that hand-over (`HANDOVER`). Any other login shell gets `sh -lc`. One fixed
-# string; the app id goes inside the inner double quotes, validated by
-# `print_socket_argv`, so no shell reads anything of a person's. No `!`
-# anywhere (csh history inside quotes).
+# that hand-over (`HANDOVER`). Any other login shell gets `sh -lc`. The command
+# sits inside the inner double quotes: the app id is validated by
+# `print_socket_argv`, and a caller's command reaches the login shell as it was
+# written, with `remote_command` spelling out what the two outer layers would
+# read. No `'` beyond the outer pair and no `!` anywhere (csh history inside
+# quotes), whatever the command holds.
 REMOTE_COMMAND = "collins-service --print-socket"
 REMOTE_SHELLS = "bash|zsh|dash|sh|ksh|mksh|fish"
+COMMAND_MAX = 512  # the longest discovery command taken
+# What the outer layers would read: the double quotes' own specials, the outer
+# single quote and csh's history mark. The rest of a command is left to the
+# login shell it is meant for.
+_WRAPPER_SPECIALS = "\\\"$`'!"
 
 # What the remote may print as its socket's path: ssh expands `${VAR}` and
 # `%`-tokens of a LocalForward connect path on the client and sends the result
@@ -191,9 +214,20 @@ def parse_target(text: object) -> Target | None:
 # ---- argv -------------------------------------------------------------------------------
 
 
+def _through_the_wrapper(command: str) -> str:
+    """*command* as it is written inside the wrapper's double quotes, so that
+    the login shell receives exactly *command*. Each special is an octal
+    `printf`, with no backslash pair and no quote of the outer kind: the outer
+    layer is read by the user's own shell, and fish reads a doubled backslash
+    even inside single quotes."""
+    return "".join(f'$(printf "\\{ord(c):03o}")' if c in _WRAPPER_SPECIALS else c for c in command)
+
+
 def remote_command(command: str) -> str:
     """The one argument after the destination: the POSIX wrapper around
-    *command* (see `REMOTE_COMMAND`)."""
+    *command* (see `REMOTE_COMMAND`), which the login shell runs as
+    ``exec <command>``: one program and its arguments."""
+    command = _through_the_wrapper(command)
     return (
         "sh -c 'case \"${SHELL##*/}\" in "
         f'{REMOTE_SHELLS}) "$SHELL" -lc "exec {command}"; rc=$?; '
@@ -225,15 +259,51 @@ def ssh_options(target: Target) -> list[str]:
     return argv
 
 
-def print_socket_argv(target: Target, app_id: str = "") -> list[str]:
-    """``ssh … TARGET collins-service --print-socket [--app-id ID]``, for a
-    service that does not run under the default app id. Raises ValueError on
-    an app id a shell could read: the remote command is otherwise a fixed
-    string."""
-    command = REMOTE_COMMAND
-    if app_id:
-        if not _APP_ID_RE.fullmatch(app_id):
-            raise ValueError(f"an app id a shell could read: {app_id!r}")
+def valid_command(command: object) -> bool:
+    """A discovery command that may be handed to `print_socket_argv`: not
+    blank, at most `COMMAND_MAX` characters, one line, no control character
+    and no Unicode format character (a right-to-left override, a zero-width
+    joiner: its program's name is shown back to a person when it fails), and
+    no leading ``-``, which ``exec`` would read as its own option, differently
+    per shell. What else ``exec`` refuses (see the module docstring) is the
+    far shell's to say."""
+    if not isinstance(command, str) or not command.strip() or len(command) > COMMAND_MAX:
+        return False
+    if command.lstrip(" '\"").startswith("-"):
+        return False
+    return not any(ord(c) < 32 or c == "\x7f" or unicodedata.category(c) == "Cf" for c in command)
+
+
+def command_program(command: str) -> str:
+    """The name of the program *command* runs, as a shell's "not found" would
+    say it: the first word's last path component. Empty when there is none."""
+    try:
+        words = shlex.split(command)
+    except ValueError:  # an unbalanced quote: the far shell will say so itself
+        words = command.split()
+    return os.path.basename(words[0]) if words else ""
+
+
+def _names_program(detail: str, command: str) -> bool:
+    """Whether a shell's line *detail* names *command*'s program, as a word of
+    its own or the end of a path: a short name inside another word ("x" in
+    "exec:") is not it."""
+    program = command_program(command)
+    return bool(program and re.search(rf"(?<![\w.-]){re.escape(program)}(?![\w.-])", detail))
+
+
+def print_socket_argv(target: Target, app_id: str = "", command: str = REMOTE_COMMAND) -> list[str]:
+    """``ssh … TARGET <command>``, *command* being ``collins-service
+    --print-socket [--app-id ID]`` unless the server documents another. The
+    app id, for a service that does not run under the default one, goes on the
+    default command alone: another command runs verbatim, and one that needs
+    an app id writes it in. Raises ValueError on a command `valid_command`
+    refuses and on an app id a shell could read."""
+    if not valid_command(command):
+        raise ValueError(f"not a discovery command: {command!r}")
+    if app_id and not _APP_ID_RE.fullmatch(app_id):
+        raise ValueError(f"an app id a shell could read: {app_id!r}")
+    if app_id and command == REMOTE_COMMAND:
         command = f"{command} --app-id {app_id}"
     return [SSH, *ssh_options(target), target.destination, remote_command(command)]
 
@@ -316,12 +386,13 @@ def print_socket(
     app_id: str = "",
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     timeout: float = PRINT_SOCKET_TIMEOUT_S,
+    command: str = REMOTE_COMMAND,
 ) -> PrintSocketResult:
-    """Run ``ssh TARGET collins-service --print-socket`` (bounded) and read
-    the socket's path off its last line of output. Every failure of the run
-    is a result with `failure`; only an unusable *app_id* raises (ValueError,
-    `print_socket_argv`)."""
-    argv = print_socket_argv(target, app_id)
+    """Run ``ssh TARGET collins-service --print-socket``, or *command* in its
+    place (bounded), and read the socket's path off its last line of output.
+    Every failure of the run is a result with `failure`; only an unusable
+    *app_id* or *command* raises (ValueError, `print_socket_argv`)."""
+    argv = print_socket_argv(target, app_id, command)
     try:
         completed = run(
             argv,
@@ -344,10 +415,10 @@ def print_socket(
     if code != 0:
         failure = REMOTE_FAILED
         if code == SHELL_EXIT_NOT_FOUND:
-            # 127 is "not found": collins-service when the shell says so,
-            # else the login shell itself ($SHELL naming one not installed:
-            # both rounds fail the same way).
-            failure = NOT_ON_PATH if "collins-service" in detail else NO_SHELL
+            # 127 is "not found": the command's program when the shell says
+            # so, else the login shell itself ($SHELL naming one not
+            # installed: both rounds fail the same way).
+            failure = NOT_ON_PATH if _names_program(detail, command) else NO_SHELL
         return PrintSocketResult(ok=False, code=code, detail=detail, failure=failure)
     path = last_line(completed.stdout)
     if not valid_socket_path(path):
@@ -406,34 +477,84 @@ def read_pid_file(path: str) -> dict | None:
 
 
 def pid_alive(pid: int) -> bool:
-    try:
-        with open(f"/proc/{pid}/stat", encoding="ascii") as fh:
-            state = fh.read().rsplit(")", 1)[1].split()[0]
-    except (OSError, IndexError):
+    """Whether a process has *pid*: signal 0, on any POSIX system. A process
+    of another user is there (`PermissionError`), and so is a zombie its
+    parent has not reaped yet (`is_our_forward` tells that one apart). Both
+    err on signalling nothing: a dead client whose pid another user's process
+    took, or one still a zombie, reads as living and keeps its forward until
+    that pid goes."""
+    if pid <= 0:  # to `kill` these name a process group, not a process
         return False
-    return state not in ("Z", "X")
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except (OSError, OverflowError):
+        return False
+    return True
+
+
+def _ps_words(pid: int) -> list[bytes] | None:
+    """*pid*'s command line as ``ps -o args=`` prints it, split on whitespace,
+    or None when the answer is anything but one bounded line from a `ps` that
+    succeeded. `ps` cuts its line to a terminal's width when it finds one on
+    any stream and to an inherited `COLUMNS` (a login shell or tmux can export
+    one), its width on a pipe being otherwise undefined, and a socket's path
+    runs long: `COLUMNS` is POSIX's override, and no stream of the run is a
+    terminal."""
+    try:
+        completed = subprocess.run(
+            [PS, "-o", "args=", "-p", str(pid)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, "COLUMNS": str(PID_FILE_MAX)},
+            timeout=PS_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0 or len(completed.stdout) > PID_FILE_MAX:
+        return None
+    lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    return lines[0].split() if len(lines) == 1 else None
+
+
+def _command_words(pid: int) -> list[bytes] | None:
+    """*pid*'s command line: ``/proc/<pid>/cmdline`` when that exists, else
+    `_ps_words`. None when it cannot be read."""
+    try:
+        with open(f"{PROC_DIR}/{pid}/cmdline", "rb") as fh:
+            return fh.read(PID_FILE_MAX).split(b"\0")
+    except FileNotFoundError:
+        return _ps_words(pid)
+    except OSError:
+        return None
 
 
 def is_our_forward(pid: int, local_path: str) -> bool:
-    """Whether *pid* still runs an ``ssh … -L <local_path>:…``: the pid may
-    have been reused since the file was written, so nothing is signalled
-    unless the command line is the forward's own."""
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            argv = fh.read(PID_FILE_MAX).split(b"\0")
-    except OSError:
+    """Whether *pid* still runs an ``ssh … -N … -L <local_path>:…``: the pid
+    may have been reused since the file was written, so nothing is signalled
+    unless the command line is the forward's own. The program must be the
+    first word and the socket the word after ``-L``, up to its colon; anything
+    less, anything unreadable, a zombie's empty or bracketed line: not ours."""
+    if pid <= 0:
         return False
-    if not argv or os.path.basename(argv[0]) != b"ssh":
+    words = _command_words(pid)
+    if not words or os.path.basename(words[0]) != b"ssh" or b"-N" not in words:
         return False
-    want = (local_path + ":").encode()
-    return any(arg.startswith(want) for arg in argv)
+    want = os.fsencode(local_path + ":")
+    return any(
+        flag == b"-L" and spec.startswith(want)
+        for flag, spec in zip(words, words[1:], strict=False)
+    )
 
 
 def _signal_forward(pid: int, local_path: str, sig: int) -> bool:
     """Signal *pid* only while its command line is still that forward's:
     with `pidfd_open` the check and the signal name one process (a pid
-    reused in between is never hit); without it (an older kernel) the check
-    precedes a plain `os.kill`."""
+    reused in between is never hit); without it (an older kernel, another
+    system) the check precedes a plain `os.kill`."""
     pidfd_open = getattr(os, "pidfd_open", None)
     send = getattr(signal, "pidfd_send_signal", None)
     if pidfd_open is not None and send is not None:

@@ -505,6 +505,7 @@ def stage(win) -> list[tuple[int, callable]]:
             # Nothing of this machine's login or hostname in frame.
             dialog.name_row.set_text("workstation")
             dialog.target_row.set_text("collins@workstation.example.net")
+            dialog.advanced_row.set_expanded(True)
 
         return [(800, fill_form)]
     elif scene == "path-picker":

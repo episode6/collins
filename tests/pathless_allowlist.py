@@ -166,11 +166,11 @@ DEVICE = frozenset(
         "sshremote:unlink_socket:os.unlink",
         # The pid file beside each forward's socket and the sweep of a crashed
         # client's forwards (ruled 2026-10-29, the review of PR 623, Q2): this
-        # device's files under its own runtime dir, and its own /proc.
+        # device's files under its own runtime dir, and its own /proc or ps.
         "sshremote:Forward.stop:os.unlink",
+        "sshremote:_command_words:open",
+        "sshremote:_ps_words:subprocess.run",
         "sshremote:end_stale_forward:os.unlink",
-        "sshremote:is_our_forward:open",
-        "sshremote:pid_alive:open",
         "sshremote:read_pid_file:os.open",
         "sshremote:sweep_orphans:os.listdir",
         "sshremote:write_pid_file:os.open",

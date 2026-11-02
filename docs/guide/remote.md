@@ -50,6 +50,19 @@ the box when none is running), or ssh's own last line when it could not
 connect. **Add** saves the connection in this computer's `ui-state.json`;
 nothing is stored on the box.
 
+**Advanced** holds one row, *Discovery command*: what runs on the box in
+place of `collins-service --print-socket`, for a server that is not
+`collins-service` and documents its own. Leave it empty for the default,
+shown as its placeholder. The command must print the socket's path as the
+last line of its output and exit 0, or exit non-zero. It goes through the
+same login-shell wrapper and your login shell reads it as `exec <command>`,
+so it is one program and its arguments, as `exec` takes them: your shell's
+quoting and `$VARIABLES` in the arguments work, but a leading `VAR=value`
+does not (write `env VAR=value program`), nor does a shell builtin or a
+pipeline, and it cannot start with `-`. It runs verbatim, with nothing
+added, and takes one line of plain text, at most 512 characters. Error
+messages name the program it runs.
+
 From a terminal, `collins --connect NAME` opens the window on a saved
 connection (`local` names this computer); if a window is already running,
 it switches. The connection you used last is the one the next launch
@@ -97,6 +110,9 @@ writes a small pid file (`<id>.pid`, naming the ssh and the window that
 started it): a forward a crashed window left behind is ended by the next
 window on this machine (or the next connect to that box) before a new
 one binds, and a forward whose window is still running is left alone.
+Before signalling a recorded ssh, Collins checks that the pid still runs
+that forward (`/proc` where there is one, `ps` elsewhere); an answer it
+cannot read as that forward's command line leaves the process alone.
 
 Authentication, encryption, host verification and key management are all
 ssh's. **`BatchMode=yes`** means ssh never asks you

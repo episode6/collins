@@ -4,8 +4,9 @@ GTK-free; `tests/test_sshforward.py` drives it with fakes.
 
 The ssh runs themselves are `sshremote`, the MIT-licensed module another
 client can vendor. This is what Collins puts around them: a connection's
-target and remote app id, where its forward's socket lives, the words the
-connect dialog and the banner show, and `RemoteTransport`.
+target, remote app id and discovery command, where its forward's socket
+lives, the words the connect dialog and the banner show, and
+`RemoteTransport`.
 
 `RemoteTransport` is what `connection.ConnectionManager.start_remote`
 drives: its `find` is the local socket's probe (``none`` while no forward
@@ -34,10 +35,10 @@ STARTED_HOW = "forward"  # the manager's `started_how` for a remote start
 # braces).
 MSG_NO_SSH = N_("ssh is not installed on this computer")
 MSG_CONNECT_FAILED = N_("ssh could not connect to {target}: {detail}")
-MSG_REMOTE_FAILED = N_("collins-service failed on {target} (exit {code}): {detail}")
+MSG_REMOTE_FAILED = N_("{program} failed on {target} (exit {code}): {detail}")
 MSG_TIMEOUT = N_("no answer from {target} within {seconds} s")
-MSG_BAD_PATH = N_("collins-service on {target} printed no socket path")
-MSG_NOT_ON_PATH = N_("collins-service is not on the login shell's PATH on {target}")
+MSG_BAD_PATH = N_("{program} on {target} printed no socket path")
+MSG_NOT_ON_PATH = N_("{program} is not on the login shell's PATH on {target}")
 MSG_HANDOVER = N_(
     "the command never ran on {target}: a login or interactive startup file there "
     "(~/.profile, ~/.bash_profile, ~/.bashrc) hands the shell on (exec zsh, tmux)? Set the "
@@ -98,9 +99,11 @@ def _target(connection: Connection) -> sshremote.Target:
     return target
 
 
-def _failure_text(result: sshremote.PrintSocketResult, target: str, timeout: float) -> str:
-    """The person's word for a failed `--print-socket`."""
-    args = {"target": target, "code": result.code, "detail": result.detail or "-"}
+def _failure_text(
+    result: sshremote.PrintSocketResult, target: str, timeout: float, program: str
+) -> str:
+    """The person's word for a failed discovery run of *program*."""
+    args = {"target": target, "code": result.code, "detail": result.detail or "-", "program": program}
     failure = result.failure
     if failure == sshremote.NO_SSH:
         return translate(MSG_NO_SSH)
@@ -127,18 +130,21 @@ def print_socket(
     timeout: float = sshremote.PRINT_SOCKET_TIMEOUT_S,
     **options,
 ) -> PrintSocketResult:
-    """`sshremote.print_socket` for *connection*, with the person's word on a
-    failure. Raises ValueError for a connection with no valid target."""
+    """`sshremote.print_socket` for *connection* (its discovery command), with
+    the person's word on a failure. Raises ValueError for a connection with no
+    valid target."""
+    command = connection.discovery_command
     plain = sshremote.print_socket(
-        _target(connection), connection.remote_app_id, timeout=timeout, **options
+        _target(connection), connection.remote_app_id, timeout=timeout, command=command, **options
     )
+    program = sshremote.command_program(command) or command
     return PrintSocketResult(
         ok=plain.ok,
         path=plain.path,
         code=plain.code,
         detail=plain.detail,
         failure=plain.failure,
-        text="" if plain.ok else _failure_text(plain, connection.target, timeout),
+        text="" if plain.ok else _failure_text(plain, connection.target, timeout, program),
         batch_mode_hint=plain.failure == sshremote.CONNECT_FAILED,
     )
 

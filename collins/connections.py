@@ -7,7 +7,8 @@ D2, D10). GTK-free.
 list, and the shape a connection has in the client:
 
     {"id": "<32 hex>", "name": "build box", "kind": "ssh",
-     "target": "collins@build.example.net:2222", "remote_app_id": ""}
+     "target": "collins@build.example.net:2222", "remote_app_id": "",
+     "command": ""}
 
 `kind` is ``local`` (the service on this machine, found or started by
 the connection manager: there is exactly one such connection, `LOCAL`,
@@ -15,15 +16,23 @@ never written to the file) or ``ssh`` (a service on another machine,
 reached through `sshforward`: `ssh TARGET collins-service --print-socket`
 once, then the `-L` forward of the Unix socket, §3.2). `target` is what
 ssh is handed as its destination, ``[user@]host[:port]``; `remote_app_id`
-is the app id the remote service runs under when it is not the default.
+is the app id the remote service runs under when it is not the default;
+`command` is the discovery command run on the far side in place of
+`collins-service --print-socket`, for a server that documents another
+(empty, or absent from the file: that default): one program and its
+arguments, run verbatim, so `remote_app_id` reaches the default command
+alone.
 
 Everything read off the file is foreign content (CLAUDE.md rule 5):
 shapes are checked, sizes bounded, a row that does not fit is dropped,
-and nothing here is ever formatted into a shell line (`sshremote` builds
-an argv; a target that would read as an ssh option is refused by its
-`parse_target`, the one grammar of a target). The
-`--connect NAME` main option and the connect dialog resolve a connection
-by name through `find`; ``local`` always names `LOCAL`.
+and a `command` that does not fit (`sshremote.valid_command`) is dropped
+alone, the row keeping the default. `sshremote` builds an argv; a target
+that would read as an ssh option is refused by its `parse_target`, the one
+grammar of a target. `command` is the one field a shell reads, the login
+shell on the far side as that login's own, and `sshremote.remote_command`
+sees that it reaches that shell as written. The `--connect NAME` main
+option and the connect dialog resolve a connection by name through `find`;
+``local`` always names `LOCAL`.
 """
 
 from __future__ import annotations
@@ -32,7 +41,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field, replace
 
-from .sshremote import Target, parse_target
+from .sshremote import REMOTE_COMMAND, Target, parse_target, valid_command
 from .uistate import UiState, mint_id
 
 KIND_LOCAL = "local"
@@ -76,6 +85,7 @@ class Connection:
     kind: str
     target: str = ""
     remote_app_id: str = ""
+    command: str = ""  # the discovery command; empty is `REMOTE_COMMAND`
     # Not stored: whether this is the local connection.
     extra: dict = field(default_factory=dict, compare=False, repr=False)
 
@@ -86,11 +96,18 @@ class Connection:
     def parsed_target(self) -> Target | None:
         return parse_target(self.target)
 
+    @property
+    def discovery_command(self) -> str:
+        """What runs on the far side to learn the socket's path."""
+        return self.command or REMOTE_COMMAND
+
     def to_record(self) -> dict:
         """The row as the file holds it."""
         record = {"id": self.id, "name": self.name, "kind": self.kind, "target": self.target}
         if self.remote_app_id:
             record["remote_app_id"] = self.remote_app_id
+        if self.command:
+            record["command"] = self.command
         return record
 
 
@@ -101,7 +118,8 @@ LOCAL = Connection(id=LOCAL_ID, name=LOCAL_NAME, kind=KIND_LOCAL)
 def from_record(raw: object) -> Connection | None:
     """One row of the file as a `Connection`, or None when it does not fit
     (rule 5). Only ``ssh`` rows live in the file: a ``local`` row, or an
-    unknown kind, is dropped."""
+    unknown kind, is dropped. A `command` that does not fit costs only
+    itself: the row stays, with the default command."""
     if not isinstance(raw, dict):
         return None
     connection_id = raw.get("id")
@@ -120,8 +138,9 @@ def from_record(raw: object) -> Connection | None:
         app_id = ""
     elif not valid_app_id(app_id):
         return None
+    command = raw.get("command")
     return Connection(id=connection_id, name=name.strip(), kind=KIND_SSH, target=target,
-                      remote_app_id=app_id)
+                      remote_app_id=app_id, command=command.strip() if valid_command(command) else "")
 
 
 def clean(rows: object) -> list[Connection]:
@@ -142,17 +161,21 @@ def clean(rows: object) -> list[Connection]:
     return out
 
 
-def new_ssh(name: str, target: str, remote_app_id: str = "") -> Connection:
-    """A connection a person just added. Raises ValueError on a bad name,
-    target or app id, with a word for the dialog."""
+def new_ssh(name: str, target: str, remote_app_id: str = "", command: str = "") -> Connection:
+    """A connection a person just added; a blank *command* is the default
+    one. Raises ValueError on a bad name, target, app id or command, with a
+    word for the dialog."""
     if not valid_name(name):
         raise ValueError("name")
     if parse_target(target) is None:
         raise ValueError("target")
     if remote_app_id and not valid_app_id(remote_app_id):
         raise ValueError("remote_app_id")
+    command = command.strip()
+    if command and not valid_command(command):
+        raise ValueError("command")
     return Connection(id=mint_id(), name=name.strip(), kind=KIND_SSH, target=target.strip(),
-                      remote_app_id=remote_app_id)
+                      remote_app_id=remote_app_id, command=command)
 
 
 def find(connections: list[Connection], name_or_id: str) -> Connection | None:
@@ -200,6 +223,8 @@ class Connections:
         """Add (or, by id, replace) a connection; returns what was stored.
         A `LOCAL` is never stored. Raises ValueError when the list is full."""
         if connection.is_local or from_record(connection.to_record()) is None:
+            raise ValueError("connection")
+        if connection.command and not valid_command(connection.command):
             raise ValueError("connection")
         rows = [c for c in self.all() if c.id != connection.id]
         if len(rows) >= CONNECTIONS_MAX:

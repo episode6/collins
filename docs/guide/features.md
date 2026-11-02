@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-31. Full change history: git log for this file.
+fork. Last modified: 2026-11-01. Full change history: git log for this file.
 -->
 
 # Features
@@ -147,7 +147,8 @@ Enter opens, Esc closes.
   a name and `user@host[:port]`, **Test** runs, in short, `ssh -o BatchMode=yes TARGET
   collins-service --print-socket` (through the box's login shell: the full
   command is in the guide) and shows the socket's path or ssh's
-  last line, **Connect** forwards the box's socket over `ssh -L` and
+  last line, *Advanced* takes a discovery command for a server that
+  documents one in place of that command, **Connect** forwards the box's socket over `ssh -L` and
   switches: every tab detaches with no question, the sidebar refills with
   the box's sessions, and the tabs you last had open there come back. A
   forward that dies shows *Reconnecting to \<name\>* with ssh's last line

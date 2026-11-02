@@ -171,11 +171,16 @@ machine with fakes, its remote path included (a `FakeTransport` whose
 forward the test kills: the start's word, the lost road, a hello failing
 over a live forward, `switch`); `test_sshremote.py` the two ssh argv, each
 failure as a code, the local socket unlinked first (a non-socket refused), a
-fake `Popen` whose stderr the test writes, and that the module runs as one
+fake `Popen` whose stderr the test writes, the checks on a recorded pid with
+no `/proc` and no pidfd (`sshremote.PROC_DIR` and `PS` are the seams: a fake
+`ps`, then the real one), a discovery command through the wrapper under the
+real shells present (the rest skip), and that the module runs as one
 file copied out of the tree; `test_sshforward.py` Collins' word for each
 failure and a forward's exit as the transport's `lost`; `test_connections.py` the list in `ui-state.json`
-(rule 5's grammar, `find`, `last_connection`). The by-hand half of PR-3.1
-(the connect dialog's Add, Test and Connect against the ssh target of
+(rule 5's grammar, `find`, `last_connection`, a `command` that does not fit
+dropped alone). `scripts/check_connect_dialog.py` is the dialog's form behind
+an `ssh` stub on PATH (*Advanced*, Test's argv, Add's row). The by-hand half of PR-3.1
+(the connect dialog's Test and Connect against the ssh target of
 `~/specs/collins/assets/split-service/ssh-target/`, the forward killed, the
 banner and the reconnect) has no e2e check: it needs a container the CI
 lacks, and the record of a run lives in the PR. `tests/test_service_imports.py` imports every module of
