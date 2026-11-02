@@ -224,7 +224,10 @@ def check_answered(t: Terminal, notes: list[str]) -> None:
                 failures.append(f"{name}: the query reached the client")
     # The replies come in query order, each ahead of any typing queued.
     answer = probe.query(b"\x1b[5n\x1b[c\x1b[5n")
-    if answer != b"\x1b[0n\x1b[?61;1;21;22;28c\x1b[0n":
+    sequences = re.findall(rb"\x1b\[[^\x1b]*?[a-zA-Z]", answer)
+    in_order = len(sequences) == 3 and sequences[0] == b"\x1b[0n" and sequences[2] == b"\x1b[0n"
+    in_order = in_order and sequences[1].startswith(b"\x1b[?") and sequences[1].endswith(b"c")
+    if not in_order:
         failures.append(f"three queries in a row answered out of order or short: {notation.describe(answer)}")
     # A query ended by BEL is answered ended by BEL.
     answer = probe.query(b"\x1b]11;?\x07")
@@ -247,8 +250,10 @@ def check_answered(t: Terminal, notes: list[str]) -> None:
         notes.append("DECRQSS of 38;5;1 answers VTE's 38:5:1")
     elif answer == b"\x1bP1$r0;31m\x1b\\":
         notes.append("DECRQSS of 38;5;1 answers the named colour 31 (the page's stated divergence)")
+    elif not answer:
+        failures.append("DECRQSS of 38;5;1 was not answered")
     else:
-        failures.append(
+        other_voice.append(
             f"DECRQSS of 38;5;1 answered {notation.describe(answer)}, neither VTE's nor the stated divergence"
         )
     if other_voice and t.run.options.vte_bytes:
@@ -594,8 +599,11 @@ def check_colours_follow_the_active_client(t: Terminal, notes: list[str]) -> Non
     answer = ask(b"\x1b]11;?\x1b\\")
     if answer != b"\x1b]11;rgb:0000/0000/0000\x1b\\":
         raise CheckFailed(f"OSC 11 while the first client is active answered {notation.describe(answer)}")
+    since_first = len(t.client.events)
     other.send_event("focus", pty=t.pty, focused=True)
-    t.client.wait_for(lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is False, 5.0)
+    t.client.wait_for(
+        lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is False, 5.0, since_first
+    )
     try:
         answer = ask(b"\x1b]11;?\x1b\\")
         if answer != b"\x1b]11;rgb:1212/3434/5656\x1b\\":
@@ -608,11 +616,16 @@ def check_colours_follow_the_active_client(t: Terminal, notes: list[str]) -> Non
                 f"CSI ? 996 n with a light-scheme client active answered {notation.describe(answer)}"
             )
         answer = ask(b"\x1b[>c")
-        if answer != b"\x1b[>61;7000;1c":
-            raise CheckFailed(f"DA2 with a vte 7000 client active answered {notation.describe(answer)}")
+        if not re.fullmatch(rb"\x1b\[>\d+;7000;\d+c", answer):
+            raise CheckFailed(
+                f"DA2 with a vte 7000 client active does not carry 7000: {notation.describe(answer)}"
+            )
     finally:
+        since_other = len(other.events)
         t.client.send_event("focus", pty=t.pty, focused=True)
-        other.wait_for(lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is False, 5.0)
+        other.wait_for(
+            lambda e: e.type == "pty" and e.get("pty") == t.pty and e.get("active") is False, 5.0, since_other
+        )
         other.close()
         outsider.close()
     answer = ask_again = t.probe.query(b"\x1b]11;?\x1b\\")

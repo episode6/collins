@@ -99,6 +99,18 @@ def timeline(s: Session, since: int, t0: float) -> str:
     return "; ".join(parts)
 
 
+def unlisted_fields(run: Run, event: apiclient.Event) -> None:
+    """A `session` field that belongs to a family the server does not list
+    must not be sent (index.md, State)."""
+    p = run.p
+    for family, entry in p.CONFORMANCE_FAMILIES.items():
+        if family in run.caps:
+            continue
+        stray = sorted(set(entry.session_fields) & set(event.fields))
+        if stray:
+            raise CheckFailed(f"the session event carries {stray} of the unlisted family `{family}`")
+
+
 def spawn_session(run: Run, client: apiclient.Client, notes: list[str], **extra) -> Session:
     s = Session(run, client, client.device)
     fields = {
@@ -136,6 +148,11 @@ def spawn_session(run: Run, client: apiclient.Client, notes: list[str], **extra)
         raise CheckFailed(
             f"the snapshot's handle {snapshot['handle']!r} is not the spawn reply's {s.handle!r}"
         )
+    unlisted_fields(run, snapshot)
+    # Whether the agent has the two progress spoofs, off the fake's own
+    # banner: the checks that need its progress report are skipped without.
+    if run.spoofs is None and client.wait_output(s.pty, b"progress:", 10.0) >= 0:
+        run.spoofs = b"progress:on" in bytes(client.output[s.pty])
     return s
 
 
@@ -175,9 +192,12 @@ def check_second_attach(s: Session, notes: list[str]) -> None:
     reply = second.attach(s.pty, COLS, ROWS)
     if not reply.ok:
         raise CheckFailed(f"attach: {reply.describe()}")
-    snapshot = second.wait_for(lambda e: e.type == "session" and e.get("pty") == s.pty, 5.0)
+    snapshot = second.wait_for(
+        lambda e: e.type == "session" and e.get("pty") == s.pty and "cwd" in e.fields, 5.0
+    )
     if snapshot is None:
-        raise CheckFailed("no `session` snapshot for the second client within 5 s")
+        raise CheckFailed("no whole `session` snapshot (one carrying `cwd`) for the second client within 5 s")
+    unlisted_fields(s.run, snapshot)
     held = s.facts()
     differences = []
     for name in (
@@ -262,8 +282,13 @@ def check_lookalikes(s: Session, notes: list[str]) -> None:
         raise CheckFailed(f"prompt 'menu': {reply.describe()}")
     if not client.wait_until(lambda: "Which way?" in s.capture(), 5.0):
         raise CheckFailed("the fake did not draw its menu")
-    if not s.wait_fact("takes_prompt", False, 5.0):
-        raise CheckFailed("takes_prompt stayed true while a menu, marked `\u276f` and a space, had the keys")
+    # The fact as read after the menu settled on the screen, not the false
+    # left over from the text typed to ask for it.
+    client.pump(2.0)
+    if s.facts().get("takes_prompt") is not False:
+        raise CheckFailed(
+            "takes_prompt is true while a menu, marked `\u276f` and an ordinary space, has the keys"
+        )
     client.send_input(s.pty, b"\r")
     if not s.wait_fact("takes_prompt", True, 5.0):
         raise CheckFailed("takes_prompt did not come back after the menu was answered")
@@ -645,9 +670,15 @@ def check_die(run: Run, notes: list[str]) -> None:
         # The shell the agent left behind is made to draw the box's own mark
         # and no-break space, so that only a reading of the process table,
         # never of the screen, answers false.
-        client.send_input(s.pty, b"PS1='\xe2\x9d\xaf\xc2\xa0'\r")
+        client.wait_quiet(s.pty, 0.5, 10.0)
+        client.send_input(
+            s.pty, b"PS1=$(printf '\\342\\235\\257\\302\\240'); printf '\\033[r\\033[2J\\033[H'\r"
+        )
         if not client.wait_until(lambda: "\u276f\u00a0" in s.capture().split("\n")[-1], 10.0):
-            notes.append("the shell left behind did not draw the box's mark as its prompt; checked as is")
+            raise CheckSkipped(
+                "the shell left behind did not draw the box's mark as its prompt, so the reading could not "
+                "be set up (a shell that takes PS1=$(printf ...) is needed)"
+            )
         client.pump(2.5)
         if s.facts().get("takes_prompt") is not False:
             raise CheckFailed(

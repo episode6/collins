@@ -802,8 +802,8 @@ and hints; that row is not part of the box.
 - **A carriage return submits** when it arrives in a write of its own
   after the text (Collins waits 250 ms between the two). What is known of a
   carriage return inside the same chunk as the text: a four-byte chunk
-  ending in one (`/bg` and its Return, the handoff Collins has typed that
-  way since 2026-07) submits, while a prompt's text with its Return in one
+  ending in one (`/bg` and its Return, the handoff Collins typed that way
+  from 2026-07) submits, while a prompt's text with its Return in one
   chunk is left typed, the Return a line break; the threshold between the
   two is unmeasured.
 - **Pastes.** Text wrapped in the bracketed-paste markers (`ESC [ 200 ~`

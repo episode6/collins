@@ -173,9 +173,18 @@ class Transcript:
         self._append(record)
 
     def assistant(self, text: str, model: str, effort: str) -> None:
-        # What a naive reading trips on, as the appendix lists it: a record
-        # the CLI made up locally, with the placeholder model, and a
-        # sub-agent's record on a sidechain with a model of its own.
+        self._append(
+            {
+                "type": "assistant",
+                **self._common(),
+                "effort": effort,
+                "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": text}]},
+            }
+        )
+        # What a naive reading trips on, as the appendix lists it, written
+        # after the real record so that a reading of the last assistant record
+        # finds them: one the CLI made up locally, with the placeholder model,
+        # and a sub-agent's record on a sidechain with a model of its own.
         self._append(
             {
                 "type": "assistant",
@@ -200,13 +209,6 @@ class Transcript:
                 },
             }
         )
-        record = {
-            "type": "assistant",
-            **self._common(),
-            "effort": effort,
-            "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": text}]},
-        }
-        self._append(record)
 
     def turn_duration(self, duration_ms: int) -> None:
         self._append(
@@ -682,8 +684,8 @@ class Fake:
         write(f"{CSI}?25l{CSI}{layout['region_bottom'] + 1};1H{CSI}J")
         write(f"{CSI}{layout['top_rule']};1H{RULE * s.cols}")
         write(f"{CSI}{layout['first_prompt']};1HWhich way? (Enter to pick)")
-        write(f"{CSI}{layout['bottom_rule']};1H{MARK} 1. This way")
-        write(f"{CSI}{layout['mode']};1H  2. That way")
+        write(f"{CSI}{layout['bottom_rule']};1H{MARK} {CSI}2m1. This way{CSI}0m")
+        write(f"{CSI}{layout['mode']};1H  {CSI}2m2. That way{CSI}0m")
         write(f"{CSI}{layout['bottom_rule']};3H{CSI}?25h")
         self.in_menu = True
 
@@ -717,7 +719,7 @@ class Fake:
                 self.effort = argument
                 output = f"Set effort level to {argument} (this session only)"
             else:
-                output = f"Effort level is {self.effort}"
+                output = f"effort stays {self.effort}"
         self.transcript.local_command(command, argument, output)
         self.box.clear()
         self.emit(f"> {command} {argument}".rstrip())
@@ -876,7 +878,7 @@ class Fake:
         write(f"{CSI}c{CSI}?u")  # who is this terminal, and does it speak kitty's keyboard protocol
         self.progress(0)  # the CLI clears its report once at startup
         self.title("fake claude")
-        self.draw_all(f"fake claude {VERSION} in {self.cwd}")
+        self.draw_all(f"fake claude {VERSION} in {self.cwd} progress:{'on' if self.progress_on else 'off'}")
         try:
             while self.running:
                 timeout = self.next_due()

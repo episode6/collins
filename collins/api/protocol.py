@@ -1475,7 +1475,8 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "close",
         "End a pty's session: `exit` types the agent's own exit keys, `background` its handoff "
-        "command, `kill` forces it; `text` is keystrokes to type instead of the server's own.",
+        "command, `kill` forces it; `text` is keystrokes to type instead of the server's own. A "
+        "`background` close of a session that cannot be handed off is refused.",
         family=FAMILY_CORE, level=1,
         request=_request(
             {
