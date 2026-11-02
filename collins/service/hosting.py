@@ -402,16 +402,26 @@ class SessionRecord:
         """One read of every fact a poll or a settle also sends, through the
         road that records it: what moved goes to the attached clients and
         `_sent` holds it. What was read; with no pty (before the spawn, after
-        the exit) there is nothing to read and it is recorded nowhere."""
-        tracked = {
+        the exit) there is nothing to read and it is recorded nowhere.
+
+        The process facts go first and are recorded before the box is read:
+        `Session.takes_prompt` consults the recorded `agent_running` (§5
+        ruling 40), and an attach between the agent appearing and the poll
+        that finds it read the box under the old word, then recorded the
+        new one, so the poll saw no flip and `takes_prompt` stuck false
+        until the next output (the verification of PR 648, V2)."""
+        live = self.pty() is not None
+        process = self.process_facts()
+        if live:
+            self._send_changed(process)
+        rest = {
             **self.launch_facts(),
             **self.sandbox_facts(),
             **self.box_facts(),
-            **self.process_facts(),
         }
-        if self.pty() is not None:
-            self._send_changed(tracked)
-        return tracked
+        if live:
+            self._send_changed(rest)
+        return {**process, **rest}
 
     def snapshot(self) -> dict:
         """Every fact, for a client attaching or subscribing. A snapshot and
@@ -555,8 +565,8 @@ class SessionRecord:
     def refresh_process_facts(self) -> None:
         """The /proc poll's tick: the questions that walk the process tree.
         `agent_running` flipping re-reads the box facts, which consult it
-        (`Session.takes_prompt`), so the two never disagree for longer than
-        a poll, and a shell alone drawing the CLI's mark reads
+        (`Session.takes_prompt`), so any disagreement between the two lasts
+        one poll at most, and a shell alone drawing the CLI's mark reads
         `takes_prompt` false until the poll that finds the agent, with no
         settle in between (§5 ruling 40)."""
         if self.pty() is None:

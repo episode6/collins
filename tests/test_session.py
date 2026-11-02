@@ -375,12 +375,18 @@ def test_a_shell_alone_drawing_the_mark_takes_no_prompt(rig):
     read. A shell the agent left behind can draw the CLI's mark, and a
     prompt typed then lands in the shell: whatever the screen shows, no
     agent recorded is no prompt taken, and unknown is no agent."""
-    session, _term, host, _clock = rig
+    session, term, host, _clock = rig
     host.agent_running_recorded = False
     assert not session.takes_prompt()
     assert session.prompt_block()
+    # Nor is anything on the row typed text: the hint, or a shell's own
+    # prompt, read as a prompt entered while the agent was unrecorded.
+    assert session.entered_prompt() is None
+    term.write(b"half a sentence")
+    assert session.entered_prompt() is None
     host.agent_running_recorded = True
-    assert session.takes_prompt()
+    prompt = session.entered_prompt()
+    assert prompt is not None and prompt.text == "half a sentence"
 
 
 def test_typed_text_blocks_a_prompt_and_reads_back(rig):

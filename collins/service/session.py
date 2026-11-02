@@ -463,8 +463,9 @@ class SessionHost(Protocol):
     def agent_running(self) -> bool:
         """The host's last recorded reading of `agent_running`, the one its
         clients were last sent; False before the first reading. What
-        `takes_prompt` consults, so that the two facts never disagree for
-        longer than a poll and no settle walks /proc (§5 ruling 40)."""
+        `takes_prompt` consults, so that any disagreement between the two
+        facts lasts one poll at most and no settle walks /proc (§5 ruling
+        40)."""
         ...
 
 
@@ -775,10 +776,11 @@ class Session:
         this does is find what it reads — the line the cursor is on, how far
         into it the cursor sits, and whether the rest of that line is the
         agent's own dim ghost text — and rule out a terminal with no agent
-        in it: a shell the agent left behind draws a prompt of its own, and
-        whatever that looks like a prompt typed now lands in the shell, so
-        the host's last recorded `agent_running` gates the read (§5 ruling
-        40; the facts page's first required property of `takes_prompt`).
+        in it: the shell that outlives an exited agent draws its own prompt,
+        and whatever that looks like a prompt typed now goes to the shell,
+        so the host's last recorded `agent_running` gates the read (§5
+        ruling 40; the facts page's first required property of
+        `takes_prompt`).
         """
         if self.pty.child_pid() is None:
             return False
@@ -834,6 +836,11 @@ class Session:
         rows sit below it whenever the cursor was arrowed back up into the box.
         """
         if self.pty.child_pid() is None or self.takes_prompt():
+            return None
+        if not self.host.agent_running():
+            # No agent recorded, no box: what the screen shows is a shell's,
+            # or the CLI's hint before the poll that finds the agent, and
+            # neither is typed text (the verification of PR 648, V3).
             return None
         _column, cursor_row = self.screen.cursor()
         rows = self.screen.rows()

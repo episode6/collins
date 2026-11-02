@@ -110,6 +110,13 @@ downloads of each version, see the
   empty input box, and a prompt sent then would have landed in the shell.
   The reading now takes the service's own word on whether the agent runs,
   and is re-read the moment that word changes.
+- **Fixed: a window that attached just as the agent came up could keep
+  reading its input box as unusable.** The attach's snapshot read the box
+  before it recorded that the agent was there, so the box stayed reported
+  as not taking a prompt until the agent's next output; and before the
+  agent was recorded, the CLI's own hint in the empty box was reported as
+  typed text. The snapshot records the agent first, and a box with no
+  agent recorded reports no typed text.
 - **The terminal contract is published.** [The terminal
   contract](/api/terminal) is the third page of the API spec: what a server
   does to a pty's stream (the terminal queries it answers in the child's
