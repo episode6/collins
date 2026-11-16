@@ -51,6 +51,7 @@ from . import (  # noqa: E402
     composerkeys,
     dropimages,
     editorfiles,
+    growbox,
     pictures,
     remoteuploads,
 )
@@ -234,6 +235,11 @@ class ComposerView(Gtk.Box):
         scroller.set_max_content_height(_MAX_CONTENT_HEIGHT)
         scroller.set_propagate_natural_height(True)
         self._scroller = scroller
+        # A restored draft grows the box on the frame it lands, not when
+        # GTK's own layout gets round to it (growbox).
+        self._height_hold = growbox.HeightHold(
+            self._view, scroller, _MIN_CONTENT_HEIGHT, _MAX_CONTENT_HEIGHT
+        )
         self.append(scroller)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -685,6 +691,8 @@ class ComposerView(Gtk.Box):
         # Docked, the panel tab's own X already closes the composer, so the
         # chrome's close button would be a second one an inch away.
         self._close_btn.set_visible(self._chrome and not self._docked)
+        # Docked, the box fills its pane rather than growing with the text.
+        self._height_hold.set_enabled(not self._docked)
         if self._docked:
             self.add_css_class("docked")
             self._scroller.set_max_content_height(-1)

@@ -230,6 +230,18 @@ empty menu and locks tiny.
 
 ## Footguns
 
+- The box's height is not left to GTK. A `Gtk.TextView` grows only by the
+  lines it has laid out, and it lays out the off-screen ones on an idle the
+  window's own landings starve, so a restored draft used to sit at three
+  lines for seconds. `growbox.HeightHold` (in `ComposerView`, and in
+  `prview`'s comment and reply boxes) measures every change with Pango, one
+  layout per paragraph as the view does it. A frame callback holds the
+  scroller's minimum content height at that estimate until the view's own
+  measure is within `textheight.SLACK_PX`, or for `textheight.HOLD_S`
+  at most. Docked, the hold is off (the box fills its pane).
+  `check_new_chat.py` starves the idle on purpose (a source at priority
+  122) and checks that the box grows anyway.
+
 - `send-requested` grew arguments (text, worktree, model, effort); e2e checks
   emit it by hand — grep `scripts/check_*.py` when changing the signature.
 - Never hand the composer a `feed_child_text` of the raw draft on close; the

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-02. Full change history: git log for this file.
+fork. Last modified: 2026-11-15. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -635,6 +635,11 @@ downloads of each version, see the
   one service folded each other's sidebars. It is now kept in this
   device's own file, per service; the first time a device meets a service
   it takes the service's old value, once, so nothing refolds.
+- **Fixed: a long draft opened in a three-line box.** A draft restored onto
+  the new-chat screen or into the composer, or a reply draft on a pull
+  request page, sat at the box's minimum height for a second or two on a busy
+  window before growing to fit its text. The box now takes the draft's height
+  on the frame it appears.
 
 ### v0.1.4 — 2026-09-27
 

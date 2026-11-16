@@ -134,6 +134,7 @@ from . import (  # noqa: E402
     avatars,
     bodyimages,
     dialogs,
+    growbox,
     keyedslots,
     mdblocks,
     mdwidgets,
@@ -1882,6 +1883,7 @@ class _Composer(Gtk.Box):
         entry.set_min_content_height(64)
         entry.set_max_content_height(220)
         entry.set_propagate_natural_height(True)
+        self._height_hold = growbox.HeightHold(self._text, entry, 64, 220)
         self.append(entry)
 
         # Wrapping rather than a box: four buttons side by side would otherwise
@@ -2246,6 +2248,7 @@ class _ThreadCard(Gtk.Box):
         entry.set_min_content_height(48)
         entry.set_max_content_height(160)
         entry.set_propagate_natural_height(True)
+        self._height_hold = growbox.HeightHold(self._text, entry, 48, 160)
         self._post_btn = _BusyButton(label=_("Post reply"))
         self._post_btn.add_css_class("suggested-action")
         self._post_btn.connect("clicked", lambda *_a: self._post_reply())
