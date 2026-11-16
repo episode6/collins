@@ -642,6 +642,11 @@ downloads of each version, see the
   one service folded each other's sidebars. It is now kept in this
   device's own file, per service; the first time a device meets a service
   it takes the service's old value, once, so nothing refolds.
+- **Fixed: a long draft opened in a three-line box.** A draft restored onto
+  the new-chat screen or into the composer, or a reply draft on a pull
+  request page, sat at the box's minimum height for a second or two on a busy
+  window before growing to fit its text. The box now takes the draft's height
+  on the frame it appears.
 
 ### v0.1.4 — 2026-09-27
 

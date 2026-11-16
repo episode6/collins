@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 E2E = tempfile.mkdtemp(prefix="collins-newchat-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
@@ -388,8 +389,37 @@ def after_the_reopen() -> bool:
     shell = tab.panel_shells()[0]
     state["shell"] = shell
     check("an idle shell follows", shell.follow_cwd(ELSEWHERE))
+    a_long_draft_grows_the_box_at_once(tab)
     GLib.timeout_add(1200, after_the_follow)
     return GLib.SOURCE_REMOVE
+
+
+def a_long_draft_grows_the_box_at_once(tab) -> None:
+    """A draft taller than the box's minimum grows it on the frame it lands,
+    not when GTK's text layout gets round to the lines off screen: that
+    finishes on an idle below every PRIORITY_DEFAULT landing, which a busy
+    window starves for seconds (growbox). Starve it here on purpose — a
+    source at 122 lets frames paint (120) and holds the layout idle (125)."""
+    started = GLib.get_monotonic_time()
+
+    def hog() -> bool:
+        time.sleep(0.001)
+        return GLib.get_monotonic_time() - started < 1_000_000
+
+    scroller = tab._new_chat.composer._scroller
+    floor = scroller.get_min_content_height()
+    GLib.idle_add(hog, priority=122)
+    tab._new_chat.set_text("\n".join(f"line {i} of a long kept draft" for i in range(8)))
+
+    def grown() -> bool:
+        check(
+            "a long draft grows the box while GTK's layout idle is starved",
+            scroller.get_height() > floor + 40,
+            (scroller.get_height(), floor),
+        )
+        return GLib.SOURCE_REMOVE
+
+    GLib.timeout_add(400, grown)
 
 
 def after_the_follow() -> bool:

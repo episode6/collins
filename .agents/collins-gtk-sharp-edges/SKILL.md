@@ -55,6 +55,14 @@ Feature-specific traps live in the feature skills; these are the general ones.
 - `scroll_to_iter` on a fresh text buffer stays at the top (heights are
   estimates until validation idles); re-issue `scroll_to_mark` from a
   `PRIORITY_LOW` idle.
+- A `Gtk.TextView`'s natural height counts only the lines it has laid out.
+  A whole-buffer write lays out the on-screen lines (the scroller's minimum)
+  at once and the rest on an idle at 125 (`GTK_TEXT_VIEW_PRIORITY_VALIDATE`),
+  so a grow-with-the-text box sits at its minimum for as long as the app's own
+  landings keep that idle from running (seconds, in a busy window). A box
+  that must be the right size on its first frame uses `growbox.HeightHold`.
+  To recreate the stall, run an always-ready idle at priority 122: frames
+  (120) still paint and the layout idle (125) never runs.
 
 ## Focus, input, hit-testing
 
