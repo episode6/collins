@@ -263,6 +263,7 @@ class ClientTerminal:
         self.frame: TerminalFrame | None = None
         self.grids_withheld = 0  # allocations not sent while pinned, for the checks
         self.dropped_commits = 0  # what the guard swallowed, for the checks
+        self._withheld_grid: tuple[int, int] | None = None  # the last grid logged as withheld
         terminal.connect("commit", self._on_commit)
         terminal.connect("notify::has-focus", self._on_focus_changed)
         # A click into a pinned terminal takes the size (§3.3): capture
@@ -291,6 +292,7 @@ class ClientTerminal:
         if reset:
             # A redraw the service sent on its own (flow control, a resize
             # for another client): the screen it lands on is stale.
+            log.info("pty %s: the service sent a redraw it was not asked for; resetting the terminal", pty)
             self.terminal.reset(True, True)
         self.terminal.feed(data)
         if sentinel is not None:
@@ -314,6 +316,16 @@ class ClientTerminal:
 
     def _apply_role(self, message: dict) -> None:
         change = self.role.apply(message)
+        if change != sizerole.UNCHANGED:
+            log.info(
+                "pty %s: size role %s (active %s, the pty %sx%s, sized for %r)",
+                self.pty,
+                change,
+                message.get("active"),
+                message.get("cols"),
+                message.get("rows"),
+                message.get("sized_for"),
+            )
         if change in (sizerole.PINNED, sizerole.MOVED):
             grid = self.role.pinned
             if grid is not None:
@@ -450,7 +462,11 @@ class ClientTerminal:
             return
         if not self.role.sends_grid:
             self.grids_withheld += 1
+            if grid != self._withheld_grid:
+                self._withheld_grid = grid
+                log.info("pty %s: not sending the grid %sx%s: another client owns the size", self.pty, *grid)
             return
+        self._withheld_grid = None
         self._last_grid = grid
         self.send_grid()
 

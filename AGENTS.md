@@ -581,8 +581,12 @@ the service saves pty models), `COLLINS_UPLOADS_DIR` (the uploads; the one overr
 check), plus `XDG_CONFIG_HOME` / `XDG_STATE_HOME` /
 `XDG_RUNTIME_DIR`.
 Diagnostics: `COLLINS_LOG=INFO` (the service's too: a window-spawned service
-goes to `/dev/null` unless it is set; under the unit it is the journal), `COLLINS_SHIM_LOG=<file>`,
-`COLLINS_GIT_DEBUG_LOG=<file>`.
+goes to `/dev/null` unless it is set; under the unit it is the journal;
+`./start-debug` sets it and writes the window's, service's and keeper's
+timestamped lines to `~/.local/state/collins/debug.log`, the run before in
+`debug.log.1`: at INFO the pty server logs who attaches, who owns each
+pty's size, held resizes, catch-up redraws and a client whose ack window
+stays full), `COLLINS_SHIM_LOG=<file>`, `COLLINS_GIT_DEBUG_LOG=<file>`.
 
 ## Conventions that hold everywhere
 
@@ -639,7 +643,7 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 python3 scripts/verify_versions.py          # every version copy agrees
 python3 scripts/run_conformance.py          # the conformance kit (conformance/) against a scratch service of this checkout
 python3 -m collins.service.main --app-id X  # a service by hand (--check, --print-socket too)
-./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug)
+./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug), logging to ~/.local/state/collins/debug.log
 ./scripts/install-service.sh                # pipx-install this checkout's service; stops every running service first
 ```
 

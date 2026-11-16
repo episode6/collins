@@ -343,6 +343,17 @@ collins-service`). A service spawned by the window sends its output to
 `/dev/null` unless `COLLINS_LOG` is set in the window's environment, in
 which case it inherits the window's stdout and stderr.
 
+`./start-debug` logs at `INFO` by default (set `COLLINS_LOG` to choose
+another level) and writes the window's, the service's and the keeper's
+output, every line timestamped, to `~/.local/state/collins/debug.log`;
+the previous run's file is kept as `debug.log.1`. At `INFO` the service
+records, per pty, which client attached and detached, which client owns
+its size, a resize it held because another client owns the size, a
+redraw sent in place of a backlog, and a client whose ack window filled
+(with a warning when it stays full for ten seconds while output keeps
+coming, the trace of a frozen terminal). The window records the size
+it did not send and a redraw it was sent unasked.
+
 ## Requirements
 
 `libsoup` 3 (`gir1.2-soup-3.0`, `libsoup3`) carries the socket and is a
