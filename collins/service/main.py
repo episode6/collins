@@ -793,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(
         level=(os.environ.get("COLLINS_LOG") or "WARNING").upper(),
-        format="collins-service %(levelname)s %(name)s: %(message)s",
+        format="%(asctime)s collins-service %(levelname)s %(name)s: %(message)s",
     )
     os.environ["COLLINS_APP_ID"] = args.app_id
     if args.check:

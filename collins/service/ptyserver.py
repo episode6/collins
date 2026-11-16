@@ -252,6 +252,21 @@ from . import termscreen, termstream
 
 log = logging.getLogger(__name__)
 
+
+def sink_name(sink) -> str:
+    """A sink as the log names it: its client's device and client id (a
+    socket sink's), else its kind, and always a short tag of its identity,
+    so two views of one pty from one device tell apart. Never raises."""
+    try:
+        client = getattr(sink, "client", None)
+        client_id = getattr(client, "client_id", None) or ""
+        device = getattr(sink, "device", None) or ""
+        who = "/".join(part for part in (device, client_id[:8]) if part) or type(sink).__name__
+    except Exception:
+        who = "?"
+    return f"{who}#{id(sink) & 0xFFFF:04x}"
+
+
 # The typing queue's bound per pty: past it a client's input is dropped
 # whole until the queue has drained, never blocked on. The filter's replies
 # are not counted.
@@ -1154,6 +1169,12 @@ class PtyServer:
             if not attachment.ever_drained and not attachment.fallback_logged:
                 attachment.fallback_logged = True
                 log.warning("pty %d: a sink never reports draining; redrawing it on the fallback", pty.id)
+            log.info(
+                "pty %d: %s is %d bytes behind; redrawing it instead of the backlog",
+                pty.id,
+                sink_name(attachment.sink),
+                attachment.queued,
+            )
             self._redraw(pty, attachment)
             return
         attachment.queued += len(data)
@@ -1280,10 +1301,12 @@ class PtyServer:
             # to be released after the redraw, stale output painted over
             # the fresh screen: the review of PR 604, should-fix 4).
             attachment.cols, attachment.rows = cols, rows
+        log.info("pty %d: %s attached at %dx%d", pty.id, sink_name(sink), cols, rows)
         became_active = False
         if pty.active is None:
             pty.active = key
             became_active = True
+            log.info("pty %d: the active client is now %s (the first to attach)", pty.id, sink_name(sink))
             self.apply_pty_term(pty)
         if pty.active == key:
             pty.pending_sizes.pop(key, None)
@@ -1316,9 +1339,16 @@ class PtyServer:
         key = id(attachment.sink)
         pty.attachments.pop(key, None)
         pty.pending_sizes.pop(key, None)
+        log.info(
+            "pty %d: %s detached%s",
+            pty.id,
+            sink_name(attachment.sink),
+            " (the active client)" if pty.active == key else "",
+        )
         if pty.active != key:
             return
         if not pty.attachments:
+            log.info("pty %d: no client attached; the next to attach becomes the active one", pty.id)
             pty.active = None  # the next sink to attach takes it
             self.apply_pty_term(pty)
             self._announce(pty)
@@ -1411,6 +1441,12 @@ class PtyServer:
         size it asked for while it was not is applied (or the change is
         announced)."""
         if pty.active != key:
+            attachment = pty.attachments.get(key)
+            log.info(
+                "pty %d: the active client is now %s",
+                pty.id,
+                sink_name(attachment.sink) if attachment is not None else f"#{key & 0xFFFF:04x}",
+            )
             pty.active = key
             self.apply_pty_term(pty)
             size = pty.pending_sizes.pop(key, None)
@@ -1433,15 +1469,32 @@ class PtyServer:
             key = id(sink)
             attachment = pty.attachments.get(key)
             if attachment is None:
+                log.info(
+                    "pty %d: a resize to %dx%d from %s, which is not attached; ignored",
+                    pty.id,
+                    cols,
+                    rows,
+                    sink_name(sink),
+                )
                 return
             attachment.cols, attachment.rows = cols, rows
             if pty.active != key:
+                active = pty.attachments.get(pty.active) if pty.active is not None else None
+                log.info(
+                    "pty %d: %s asked for %dx%d; held, the active client is %s",
+                    pty.id,
+                    sink_name(sink),
+                    cols,
+                    rows,
+                    sink_name(active.sink) if active is not None else "none",
+                )
                 pty.pending_sizes[key] = (cols, rows)
                 return
         if (cols, rows) != (pty.cols, pty.rows):
             self._apply_size(pty, cols, rows)
 
     def _apply_size(self, pty: Pty, cols: int, rows: int, skip: _Attachment | None = None) -> None:
+        log.info("pty %d: resized from %dx%d to %dx%d", pty.id, pty.cols, pty.rows, cols, rows)
         pty.cols, pty.rows = cols, rows
         pty.state.cols, pty.state.rows = cols, rows
         pty.screen.resize(cols, rows)

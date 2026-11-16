@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-02. Full change history: git log for this file.
+fork. Last modified: 2026-11-15. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,13 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **A garbled or frozen session terminal leaves a trace.** At
+  `COLLINS_LOG=INFO` the service now logs which client owns each
+  terminal's size, a resize it held for another client, a redraw sent in
+  place of a backlog, and a client that stopped acknowledging output; the
+  window logs a size it held back and a redraw it was sent unasked. Log
+  lines are timestamped, and `./start-debug` logs at `INFO` to
+  `~/.local/state/collins/debug.log` by default.
 - **The service's API is published, under MIT.** The protocol
   `collins-service` speaks over its socket has a spec of its own at
   [docs/api](/api/): the transport, connecting over ssh, the frames, the

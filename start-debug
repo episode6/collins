@@ -40,4 +40,19 @@ stop_matching() {
 stop_matching "(collins\.service\.main|collins-service) --app-id $APP_ID_RE" "$COLLINS_APP_ID service"
 stop_matching "(collins\.service\.keeper|collins-keeper) --app-id $APP_ID_RE" "$COLLINS_APP_ID keeper"
 
+# Logged at INFO unless COLLINS_LOG says otherwise, to a file: a
+# window-spawned service and its keeper inherit this output
+# (connection.py), so the window's, the service's and the keeper's lines
+# land in one timestamped file to read after something has gone wrong.
+# A file, not a tee to the terminal: the service and the keeper outlive
+# the window and this terminal, and a tee would die under them. The
+# previous run's file is kept beside it as debug.log.1.
+export COLLINS_LOG="${COLLINS_LOG:-INFO}"
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/collins"
+LOG_FILE="$LOG_DIR/debug.log"
+mkdir -p "$LOG_DIR"
+[ -f "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.1"
+echo "start-debug: logging at $COLLINS_LOG to $LOG_FILE (tail -f it to follow)" >&2
+exec >>"$LOG_FILE" 2>&1
+
 exec python3 -m collins

@@ -1016,7 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=(os.environ.get("COLLINS_LOG") or "WARNING").upper(),
-        format="collins-keeper %(levelname)s: %(message)s",
+        format="%(asctime)s collins-keeper %(levelname)s: %(message)s",
     )
     path = args.socket or default_socket_path(args.app_id)
     if not path:

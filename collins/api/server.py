@@ -73,6 +73,7 @@ import os
 import secrets
 import socket
 import stat
+import time
 from collections import deque
 from collections.abc import Callable
 
@@ -85,6 +86,10 @@ from .. import __version__, mcptools, sandboxplan, uploads
 from . import protocol
 
 log = logging.getLogger(__name__)
+
+# How long a sink's ack window may stay full, output still arriving, before
+# the log warns that the client has stopped acking (its view is frozen).
+HELD_WARN_S = 10.0
 
 WS_PATH = "/api/ws"
 # Plain HTTP on the same listener (§3.2): a blob's bytes, never a path.
@@ -220,7 +225,7 @@ class _Sink:
     protocol: `send_output`, `send_event`, `drop_queued`, `device`, `term`)
     with the ack window of §3.20 in front of libsoup's unbounded queue."""
 
-    __slots__ = ("client", "pty", "sent", "acked", "pending", "pending_bytes")
+    __slots__ = ("client", "pty", "sent", "acked", "pending", "pending_bytes", "held_since", "held_warned")
 
     def __init__(self, client: SocketClient, pty: int) -> None:
         self.client = client
@@ -229,6 +234,11 @@ class _Sink:
         self.acked = 0  # live bytes the client said it fed
         self.pending: deque[bytes] = deque()  # live frames waiting on the window
         self.pending_bytes = 0
+        # When the window last filled (monotonic seconds), 0 while it is open;
+        # for the log only: a client that stops acking freezes its view of
+        # the pty with no other trace.
+        self.held_since = 0.0
+        self.held_warned = False
 
     @property
     def device(self) -> str:
@@ -247,6 +257,7 @@ class _Sink:
         if not data:
             return
         if self.pending or self.sent - self.acked >= protocol.ACK_WINDOW:
+            self._note_held()
             self.pending.append(bytes(data))
             self.pending_bytes += len(data)
             return
@@ -266,13 +277,61 @@ class _Sink:
         it. `acked` stays where it is: what libsoup holds is still unacked,
         and moving the mark would open a fresh window on top of it (one
         window per fallback cycle until the pong timeout cut the client)."""
+        if self.pending:
+            log.info(
+                "api: pty %d for %s: %d held bytes dropped for a redraw (%d sent, %d acked)",
+                self.pty,
+                self._who(),
+                self.pending_bytes,
+                self.sent,
+                self.acked,
+            )
         self.pending.clear()
         self.pending_bytes = 0
+
+    def _who(self) -> str:
+        return f"{self.client.device or '?'}/{(self.client.client_id or '')[:8]}"
+
+    def _note_held(self) -> None:
+        """The log's side of a full window: once when it fills, and a
+        warning once it has stayed full past `HELD_WARN_S` with output
+        still arriving."""
+        now = time.monotonic()
+        if not self.held_since:
+            self.held_since = now
+            self.held_warned = False
+            log.info(
+                "api: pty %d for %s: ack window full (%d sent, %d acked); holding output",
+                self.pty,
+                self._who(),
+                self.sent,
+                self.acked,
+            )
+        elif not self.held_warned and now - self.held_since >= HELD_WARN_S:
+            self.held_warned = True
+            log.warning(
+                "api: pty %d for %s: output held %.0f s with no ack (%d sent, %d acked, %d bytes waiting)",
+                self.pty,
+                self._who(),
+                now - self.held_since,
+                self.sent,
+                self.acked,
+                self.pending_bytes,
+            )
 
     def ack(self, offset: int) -> int:
         """The client fed live output up to *offset*: release what the
         window now allows and return how many bytes the ack covered."""
         if offset <= self.acked:
+            if offset < self.acked:
+                log.info(
+                    "api: pty %d for %s: an ack at %d behind the mark %d (%d sent); ignored",
+                    self.pty,
+                    self._who(),
+                    offset,
+                    self.acked,
+                    self.sent,
+                )
             return 0
         covered = min(offset, self.sent) - self.acked
         self.acked = max(self.acked, min(offset, self.sent))
@@ -280,6 +339,14 @@ class _Sink:
             data = self.pending.popleft()
             self.pending_bytes -= len(data)
             self._emit(data)
+        if self.held_since and not self.pending:
+            log.info(
+                "api: pty %d for %s: window open again after %.1f s",
+                self.pty,
+                self._who(),
+                time.monotonic() - self.held_since,
+            )
+            self.held_since = 0.0
         return covered
 
 
