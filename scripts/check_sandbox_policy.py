@@ -962,6 +962,16 @@ def forgotten() -> bool:
     os.symlink(OTHER, f"{sandboxplan.box_home(box)}/dev/lib")  # a live grant's link
     win.state.set_sandboxed(gone, True, box=box)
     state["gone"] = (gone, box)
+    # The two writes above are the mirror's `send`s on the primary
+    # WebSocket; the forget below is a `call` on the sync channel, and
+    # nothing orders one connection against the other. A forget that
+    # overtakes them finds no box to forget, and the late writes name it
+    # again (the CI flake on PR 653). So the service holds both first.
+    staged = e2e_service.wait_until(
+        lambda: AppState().sandbox_box(gone) == box and AppState().get_sandbox_grants(box) == [OTHER],
+        timeout_s=10,
+    )
+    check("the forgotten session's box and grants reached the service", staged, AppState().sandboxed_sessions)
     win._forget_transcript(gone)
     check("a forgotten session keeps its sticky flag", AppState().is_sandboxed(gone))
     check("…and names no box", AppState().sandbox_box(gone) == "", AppState().sandboxed_sessions)

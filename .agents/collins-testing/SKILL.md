@@ -350,7 +350,14 @@ the socket: the reply and the event land on the main loop afterwards, so a check
 a green row) or off a tab (`session-resolved` from a probed
 `host.session_resolved`) pumps first: `e2e_service.settle()` (150 ms,
 then until nothing is pending) or `wait_until(predicate)`. Never loosen
-the assertion; wait for it. **Never `call` from the link's own I/O thread**
+the assertion; wait for it. **A `call` can overtake a mirror's write.**
+The mirrors write with `send` on the primary WebSocket and `call` rides
+the sync channel; nothing orders one connection against the other, so
+a check that stages state through a mirror (`win.state.set_*`) and then
+makes a request that acts on it (`_forget_transcript`'s `store.forget`)
+waits until the service holds the staging first (`wait_until` on
+`AppState()` read from disk): `check_sandbox_policy.py`'s `forgotten()`
+flaked on CI without it. **Never `call` from the link's own I/O thread**
 (`SocketLink.call` raises there): a blocking `call` is for the main thread
 or a worker thread, never a callback the link's thread runs. A check that must observe a transient reads
 it with nothing pumped where the code sets it in the call (the clone dialog's
