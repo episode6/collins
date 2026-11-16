@@ -822,9 +822,9 @@ names the side to upgrade; the forward is stopped before any exit); the
 `local` proof is not sent over a forward at all; `_on_link_lost` cancels
 a WAITING round's poll chain and `_poll` stops when its generation moved
 (two chains once shook hands twice); `detach_all_tabs` drops a page's
-settling state (`_closing_pages`, `_close_asking`) so every page leaves the old service instead of re-attaching
-its old pty id on the new one; `expect_restart` is skipped for a remote
-restart (the pid is the box's).
+settling state (`_closing_pages`, `_close_asking`) so every page leaves
+the old service instead of re-attaching its old pty id on the new one;
+`expect_restart` is skipped for a remote restart (the pid is the box's).
 **From its verification (ruled 2026-10-29):** the socket and pid file are
 `<runtime dir>/collins/remote/<app id>/<id>.{sock,pid}` — `ui-state.json`
 and so the connection ids are shared by the real and the debug instance,

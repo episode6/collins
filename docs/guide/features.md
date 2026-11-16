@@ -30,7 +30,7 @@ the app reads, are in
   optional second line for the project folder path. Within a project,
   sessions sort by creation time, newest first, so rows don't jump around.
   Pointing at a row swaps its timestamp for its actions: **archive** on
-  every row, plus **stop** and **background** on sessions with a tab open.
+  every row, plus **stop** and **detach** on sessions with a tab open.
 - **Aggregated pull request status on every session**: a mark ahead of the
   title reads a session's PRs into one glyph — their state, plus whatever
   needs attention most (failed checks, conflicts, unanswered comments,
@@ -1637,8 +1637,8 @@ permission prompts inside**, **Share GitHub CLI login**, **Share SSH
 agent**, **Let sandboxed sessions write settings and hooks**, and a
 status row saying whether bubblewrap was found and whether allowed
 directories reach a running session — what to do **when quitting with running sessions** (leave
-running / ask / stop sessions / background / hide) and **when archiving a running session** (ask /
-exit / background), **Archive on claude.ai too**, **Delete
+running / ask / stop sessions / hide) and **when archiving a running session** (ask /
+exit / detach), **Archive on claude.ai too**, **Delete
 archived sessions after** (a number and a unit; 0 never), **Exact busy
 tracking from the agent** (on: the sidebar's working indicator reads the
 CLI's own progress announcements) with a **Poll for background sessions**
