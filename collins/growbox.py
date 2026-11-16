@@ -96,9 +96,14 @@ class HeightHold:
 
     def _wanted_height(self, width: int) -> int:
         buffer = self._view.get_buffer()
+        # Read no more than the prefix needs: the line bound, or the char
+        # bound for a paste with few breaks, whichever comes first.
         found, end = buffer.get_iter_at_line(textheight.PREFIX_LINES)
         if not found:
             end = buffer.get_end_iter()
+        cap = buffer.get_iter_at_offset(textheight.PREFIX_CHARS)
+        if cap.compare(end) < 0:
+            end = cap
         text = textheight.measured_prefix(buffer.get_text(buffer.get_start_iter(), end, True))
         if self._estimate is not None and self._estimate[:2] == (text, width):
             return self._estimate[2]
