@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-01. Full change history: git log for this file.
+fork. Last modified: 2026-11-15. Full change history: git log for this file.
 -->
 
 # Features
@@ -30,7 +30,7 @@ the app reads, are in
   optional second line for the project folder path. Within a project,
   sessions sort by creation time, newest first, so rows don't jump around.
   Pointing at a row swaps its timestamp for its actions: **archive** on
-  every row, plus **stop** and **background** on sessions with a tab open.
+  every row, plus **stop** and **detach** on sessions with a tab open.
 - **Aggregated pull request status on every session**: a mark ahead of the
   title reads a session's PRs into one glyph — their state, plus whatever
   needs attention most (failed checks, conflicts, unanswered comments,
@@ -339,11 +339,12 @@ Enter opens, Esc closes.
   `Ctrl+Shift+C` / `Ctrl+Shift+V` always work.
 - Closing a session asks the agent to **exit cleanly** (Claude Code's
   `Ctrl+C` `Ctrl+C`, which works from whatever the agent happens to be
-  showing) in the background first — or the dialog offers to **background
-  the session** instead (`/bg`), leaving it running detached to re-attach
-  to later. While a session is focused, two header buttons do the same
-  directly, skipping the dialog. Backgrounding is greyed out for the second
-  or two before a brand-new session's id is known — the tooltip says so.
+  showing) in the background first — or the dialog offers to **detach
+  the session** instead, leaving it running in the Collins service to
+  re-attach to later. While a session is focused, two header buttons (and
+  the same two on its sidebar row) do the same directly, skipping the
+  dialog. Collins never sends the CLI's `/bg`: a background agent you
+  started yourself still gets its yellow line, and opening it attaches.
 - **Closing the window doesn't have to end anything.** The close-window
   dialog's third answer, **Keep Running (Hide Window)**, hides the window
   and leaves every session exactly as it is — panels, scrollback and all.
@@ -352,7 +353,8 @@ Enter opens, Esc closes.
   sessions** preference set to *Hide Window* hides without asking, and the
   menu's explicit Quit always really quits (the sessions keep running in
   the service).
-- **Detach** (the tab menu, and the row menu of a session with a tab open)
+- **Detach** (the close dialog, the header and row buttons, the tab menu,
+  and the row menu of a session with a tab open)
   stops looking without ending anything: the tab closes with no question,
   the session keeps running in the Collins service, and its row becomes a
   **running row** — the yellow line, climbing in yellow stripes while the
@@ -362,8 +364,8 @@ Enter opens, Esc closes.
   yet shows as a running **New session** row under its project. Unsaved
   editor buffers still get their *Save Changes?* first; the terminal
   panel's shells end with the tab, their scrollback kept as on a close.
-  Detach is not offered while the tab is already closing (an exit or a
-  `/bg` handoff runs to its end), and a tab whose agent has exited simply
+  Detach is not offered while the tab is already closing (an exit runs
+  to its end), and a tab whose agent has exited simply
   closes: a shell alone is no running session, and its row is not a
   running row. **Close** keeps its meaning: the agent is asked to exit.
 - **Quitting leaves the sessions running.** *Quit* closes the window and
@@ -387,7 +389,9 @@ Enter opens, Esc closes.
   is brought back). A tab whose agent is still starting is kept and comes
   back like any other. The preference's choices are
   *Leave Running* (the default; an install that had *Ask* moves to it
-  once), *Ask*, *Stop Sessions*, *Background Session* and *Hide Window*.
+  once), *Ask*, *Stop Sessions* and *Hide Window* (a *Background Session*
+  saved by an older version reads as *Leave Running*). **When archiving a
+  running session** offers *Ask*, *Exit Session* and *Detach Session*.
 - **Restart service** (the main menu) restarts the Collins service after
   saying what the restart means: how many sessions run, how many of them
   are working, and that they **keep running through it** — a small
@@ -1578,7 +1582,7 @@ is hidden rather than greyed out:
 | `tools` | The attachments panel, the session tool switches; a drop or an upload says no in a toast |
 | `jobs` | *Clone repository…*, *Generate Icon*, new scratch chats, *Repair session link* |
 | `usage` | The usage panel, the *Token use* group, *Generate Icon*; the model menus use a built-in list |
-| `background` | *Background Session* and the row's background button |
+| `background` | The yellow lines of the CLI's own background agents, *Repair session link*, the background poll |
 | `shells` | The terminal panel, its toggle and Ctrl+J |
 | `composer` | Typing into the composer: keys go to the agent, Send and the model and effort menus type into an empty box only, and a closed draft is kept rather than put back |
 | `internal` | *Restart service* and the CLI path row |
@@ -1633,8 +1637,8 @@ permission prompts inside**, **Share GitHub CLI login**, **Share SSH
 agent**, **Let sandboxed sessions write settings and hooks**, and a
 status row saying whether bubblewrap was found and whether allowed
 directories reach a running session — what to do **when quitting with running sessions** (leave
-running / ask / stop sessions / background / hide) and **when archiving a running session** (ask /
-exit / background), **Archive on claude.ai too**, **Delete
+running / ask / stop sessions / hide) and **when archiving a running session** (ask /
+exit / detach), **Archive on claude.ai too**, **Delete
 archived sessions after** (a number and a unit; 0 never), **Exact busy
 tracking from the agent** (on: the sidebar's working indicator reads the
 CLI's own progress announcements) with a **Poll for background sessions**

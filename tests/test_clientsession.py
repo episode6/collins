@@ -341,11 +341,9 @@ def test_with_no_family_the_session_sends_none_of_their_requests(mirror, no_fami
     assert client.sent == []
 
 
-def test_a_handoff_is_refused_with_no_background_and_an_exit_goes_out(mirror, no_families):
+def test_an_exit_goes_out_with_no_families(mirror, no_families):
     session, client = mirror
-    assert session.begin_close("/bg", True) is False
-    assert client.sent == []
-    assert session.begin_close("\x03\x03", False) is True
+    assert session.begin_close("\x03\x03") is True
     assert client.sent[-1]["t"] == "close" and client.sent[-1]["mode"] == "exit"
 
 
@@ -421,20 +419,18 @@ def test_the_cwd_settles_as_a_follow_scope(mirror):
 
 def test_the_close_flows_are_requests(mirror):
     session, client = mirror
-    assert session.begin_close("\x03\x03", False) is True
-    assert session.begin_close("/bg\r", True) is True
+    assert session.begin_close("\x03\x03") is True
     session.nudge_exit()
     session.end_close()
     session.relaunch_without_worktree()
     assert client.sent == [
         {"t": "close", "pty": 7, "mode": "exit", "text": "\x03\x03"},
-        {"t": "close", "pty": 7, "mode": "background", "text": "/bg\r"},
         {"t": "close.nudge", "pty": 7},
         {"t": "close.end", "pty": 7},
         {"t": "restart.worktreeless", "pty": 7},
     ]
     client.refuse.add("close")
-    assert session.begin_close("\x03\x03", False) is False  # the window forces it
+    assert session.begin_close("\x03\x03") is False  # the window forces it
 
 
 def test_the_restart_goes_by_the_box(mirror):

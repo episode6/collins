@@ -3209,7 +3209,7 @@ SERVICE_SETTINGS: Mapping[str, ServiceSetting] = {
     "cli_title_sessions": ServiceSetting("boolean", "Show the titles the CLI gives its sessions."),
     "refresh_prs_on_launch": ServiceSetting("boolean", "Refresh pull requests once when a client starts."),
     "archive_running_session": ServiceSetting(
-        "string", "Archiving a session with a running tab: `ask`, `exit` or `background`."
+        "string", "Archiving a session with a running tab: `ask`, `exit` or `detach`."
     ),
     "archive_worktree": ServiceSetting(
         "string", "A session's worktree on archive: `ask`, `always` or `never`.",

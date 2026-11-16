@@ -528,14 +528,12 @@ class ClientSession:
     def arm_resolver(self) -> None:
         self._ask({"t": "resolver.arm"})
 
-    def begin_close(self, exit_text: str, backgrounding: bool) -> bool:
+    def begin_close(self, exit_text: str) -> bool:
         """The graceful close; False when the service refused it (the
-        window then forces the close), or would not take a /bg."""
-        if not backgrounding:
-            return self._ask({"t": "close"}, mode="exit", text=exit_text) is not None
-        if not apilink.has(protocol.CAP_BACKGROUND):
-            return False
-        return self._ask({"t": "close"}, mode="background", text=exit_text) is not None
+        window then forces the close). Always an exit: the window never
+        asks the service for a /bg handoff (a session kept running is a
+        detach)."""
+        return self._ask({"t": "close"}, mode="exit", text=exit_text) is not None
 
     def end_close(self) -> None:
         if not apilink.has(protocol.CAP_INTERNAL):

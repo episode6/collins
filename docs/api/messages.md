@@ -3690,7 +3690,7 @@ The entries of `settings`. A value of another type is refused `refused`. So is a
 | `pr_title_sessions` | boolean | Title a session after its newest pull request. |
 | `cli_title_sessions` | boolean | Show the titles the CLI gives its sessions. |
 | `refresh_prs_on_launch` | boolean | Refresh pull requests once when a client starts. |
-| `archive_running_session` | string | Archiving a session with a running tab: `ask`, `exit` or `background`. |
+| `archive_running_session` | string | Archiving a session with a running tab: `ask`, `exit` or `detach`. |
 | `archive_worktree` | string | A session's worktree on archive: `ask`, `always` or `never`. |
 | `archive_on_claude_ai` | boolean | Mirror archiving to the session's claude.ai page. |
 | `auto_delete_archived_after` | integer | Trash archived sessions after this many units; 0 is never. |

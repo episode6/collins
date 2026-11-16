@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-11-01. Full change history: git log for this file.
+# fork. Last modified: 2026-11-15. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -107,20 +107,19 @@ _CARD_SCHEMES = [
 _RUNNING_BEHAVIORS = [
     ("ask", N_("Ask")),
     ("exit", N_("Exit Session")),
-    ("background", N_("Background Session")),
+    ("detach", N_("Detach Session")),
 ]
 
 # Quitting has its own answers (split-service spec §3.21, D30): leave every
 # session running in the Collins service (detach, the default), ask, stop
-# them first (exit: the dialog's "Stop Sessions and Quit"), hand them to
-# /bg, or keep every session exactly as it is and just hide the window (the
+# them first (exit: the dialog's "Stop Sessions and Quit"), or keep every
+# session exactly as it is and just hide the window (the
 # dialog's "Keep Running (Hide Window)"). Short labels: a ComboRow's value
 # label ellipsizes past ~130px.
 _QUIT_BEHAVIORS = [
     ("detach", N_("Leave Running")),
     ("ask", N_("Ask")),
     ("exit", N_("Stop Sessions")),
-    ("background", N_("Background Session")),
     ("hide", N_("Hide Window")),
 ]
 
@@ -253,7 +252,7 @@ def _searchable(widget: Gtk.Widget, *terms: str) -> Gtk.Widget:
     """Give *widget* extra words to match, beyond its own title and subtitle.
 
     The options folded away inside an expander or a dropdown — "Dracula",
-    "Magyar", "Background Session" — are exactly what someone searches for,
+    "Magyar", "Detach Session" — are exactly what someone searches for,
     and none of them are in the row's own text. The same goes for a group
     whose only control sits in its header suffix: "Add application…" is on a
     button beside the Footer apps heading, not in any row.
@@ -2216,16 +2215,15 @@ class PreferencesDialog(Adw.Dialog):
         behaviors: list[tuple[str, str]] | None = None,
     ) -> Adw.ComboRow:
         behaviors = behaviors if behaviors is not None else _RUNNING_BEHAVIORS
-        if not apilink.has(protocol.CAP_BACKGROUND):
-            # No /bg to choose on such a service (D5): a saved "background"
-            # reads as the first choice here, and exits where it is acted on
-            # (the window's blocker).
-            behaviors = [choice for choice in behaviors if choice[0] != "background"]
         row = Adw.ComboRow(title=title, subtitle=subtitle)
         labels = [_(label) for _v, label in behaviors]
         row.set_model(Gtk.StringList.new(labels))
         values = [value for value, _l in behaviors]
         current = self._state.get_setting(key)
+        if current == "background":
+            # What an older build stored for a /bg handoff, which Collins no
+            # longer sends: the window reads it as a detach.
+            current = "detach"
         row.set_selected(values.index(current) if current in values else 0)
         row.connect("notify::selected", self._on_running_behavior_changed, key, values)
         group.add(_searchable(row, *labels), key)
