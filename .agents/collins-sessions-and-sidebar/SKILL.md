@@ -491,11 +491,12 @@ to a background agent. Its outputs are item fields: `background`,
 `backgrounding`, `can_background`. The window is a reader: the mirror's
 `background-changed` runs `MainWindow._on_backgrounded`, which re-syncs
 the row's status (`_row_status`: a row with no tab is `background` when its
-item says so) and, when no row is `backgrounding` any more, advances the
-quit-time /bg queue (`_on_detach_settled`); `_background_blocker` reads
-the same gate over the tab and the mirror for its reasons (the header
-button's tooltip, the close dialog's sentence). `window.py` imports
-nothing of `bgstatus` (`tests/test_client_boundary.py`). The service
+item says so). The window never sends a /bg (no button, dialog answer,
+quit or archive choice does: each is a Detach), so it reads no gate:
+`window.py` imports nothing of `bgstatus` or `bgblock`
+(`tests/test_client_boundary.py`). The row's Detach button
+(`SessionRow._detach_btn`, `win.detach-session`) shows while the row has a
+tab. The service
 applies the gate itself too: a `close {mode: background}` its `blocker`
 refuses (a sandboxed session, a fork, a handoff in flight — another
 session's, or this session's own still pending) is refused with the reason

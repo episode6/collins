@@ -648,9 +648,16 @@ def test_a_stored_ask_moves_to_detach_once(app_state):
 
 
 def test_the_other_quit_values_are_not_moved(app_state):
-    for value in ("exit", "background", "hide"):
+    for value in ("exit", "hide"):
         _write_ui_settings(app_state, {"quit_with_running_sessions": value})
         assert app_state.AppState().get_setting("quit_with_running_sessions") == value
+
+
+def test_a_stored_background_quit_becomes_detach(app_state):
+    # Collins no longer sends /bg: an older build's "background" keeps the
+    # sessions running the way that still exists.
+    _write_ui_settings(app_state, {"quit_with_running_sessions": "background"})
+    assert app_state.AppState().get_setting("quit_with_running_sessions") == "detach"
 
 
 def test_a_v014_file_migrates_its_ask_to_detach(app_state, v014):

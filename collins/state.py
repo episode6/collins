@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-30. Full change history: git log for this file.
+# fork. Last modified: 2026-11-15. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -212,16 +212,20 @@ DEFAULT_SETTINGS = {
     # the disclosure is as new to it as to a fresh one, by design.
     "welcome_seen": False,
     # What to do instead of the confirmation dialog when a running session's
-    # tab has to close: ask (the dialog, as before) | exit | background.
+    # tab has to close: ask (the dialog, as before) | exit | detach (the tab
+    # closes, the session runs on in the Collins service). A "background"
+    # an older build stored (a /bg handoff, which Collins no longer sends)
+    # is read as detach.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     # Closing a window (quitting) while sessions run (MainWindow._confirm_quit,
     # split-service spec §3.21, D30): detach (the default: plain Quit, every
     # tab detached and its session left running in the Collins service) |
     # ask (the quit dialog: Quit, Stop sessions and quit, Keep running) |
     # exit (Stop sessions and quit: each agent asked to exit, as quitting
-    # always did before the service) | background (each handed to /bg, the
-    # rest exited) | hide (the window, not its sessions, goes away,
-    # recoverable from the status icon — MainWindow._hide_window). An
+    # always did before the service) | hide (the window, not its sessions, goes away,
+    # recoverable from the status icon — MainWindow._hide_window). A
+    # "background" an older build stored (each session handed to /bg) is
+    # moved to detach by migrate_device_settings. An
     # install that stored "ask" before detach existed is moved to detach
     # once, by migrate_device_settings (quit_detach_migrated records it, so
     # an "ask" chosen afterwards stays).
@@ -575,10 +579,14 @@ def _pre_split_backup() -> Path:
 
 def migrate_device_settings(settings: dict) -> dict:
     """The one-shot moves of this device's settings, applied to the device
-    settings as read (in place, and returned). Today one: the quit setting's
-    old default, "ask", becomes "detach" (D30: quitting leaves the sessions
+    settings as read (in place, and returned). The quit setting's old
+    default, "ask", becomes "detach" (D30: quitting leaves the sessions
     running in the service), once per device; quit_detach_migrated marks it
-    done, so an "ask" chosen in Preferences afterwards stays."""
+    done, so an "ask" chosen in Preferences afterwards stays. And its
+    "background" (every session handed to /bg, which Collins no longer
+    sends) becomes "detach", whenever it is read."""
+    if settings.get("quit_with_running_sessions") == "background":
+        settings["quit_with_running_sessions"] = "detach"
     if not settings.get("quit_detach_migrated"):
         if settings.get("quit_with_running_sessions", "ask") == "ask":
             settings["quit_with_running_sessions"] = "detach"

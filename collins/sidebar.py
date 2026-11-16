@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-11-01. Full change history: git log for this file.
+# fork. Last modified: 2026-11-15. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -740,7 +740,7 @@ class SessionRow(Gtk.ListBoxRow):
         time_label.add_css_class("dim-label")
         time_label.add_css_class("caption")
 
-        # Stop / background act on the tab this session is open in — the same
+        # Stop / detach act on the tab this session is open in — the same
         # two operations as the header buttons, for a row that isn't
         # necessarily the focused tab. Hidden unless a tab is actually open on
         # the session (see _on_status_changed).
@@ -757,21 +757,19 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._stop_btn = stop_btn
 
-        bg_btn = Gtk.Button(icon_name="document-save-symbolic", valign=Gtk.Align.CENTER)
-        bg_btn.add_css_class("flat")
-        bg_btn.set_tooltip_text(_("Background session and close tab"))
-        bg_btn.connect(
+        # Detach (§3.21): the tab closes and the session runs on in the
+        # Collins service, its row turning yellow. Never a /bg: a detached
+        # session is reattached by opening it, with nothing to pair or repair.
+        detach_btn = Gtk.Button(icon_name="document-save-symbolic", valign=Gtk.Align.CENTER)
+        detach_btn.add_css_class("flat")
+        detach_btn.set_tooltip_text(_("Detach session and close tab"))
+        detach_btn.connect(
             "clicked",
             lambda *_: self.activate_action(
-                "win.background-session", GLib.Variant("s", item.session_id)
+                "win.detach-session", GLib.Variant("s", item.session_id)
             ),
         )
-        self._bg_btn = bg_btn
-        # Providers that can't detach never offer backgrounding.
-        self._can_background = (
-            get_provider(item.session.provider).background_exit() is not None
-            and apilink.has(protocol.CAP_BACKGROUND)  # hidden on a service with no /bg (D5)
-        )
+        self._detach_btn = detach_btn
 
         # Archived rows are only listed while "Show archived sessions" is on,
         # and toggling rebuilds the list, so the icon never goes stale.
@@ -839,7 +837,7 @@ class SessionRow(Gtk.ListBoxRow):
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         actions.append(stop_btn)
-        actions.append(bg_btn)
+        actions.append(detach_btn)
         actions.append(archive_btn)  # rightmost: the one action every row has
 
         # Timestamp and row actions share one slot, so the row reads as either
@@ -901,14 +899,6 @@ class SessionRow(Gtk.ListBoxRow):
             "notify::backgrounding", self._on_sensitive_changed
         )
         self._on_sensitive_changed(item, None)
-        # The background button has its own gate on top of the row's: a /bg is
-        # only safe once this session is registered and no other handoff is
-        # still waiting for its new id.
-        self._can_background_handler = item.connect(
-            "notify::can-background", self._on_can_background_changed
-        )
-        self._on_can_background_changed(item, None)
-
         # Status highlight, busy pole and interrupted state need CSS-class
         # updates: plain signals, detached on unroot.
         self._status_handler = item.connect("notify::status", self._on_status_changed)
@@ -1078,12 +1068,12 @@ class SessionRow(Gtk.ListBoxRow):
         With `off_button`, a point on a button itself answers None: that press
         belongs to the button. Only buttons that are mapped (the action
         stack's hover page is up) and sensitive take redirects — a press over
-        a greyed-out background button should open the session, not silently
+        a greyed-out button should open the session, not silently
         vanish.
         """
         if not 0 <= y <= self.get_height():
             return None  # dragged off the row: no click
-        for btn in (self._pr_btn, self._stop_btn, self._bg_btn, self._archive_btn):
+        for btn in (self._pr_btn, self._stop_btn, self._detach_btn, self._archive_btn):
             if not btn.get_mapped() or not btn.get_sensitive():
                 continue
             hit, bounds = btn.compute_bounds(self)
@@ -1172,9 +1162,6 @@ class SessionRow(Gtk.ListBoxRow):
         if self._backgrounding_handler is not None:
             self.item.disconnect(self._backgrounding_handler)
             self._backgrounding_handler = None
-        if self._can_background_handler is not None:
-            self.item.disconnect(self._can_background_handler)
-            self._can_background_handler = None
         pr_hub = self._sidebar.store.pr_store
         if self._hub_status_handler is not None:
             pr_hub.disconnect(self._hub_status_handler)
@@ -1186,18 +1173,6 @@ class SessionRow(Gtk.ListBoxRow):
 
     def _on_sensitive_changed(self, item: SessionItem, _pspec) -> None:
         self.set_sensitive(not (item.syncing or item.backgrounding))
-
-    def _on_can_background_changed(self, item: SessionItem, _pspec) -> None:
-        """Grey the background button out — rather than hide it — while the
-        handoff would be unsafe, and say why: the button coming and going as a
-        session resolves would read as a glitch."""
-        self._bg_btn.set_sensitive(item.can_background)
-        self._bg_btn.set_tooltip_text(
-            _("Background session and close tab")
-            if item.can_background
-            else _("Backgrounding is unavailable until this session is registered "
-                   "and any handoff in progress finishes")
-        )
 
     def begin_archiving(self, settled: bool = False) -> None:
         """Ghost the row out ahead of its archive actually landing.
@@ -1259,12 +1234,12 @@ class SessionRow(Gtk.ListBoxRow):
         if status_css is not None:
             self.add_css_class(status_css)
 
-        # Stopping and backgrounding both work on the session's tab, so they
-        # only make sense while one is open: a detached (/bg) or idle session
-        # has no tab to exit or hand over to the background.
+        # Stopping and detaching both work on the session's tab, so they
+        # only make sense while one is open: a detached or idle session has
+        # no tab to exit or detach.
         in_tab = item.status in _IN_TAB_STATUSES
         self._stop_btn.set_visible(in_tab)
-        self._bg_btn.set_visible(in_tab and self._can_background)
+        self._detach_btn.set_visible(in_tab)
 
     def _on_busy_changed(self, item: SessionItem, _pspec) -> None:
         # Only the class goes on and off here: which pole a busy row gets —

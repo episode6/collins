@@ -472,8 +472,9 @@ transcript restored from the trash resumes boxed in a fresh home, as a
 new session would. The archive sweep's trash (the service's own timer)
 takes the same path and tells the clients `forgotten`. The /bg handoff
 never reaches a box: the gate (`bgblock.background_blocker`, read by the
-service for each row's `can_background` and by the window for its
-reasons) refuses a sandboxed session first.
+service for each row's `can_background` and for a client's `close {mode:
+background}`) refuses a sandboxed session first. The window itself never
+sends a /bg: its "keep running" is a Detach.
 
 **State.** `sandbox_new_sessions` + `project_sandbox` overrides
 (`sandbox_for_project`, the sidebar project menu's *New sessions are
@@ -852,14 +853,12 @@ whose workspace is its worktree. The display-only tools are
 unchanged.
 
 **Refusals.** `/bg` and `claude attach` are never used for a sandboxed
-session (`bgstatus.BLOCK_SANDBOXED`, `_quit_backgroundable`,
-`open_session`'s attach path, `ClaudeProvider.resume_command` with
+session (`bgstatus.BLOCK_SANDBOXED`, `open_session`'s attach path, `ClaudeProvider.resume_command` with
 `options.sandbox`): the daemon respawns jobs on the host, and its job
 record has no wrapper seam (`respawnFlags` allowlist, `bgIsolation`
-none|worktree, measured on 2.1.268). The header's background button is
-*hidden* on a sandboxed tab (the refusal never clears, unlike the
-registration window the greyed-with-tooltip rule is for); the sidebar
-row's button stays greyed through the blocker like every other reason.
+none|worktree, measured on 2.1.268). The window offers no /bg at all
+(its Detach buttons keep a sandboxed session running in its box on the
+service, like any other).
 
 **The probe.** `sandboxplan.probe()` runs `bwrap --unshare-user
 --unshare-pid … -- /bin/true` once per launch on a thread

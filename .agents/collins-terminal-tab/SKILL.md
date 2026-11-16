@@ -274,10 +274,21 @@ Everything here is probed CLI behaviour (2.1.2xx), encoded in
 
 ## Closing a tab
 
+**The window never sends `/bg`.** Every "keep it running" affordance — the
+header's and the sidebar row's Detach buttons, the close dialog's *Detach
+Session*, the tab and row menus' *Detach*, `archive_running_session` =
+`detach` — is a Detach (`detach_page`, `_detached_pages`): the tab closes
+and the pty runs on in the service. `ClientSession.begin_close` only ever
+asks `close {mode: "exit"}`; the service still serves `mode: "background"`
+for other clients (the published API), and still lists, colours and
+attaches the CLI's own background agents. A `"background"` stored by an
+older build reads as `detach` (quit: migrated in `migrate_device_settings`;
+archive: read so in `_archive_now` and Preferences).
+
 `_on_close_page` is the single entry: pages in `_close_ok` are blanket consent
-(the header Exit/Background buttons and sidebar row buttons pre-add there — the
+(the header Exit button and the sidebar row's stop button pre-add there — the
 click is the confirmation), everything else asks via `_ask_tab_close` (busy
-agent → confirm / exit / background, honouring `archive_running_session`),
+agent → confirm / exit / detach, honouring `archive_running_session`),
 then `_ask_editor_then_tab_close` for dirty editor buffers (Save / Don't
 Save / Cancel; Cancel aborts the whole action), plus the busy-panel-shell ask.
 An **unstarted thread** (resolver armed, no id, no `--continue`, empty box)
@@ -811,8 +822,7 @@ names the side to upgrade; the forward is stopped before any exit); the
 `local` proof is not sent over a forward at all; `_on_link_lost` cancels
 a WAITING round's poll chain and `_poll` stops when its generation moved
 (two chains once shook hands twice); `detach_all_tabs` drops a page's
-settling state (`_closing_pages`, `_bg_closing`, `_close_asking`,
-`_bg_queue`) so every page leaves the old service instead of re-attaching
+settling state (`_closing_pages`, `_close_asking`) so every page leaves the old service instead of re-attaching
 its old pty id on the new one; `expect_restart` is skipped for a remote
 restart (the pid is the box's).
 **From its verification (ruled 2026-10-29):** the socket and pid file are

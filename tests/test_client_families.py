@@ -244,7 +244,6 @@ def test_the_walker_finds_what_it_says() -> None:
         "cwd.settle",
         "sandbox.plan",
         "spawn kind=shell",
-        "close mode=background",
         "http_get",
         "http_put",
     ):
@@ -290,7 +289,6 @@ def test_the_shapes_of_an_ask(body: str, behind: bool) -> None:
 # The constructors whose asks need no `_sync_*`, each with why.
 BUILT_AGAIN = {
     "sidebar:GroupHeaderRow.__init__": "rebuilt by SessionSidebar.apply_families",
-    "sidebar:SessionRow.__init__": "rebuilt by SessionSidebar.apply_families",
     "prefs:PreferencesDialog.__init__": "built as it opens",
     "prefs:PreferencesDialog._build_general_group": "built as it opens",
     "prefs:PreferencesDialog._build_sessions_group": "built as it opens",

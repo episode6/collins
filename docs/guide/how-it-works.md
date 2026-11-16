@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-29. Full change history: git log for this file.
+fork. Last modified: 2026-11-15. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -24,7 +24,9 @@ permanently" — both behind a confirmation.
 Opening a session spawns your `$SHELL` in the directory the transcript **last
 recorded as its working directory** (so worktree-hopping sessions resume where
 they left off) and types `claude --resume <id>` into it. If the session is
-still running detached — say you backgrounded it with `/bg` — Collins finds
+still running detached as a background agent — say you ran `/bg` in it
+yourself; Collins itself never sends it, detaching into its own service
+instead — Collins finds
 the live process via `claude agents --json` and types `claude attach <job-id>`
 instead, reconnecting rather than resuming a copy.
 

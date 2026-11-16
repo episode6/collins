@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-11-01. Full change history: git log for this file.
+# fork. Last modified: 2026-11-15. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -63,12 +63,6 @@ from . import (
 )
 from .api import protocol
 from .api.protocol import RequestRefused
-from .bgblock import (
-    BLOCK_IN_FLIGHT,
-    BLOCK_SANDBOXED,
-    BLOCK_UNREGISTERED,
-    background_blocker,
-)
 from .caffeine import (
     DURATION_KEYS,
     WHILE_ACTIVE,
@@ -159,20 +153,10 @@ _UNDO_TOAST_SECONDS = 4
 # the network, so the same ceiling is only ever a backstop there.
 _GIT_TIMEOUT_S = 120
 
-# Quit-time backgrounding, which runs one session at a time. How long to wait
-# for a tab's session id to land before giving up and exiting it cleanly, how
-# often to re-check while waiting, and how long to let one handoff hold the
-# queue before moving on (the pending detach is on disk either way, so the
-# service's watch, or its replay at the next start, finishes any pairing this
-# gives up on — see service.bgagents).
-_BG_QUEUE_WAIT_MS = 5000
-_BG_QUEUE_POLL_MS = 500
-_BG_QUEUE_ITEM_TIMEOUT_S = 20
-
 # The graceful close's poll — how often it checks whether the CLI has
-# released the terminal, when it re-asks, and the force-close budgets of a
-# plain exit and a /bg handoff — is the session's (Session.begin_close and
-# the CLOSE_* / EXIT_* / BG_* / SHELL_EXIT_TICKS beside it).
+# released the terminal, when it re-asks, and the force-close budget — is
+# the session's (Session.begin_close and the CLOSE_* / EXIT_* /
+# SHELL_EXIT_TICKS beside it).
 
 # Bare modifiers and locks: presses VTE sends nothing to the child for. They
 # don't count as "typing into the terminal" when a keystroke clears the
@@ -189,18 +173,6 @@ _MODIFIER_KEYVALS = frozenset((
     Gdk.KEY_ISO_Level3_Shift, Gdk.KEY_ISO_Level5_Shift,
     Gdk.KEY_Caps_Lock, Gdk.KEY_Num_Lock, Gdk.KEY_Scroll_Lock,
 ))
-
-# The header background button's tooltip, per reason it's unavailable.
-_BG_TOOLTIPS = {
-    "": _("Background session and close tab"),
-    BLOCK_UNREGISTERED: _("Waiting for this session to be registered — "
-                          "backgrounding it now would leave the agent with no "
-                          "way back to it"),
-    BLOCK_IN_FLIGHT: _("Another session is still being handed to the "
-                       "background — one at a time"),
-    BLOCK_SANDBOXED: _("A sandboxed session can't be backgrounded — the CLI's "
-                       "daemon would run it outside the sandbox"),
-}
 
 class _KeepProjects(NamedTuple):
     """The "keep the emptied projects" check button and what it applies to."""
@@ -325,12 +297,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._project_dirs_asked: set[tuple[str, str]] = set()
         self._confirmed_closes: set[Adw.TabPage] = set()
         # Graceful closes in progress (their polls are the tabs' sessions':
-        # Session.begin_close), and which of them are /bg handoffs.
+        # Session.begin_close).
         self._closing_pages: set[Adw.TabPage] = set()
-        self._bg_closing: set[Adw.TabPage] = set()  # closing page is a /bg handoff, not an exit
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
-        self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
         # Archive requested for an open session: applied only once its tab
         # really closes (page -> session id).
         self._archive_on_close: dict[Adw.TabPage, str] = {}
@@ -433,20 +403,6 @@ class MainWindow(Adw.ApplicationWindow):
         # One entry per tab; the pane itself still belongs to the tab, so
         # dirty counts and state capture keep working through it.
         self._editor_windows: dict[TerminalTab, EditorWindow] = {}
-        # Whether a /bg handoff was in flight (some row `backgrounding`) at
-        # the last background-changed: its end is what the quit-time queue
-        # waits on (see _on_backgrounded). The handoff itself is the
-        # service's (service.bgagents, PR-1.12d).
-        self._detach_in_flight = False
-        # Quit-time backgrounding runs one session at a time (see
-        # _start_quit_backgrounding): tabs still waiting their turn, the timer
-        # bounding the current one, and the progress notice over them.
-        self._bg_queue: list[Adw.TabPage] = []
-        self._bg_queue_timeout: int | None = None
-        self._bg_queue_waited_ms = 0
-        self._bg_queue_done = 0
-        self._bg_queue_total = 0
-        self._bg_queue_dialog: Adw.AlertDialog | None = None
         self._switcher: QuickSwitcher | None = None
         self._quickopen: QuickOpenDialog | None = None
         # Set while the app pushes shared Caffeine state into this window's
@@ -546,10 +502,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.exit_btn.set_tooltip_text(_("Exit session and close tab"))
         self.exit_btn.connect("clicked", lambda *_: self._exit_current_tab())
         content_header.pack_start(self.exit_btn)
-        self.background_btn = Gtk.Button(icon_name="document-save-symbolic", visible=False)
-        self.background_btn.set_tooltip_text(_("Background session and close tab"))
-        self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
-        content_header.pack_start(self.background_btn)
+        # Detach (§3.21): the tab closes and the session runs on in the
+        # Collins service. Collins never hands a session to /bg.
+        self.detach_btn = Gtk.Button(icon_name="document-save-symbolic", visible=False)
+        self.detach_btn.set_tooltip_text(_("Detach session and close tab"))
+        self.detach_btn.connect("clicked", lambda *_: self._detach_current_tab())
+        content_header.pack_start(self.detach_btn)
 
         # The notification bell: first pack_end child, so it sits immediately
         # left of the window controls (minimize/maximize/close), wearing the
@@ -663,9 +621,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.connect_changed(self._on_state_name_changed)
             self.connect("destroy", lambda *_a: self.state.disconnect_changed(self._on_state_name_changed))
 
-        # Yellow "running detached" guide lines and the /bg handoff are the
-        # service's (service.bgagents, spec §3.22): its word arrives as each
-        # row's `background`, `backgrounding` and `can_background`.
+        # Yellow "running detached" guide lines of the CLI's background
+        # agents are the service's (service.bgagents, spec §3.22): its word
+        # arrives as each row's `background`.
         self._background_handler = self.store.connect("background-changed", self._on_backgrounded)
         # A session the service forgot by itself (the archive sweep): what
         # this device kept for it goes too.
@@ -1438,20 +1396,17 @@ class MainWindow(Adw.ApplicationWindow):
     def _confirm_quit(self, busy: int, explicit_quit: bool = False) -> None:
         self._quit_asking = True
 
-        def do_quit(background: bool = False) -> None:
+        def do_quit() -> None:
             self._quit_asking = False
             self._quitting = True
             # The window-level dialog already covered every tab: don't let
-            # each one ask again. Agents still get their graceful exit
-            # (or /bg, if the user chose to background them); unsaved editor
+            # each one ask again. Agents still get their graceful exit;
+            # unsaved editor
             # buffers were already saved — or given up — in _begin_quit_flow's
             # Save Changes? step before this dialog appeared.
             pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
             for page in pages:
                 self._close_ok.add(page)
-            if background:
-                self._start_quit_backgrounding(pages)
-                return
             # _on_close_page reissues the window close once the last tab drains
             # (immediately, if every close completes synchronously).
             self._close_all_tabs()
@@ -1465,7 +1420,7 @@ class MainWindow(Adw.ApplicationWindow):
             # open tabs are recorded (open_tabs brings each back at the next
             # launch), then every tab detaches and its session keeps running
             # in the Collins service — except a page already mid-close (a
-            # graceful exit, a /bg handoff), which drains as do_quit's do,
+            # graceful exit), which drains as do_quit's do,
             # and a shell whose CLI has exited or an unstarted New Thread,
             # which end (quitrules). _on_close_page reissues the window
             # close once the last page is gone.
@@ -1491,20 +1446,13 @@ class MainWindow(Adw.ApplicationWindow):
             for page in pages:
                 self.tab_view.close_page(page)
 
-        can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
-                             for i in range(self.tab_view.get_n_pages()))
         behavior = self.state.get_setting("quit_with_running_sessions")
         if behavior == "exit":
             do_quit()
             return
-        if behavior == "background":
-            # Background what can be handed off; anything that can't gets the
-            # normal graceful exit — exactly what the dialog's Background
-            # Sessions button did, so no backgroundable tabs means the same
-            # exit-all.
-            do_quit(background=can_background)
-            return
-        if behavior == "detach":
+        # "background" is what an older build stored for handing every
+        # session to /bg: keeping them running is a detach now.
+        if behavior in ("detach", "background"):
             do_detach()
             return
         # "ask" — or "hide" during an explicit app.quit, which never hides
@@ -1553,150 +1501,6 @@ class MainWindow(Adw.ApplicationWindow):
             default_response="quit",
             keys={"q": "quit", "s": "stop", "k": "hide", "c": "cancel"},
         )
-
-    # -- quit-time backgrounding ---------------------------------------------
-
-    def _quit_backgroundable(self, page: Adw.TabPage) -> bool:
-        """Whether this tab is worth queueing for the quit-time handoff: a busy
-        agent whose provider can detach and that has an id of its own to record
-        the handoff against. Registration isn't checked here — the queue
-        re-checks it on arrival, by which time a tab that was still resolving
-        may well have landed."""
-        tab = page.get_child()
-        return (
-            isinstance(tab, TerminalTab)
-            and tab.has_running_command()
-            and tab.provider.background_exit() is not None
-            and not tab.fork
-            and not tab.sandboxed  # the daemon would respawn it outside the box
-        )
-
-    def _start_quit_backgrounding(self, pages: list[Adw.TabPage]) -> None:
-        """Hand every busy agent to the background, one at a time.
-
-        Serialized because the pairing is a guess: match_background_fork()
-        fingerprints the conversation by its first message uuid and falls back
-        to the working directory, and a fork that hasn't written its copy of
-        the transcript yet has no readable uuid. Fire several /bg at once over
-        one project and the fallback can pair each old session to the wrong
-        new agent — or both to the same one. Waiting for each new id before
-        feeding the next removes the ambiguity.
-
-        Tabs that can't be backgrounded are closed straight away with the
-        normal graceful exit."""
-        self._bg_queue = [page for page in pages if self._quit_backgroundable(page)]
-        self._bg_queue_total = len(self._bg_queue)
-        self._bg_queue_done = 0
-        self._bg_queue_waited_ms = 0
-        queued = set(self._bg_queue)
-        for page in pages:
-            if page not in queued:
-                self.tab_view.close_page(page)
-        if not self._bg_queue:
-            self._finish_quit_backgrounding()
-            return
-        log.info("bg-queue: backgrounding %s session(s) one at a time", self._bg_queue_total)
-        self._bg_queue_dialog = dialogs.progress_dialog(
-            self,
-            _("Backgrounding sessions…"),
-            self._bg_queue_body(),
-            _("Quit Now"),
-            self._abandon_bg_queue,
-        )
-        self._advance_bg_queue()
-
-    def _bg_queue_body(self) -> str:
-        return _("Handing each session to a background agent, one at a time, so "
-                 "every one is paired with the agent it becomes. {done} of {total} "
-                 "done.").format(done=self._bg_queue_done, total=self._bg_queue_total)
-
-    def _cancel_bg_queue_timeout(self) -> None:
-        if self._bg_queue_timeout is not None:
-            GLib.source_remove(self._bg_queue_timeout)
-            self._bg_queue_timeout = None
-
-    def _advance_bg_queue(self) -> bool:
-        """Send the next queued session to the background. Called again as each
-        handoff settles (via _on_detach_settled) or when one outstays its
-        budget."""
-        self._cancel_bg_queue_timeout()
-        while self._bg_queue:
-            page = self._bg_queue[0]
-            if not self._page_alive(page):
-                self._bg_queue.pop(0)  # exited on its own while it waited
-                continue
-            blocker = self._background_blocker(page)
-            if (
-                blocker in (BLOCK_UNREGISTERED, BLOCK_IN_FLIGHT)
-                and self._bg_queue_waited_ms < _BG_QUEUE_WAIT_MS
-            ):
-                # Its session id may be a resolver tick away; a short wait
-                # beats exiting an agent the user asked to keep running.
-                self._bg_queue_waited_ms += _BG_QUEUE_POLL_MS
-                self._bg_queue_timeout = GLib.timeout_add(
-                    _BG_QUEUE_POLL_MS, self._advance_bg_queue
-                )
-                return GLib.SOURCE_REMOVE
-            self._bg_queue.pop(0)
-            self._bg_queue_waited_ms = 0
-            self._bg_queue_done += 1
-            self._update_bg_queue_dialog()
-            if blocker:
-                log.warning("bg-queue: %s never registered (%s); exiting it cleanly",
-                            self._session_id_of(page) or "unresolved tab", blocker)
-                self.tab_view.close_page(page)
-                continue  # nothing to wait for; straight on to the next
-            self._bg_ok.add(page)
-            self._bg_queue_timeout = GLib.timeout_add_seconds(
-                _BG_QUEUE_ITEM_TIMEOUT_S, self._bg_queue_item_timed_out
-            )
-            self.tab_view.close_page(page)  # _graceful_close feeds the /bg
-            return GLib.SOURCE_REMOVE
-        self._finish_quit_backgrounding()
-        return GLib.SOURCE_REMOVE
-
-    def _bg_queue_item_timed_out(self) -> bool:
-        """This handoff is taking too long to hold the quit up. Move on: the
-        pending detach is already on disk, so the service's watch (or its
-        replay at the next start) finishes the pairing (service.bgagents)."""
-        self._bg_queue_timeout = None
-        log.info("bg-queue: handoff still unconfirmed after %ss; leaving it to "
-                 "the next launch", _BG_QUEUE_ITEM_TIMEOUT_S)
-        self._advance_bg_queue()
-        return GLib.SOURCE_REMOVE
-
-    def _update_bg_queue_dialog(self) -> None:
-        if self._bg_queue_dialog is not None:
-            self._bg_queue_dialog.set_body(self._bg_queue_body())
-
-    def _close_bg_queue_dialog(self) -> None:
-        # Cleared first: closing emits "response", which lands in
-        # _abandon_bg_queue, and this is what tells it the queue is already done.
-        dialog, self._bg_queue_dialog = self._bg_queue_dialog, None
-        if dialog is not None:
-            dialog.close()
-
-    def _abandon_bg_queue(self) -> None:
-        """"Quit Now": stop waiting on the remaining handoffs. Whatever was
-        already fed keeps its on-disk pending detach, so the next launch can
-        still pair it; the rest get the normal graceful exit."""
-        if self._bg_queue_dialog is None:
-            return  # the queue finished on its own and closed the dialog
-        self._bg_queue_dialog = None
-        self._cancel_bg_queue_timeout()
-        log.info("bg-queue: abandoned with %s session(s) left; exiting them", len(self._bg_queue))
-        self._bg_queue.clear()
-        self._close_all_tabs()
-        if self.tab_view.get_n_pages() == 0:  # nothing left to reissue the close
-            GLib.idle_add(self.close)
-
-    def _finish_quit_backgrounding(self) -> None:
-        self._cancel_bg_queue_timeout()
-        self._close_bg_queue_dialog()
-        # Tabs still draining reissue the window close as the last one goes;
-        # with none left there is nothing to wait for.
-        if self.tab_view.get_n_pages() == 0:
-            GLib.idle_add(self.close)
 
     # -- sidebar width persistence -------------------------------------------
 
@@ -1832,9 +1636,6 @@ class MainWindow(Adw.ApplicationWindow):
             # The tab menu's and the row menu's *Detach* (§3.21); "" is the
             # page the tab menu was opened on.
             "detach-session": self._on_detach_action,
-            "background-session": lambda _a, p: self._close_session_tab(
-                p.get_string(), background=True
-            ),
             "archive-session": self._on_archive_session,
             # Archive, never restore: what a landed "Merge and archive" asks
             # for (see archive_session), which the sidebar's toggle can't be.
@@ -3485,9 +3286,6 @@ class MainWindow(Adw.ApplicationWindow):
         # The visible tab's session is known now: whether its project
         # directory is there is asked at once (PR-3.0 item 9, review S1).
         self._ask_visible_project_dir_if_unknown()
-        # Half of registering: the id is known. The gate stays shut until the
-        # store gives it a row, which _on_store_refreshed picks up.
-        self._refresh_background_affordances()
 
     def _on_tab_attachments_changed(self, tab: TerminalTab, records: object) -> None:
         """A tab saw an image: save the list against that tab's session.
@@ -3571,13 +3369,6 @@ class MainWindow(Adw.ApplicationWindow):
         # in-tab status of the rows this window's tabs show (the rows of a
         # restarted service land after the reattach: V5-S1). Differences only.
         self._resync_statuses()
-        # Rows just appeared or went away, and a row is what a handoff needs.
-        self._refresh_background_affordances()
-        # A handoff's in-flight state as the rows now have it: a row made
-        # (or a snapshot taken) by this refresh brought its `backgrounding`
-        # without a background-changed, so a handoff that settled unheard
-        # still advances the quit-time queue.
-        self._sync_detach_in_flight()
         self._schedule_launch_sweep()
 
     def _schedule_launch_sweep(self) -> None:
@@ -4021,40 +3812,36 @@ class MainWindow(Adw.ApplicationWindow):
         the session confirmation dialog — the click itself is the confirmation."""
         page = self.tab_view.get_selected_page()
         if page is not None:
-            self._close_tab_direct(page, background=False)
+            self._close_tab_direct(page)
 
-    def _background_current_tab(self) -> None:
-        """Header button: background (detach) the focused session and close
-        its tab without the session confirmation dialog."""
+    def _detach_current_tab(self) -> None:
+        """Header button: detach the focused session (detach_page): its tab
+        closes and the session runs on in the Collins service."""
         page = self.tab_view.get_selected_page()
-        if page is not None and not self._background_blocker(page):
-            self._close_tab_direct(page, background=True)
+        if page is not None:
+            self.detach_page(page)
 
-    def _close_session_tab(self, session_id: str, background: bool = False) -> None:
-        """Sidebar row buttons: exit (or detach) the session's own tab, whether
-        or not it is the focused one — same no-dialog behavior as the header
-        buttons. A session with no open tab has nothing to close."""
+    def _close_session_tab(self, session_id: str) -> None:
+        """Sidebar row's stop button: exit the session's own tab, whether or
+        not it is the focused one — same no-dialog behavior as the header
+        button. A session with no open tab has nothing to close."""
         page = self._page_for(session_id)
         if page is None:
             return
-        if background and self._background_blocker(page):
-            return  # the row's button is disabled; ignore the action either way
-        self._close_tab_direct(page, background=background)
+        self._close_tab_direct(page)
 
-    def _close_tab_direct(self, page: Adw.TabPage, background: bool) -> None:
+    def _close_tab_direct(self, page: Adw.TabPage) -> None:
         """Shared tail of the no-dialog close paths above. The click confirmed
-        exiting (or detaching) the *session* — it said nothing about unsaved
+        exiting the *session* — it said nothing about unsaved
         editor edits, so those still get the Save Changes? ask before the page
         is waved through `_on_close_page`'s checks via `_close_ok`. Cancelling
-        that dialog cancels the exit/detach along with it. Popped-out editors
+        that dialog cancels the exit along with it. Popped-out editors
         count too: the pane still belongs to the tab."""
 
         def proceed() -> None:
             if not self._page_alive(page):
                 return  # the tab closed some other way while the dialog sat open
             self._close_ok.add(page)
-            if background:
-                self._bg_ok.add(page)
             self.tab_view.close_page(page)
 
         def cancelled() -> None:
@@ -4224,13 +4011,22 @@ class MainWindow(Adw.ApplicationWindow):
             # showing its strip first if that strip is hidden.
             tab.select_busy_panel_tab()
 
-        def do_close(background: bool = False) -> None:
+        def do_close() -> None:
             self._close_asking.discard(page)
             self._close_ok.add(page)
-            if background:
-                self._bg_ok.add(page)
             if self._page_alive(page):  # continue: graceful agent close, then teardown
                 self.tab_view.close_page(page)
+
+        def do_detach() -> None:
+            # Detach instead (§3.21): the tab closes, the agent runs on in
+            # the Collins service. The editors were settled before this
+            # dialog; the panel shells end with the tab, as on a close.
+            self._close_asking.discard(page)
+            if not self._page_alive(page):
+                return
+            self._close_ok.add(page)
+            self._detached_pages.add(page)
+            self.tab_view.close_page(page)
 
         if not agent_busy and not panel_busy:
             # Everything finished while the editor dialog sat open: nothing
@@ -4238,8 +4034,7 @@ class MainWindow(Adw.ApplicationWindow):
             do_close()
             return
 
-        blocker = self._background_blocker(page)
-        can_background = agent_busy and not blocker
+        can_detach = agent_busy and tab.pty_id is not None and not tab.is_new_chat
         if agent_busy and panel_busy:
             heading = _("Close tab with an active session?")
             body = _("The agent is asked to exit cleanly first; the command "
@@ -4251,16 +4046,9 @@ class MainWindow(Adw.ApplicationWindow):
             heading = _("Close tab with a running command?")
             body = _("A command is still running in this tab's terminal panel "
                      "and will be terminated.")
-        if can_background:
-            body += " " + _("Backgrounding instead keeps the agent running "
-                            "detached — reopen the session later to re-attach.")
-        elif agent_busy and blocker == BLOCK_UNREGISTERED:
-            body += " " + _("Backgrounding isn't available yet: this session "
-                            "hasn't been registered, so a detached agent would "
-                            "have no way back to it.")
-        elif agent_busy and blocker == BLOCK_IN_FLIGHT:
-            body += " " + _("Backgrounding isn't available right now: another "
-                            "session is still being handed to the background.")
+        if can_detach:
+            body += " " + _("Detaching instead keeps the agent running in the "
+                            "Collins service — open the session later to re-attach.")
         # A panel-only-busy tab has no agent session to exit — say "Close Tab".
         confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
         def dismiss() -> None:
@@ -4275,45 +4063,21 @@ class MainWindow(Adw.ApplicationWindow):
             do_close,
             on_dismiss=dismiss,
             default_response="confirm",
-            extra_label=_("Background Session") if can_background else None,
-            on_extra=(lambda: do_close(background=True)) if can_background else None,
-            keys={"e": "confirm", "b": "extra", "c": "cancel"},
+            extra_label=_("Detach Session") if can_detach else None,
+            on_extra=do_detach if can_detach else None,
+            keys={"e": "confirm", "d": "extra", "c": "cancel"},
         )
 
     def _graceful_close(self, page: Adw.TabPage) -> None:
-        """Ask the agent to exit cleanly (e.g. Claude's Ctrl+C Ctrl+C) — or to detach
-        (e.g. /bg) if the user chose to background it — then close once the
-        shell returns. Falls back to a force-close after a timeout. Agents with
-        no clean-exit command are force-closed directly."""
+        """Ask the agent to exit cleanly (e.g. Claude's Ctrl+C Ctrl+C), then close
+        once the shell returns. Falls back to a force-close after a timeout.
+        Agents with no clean-exit command are force-closed directly. Collins
+        never feeds /bg: a session kept running is a Detach (detach_page)."""
         tab = page.get_child()
         if not isinstance(tab, TerminalTab):
             self._close_confirmed(page)
             return
-        exit_text = None
-        if page in self._bg_ok:
-            # Last line of defence for the gate: every affordance that sets
-            # _bg_ok is disabled while a handoff would be untrackable, but a
-            # /bg fed anyway detaches the agent for real and strands it — the
-            # fork's transcript is usually a stub the scan skips, so it would
-            # get no row and nothing would ever pair it. Exiting cleanly
-            # instead at least leaves a resumable transcript behind.
-            blocker = self._background_blocker(page)
-            if blocker:
-                log.warning(
-                    "bg: refusing to detach %s (%s); exiting it cleanly instead",
-                    tab.session_id or "unresolved tab", blocker,
-                )
-            else:
-                exit_text = tab.provider.background_exit()
-        if exit_text:
-            self._bg_closing.add(page)  # a handoff: the close poll allows it more time
-            # The handoff's watch, the pending detach and the rows' disabled,
-            # pre-emptively yellow state are the service's: they start when
-            # the session's close {mode: background} arrives there
-            # (service.bgagents, PR-1.12d), and come back as item fields.
-        else:
-            self._bg_closing.discard(page)
-            exit_text = tab.provider.graceful_exit()
+        exit_text = tab.provider.graceful_exit()
         if not exit_text:
             self._close_confirmed(page)
             return
@@ -4323,26 +4087,13 @@ class MainWindow(Adw.ApplicationWindow):
         # worktree dialog's answer, the shell's exit, the force-close
         # budgets — are the session's, on the service; a budget running
         # out comes back as the tab's "close-budget" (_on_tab_close_budget).
-        backgrounding = page in self._bg_closing
         if not apilink.has(protocol.CAP_INTERNAL):
             # The close poll and its budget are the Collins service's; a
             # server without them may never say the agent left, so the
             # window keeps a budget of its own and closes with `kill` (spec
             # §3.4). The tab that left in time is no longer in the set.
             GLib.timeout_add_seconds(CLOSE_BUDGET_S, self._close_budget_over, page)
-        if not tab.session.begin_close(exit_text, backgrounding):
-            if backgrounding:
-                # The service's gate refused the /bg (bgagents.blocker: a
-                # sandboxed session, a handoff already in flight): exit
-                # cleanly instead, as the window's own gate falls back above.
-                log.warning("bg: the service refused to detach %s; exiting it cleanly instead",
-                            tab.session_id or "unresolved tab")
-                self._bg_closing.discard(page)
-                graceful = tab.provider.graceful_exit()
-                if self._bg_queue or self._bg_queue_dialog is not None:
-                    self._on_detach_settled()  # no handoff to wait for
-                if graceful and tab.session.begin_close(graceful, False):
-                    return
+        if not tab.session.begin_close(exit_text):
             self._close_confirmed(page)
 
     def _close_budget_over(self, page: Adw.TabPage) -> bool:
@@ -4445,31 +4196,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_backgrounded(self, _store, session_id: str) -> None:
         """A row's background-agent facts moved on the service (its
-        `background`, `backgrounding` or `can_background`; service.bgagents,
-        PR-1.12d): the yellow line of a row with no tab follows, and so do
-        the header's button and, when a /bg handoff stopped being in flight
-        (confirmed, abandoned or timed out), the quit-time queue."""
+        `background`; service.bgagents, PR-1.12d): the yellow line of a row
+        with no tab follows."""
         self._sync_status(session_id)
-        self._sync_detach_in_flight()
-
-    def _sync_detach_in_flight(self) -> None:
-        """Note whether a /bg handoff is in flight now; one that stopped
-        being (confirmed, abandoned or timed out) reopens the gate and
-        lets the quit-time queue send the next."""
-        in_flight = self._handoff_in_flight()
-        settled = self._detach_in_flight and not in_flight
-        self._detach_in_flight = in_flight
-        if settled:
-            self._on_detach_settled()
-
-    def _handoff_in_flight(self) -> bool:
-        """Whether a /bg handoff waits for its agent anywhere (some row is
-        `backgrounding`): the gate is app-wide, one at a time."""
-        return any(
-            item.backgrounding
-            for row_id in self.store.row_ids()
-            if (item := self.store.get_item(row_id)) is not None
-        )
 
     def _chain(self, session_id: str) -> set[str]:
         """Every id a row's conversation has run under — its own and each /bg
@@ -4551,7 +4280,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.update_footer()
         # A row's background button appears with its tab; whether it's pressable
         # is the gate's call.
-        self._refresh_background_affordances()
+        self._refresh_header_buttons()
         # A session that just became (or stopped being) a background agent may
         # be the only one the header's pole was running for.
         self._sync_working_pole()
@@ -4890,69 +4619,18 @@ class MainWindow(Adw.ApplicationWindow):
     # -- terminal panel ------------------------------------------------------
 
     def _update_close_buttons(self, page: Adw.TabPage | None) -> None:
-        """The header exit/background buttons act on the focused session, so
-        they show only while a session tab is selected — and backgrounding
-        only for providers that support detaching.
-
-        The background button additionally greys out whenever the handoff
-        couldn't be tracked (see _background_blocker). Greyed rather than
-        hidden: a button that vanishes for the couple of seconds a new thread
-        takes to register reads as a glitch, and the tooltip can say why. A
-        sandboxed tab is the exception — its refusal never clears, so the
-        button is hidden outright, like a provider with no /bg."""
+        """The header exit/detach buttons act on the focused session, so
+        they show only while a session tab is selected. Detach on a tab with
+        nothing running to leave (a new-chat screen, a spawn still coming
+        up) does nothing (detach_page)."""
         tab = page.get_child() if page is not None else None
         is_session = isinstance(tab, TerminalTab)
         self.exit_btn.set_visible(is_session)
-        self.background_btn.set_visible(
-            is_session and tab.provider.background_exit() is not None and not tab.sandboxed
-        )
-        blocker = self._background_blocker(page)
-        self.background_btn.set_sensitive(not blocker)
-        self.background_btn.set_tooltip_text(_BG_TOOLTIPS.get(blocker, _BG_TOOLTIPS[""]))
+        self.detach_btn.set_visible(is_session)
 
-    # -- the background gate ---------------------------------------------------
-
-    def _background_blocker(self, page: Adw.TabPage | None) -> str:
-        """Why this tab can't be handed to the background right now, or "" when
-        it can. See bgblock.background_blocker for what the reasons mean."""
-        tab = page.get_child() if page is not None else None
-        is_session = isinstance(tab, TerminalTab)
-        session_id = tab.session_id if is_session else None
-        return background_blocker(
-            is_session=is_session,
-            supports_detach=(
-                is_session
-                and tab.provider.background_exit() is not None
-                and apilink.has(protocol.CAP_BACKGROUND)  # D5: no /bg, no menu item, no yellow line
-            ),
-            is_fork=is_session and tab.fork,
-            is_sandboxed=is_session and tab.sandboxed,
-            session_id=session_id,
-            # A row to disable now and redirect once the fork id lands. For a
-            # tab attached to a live fork that row is the one it forked from,
-            # not one of the fork's own — it may never get one.
-            has_row=bool(session_id and self.store.rows_representing(session_id)),
-            # The handoffs are the service's (service.bgagents): one is in
-            # flight while any row is `backgrounding`.
-            detach_in_flight=self._handoff_in_flight(),
-        )
-
-    def _refresh_background_affordances(self) -> None:
-        """Re-evaluate the header's background button. The rows' buttons
-        read their item's `can_background`, which the service decides over
-        its own sessions (service.bgagents.refresh_affordances, PR-1.12d)."""
+    def _refresh_header_buttons(self) -> None:
+        """Re-evaluate the header's exit and detach buttons."""
         self._update_close_buttons(self.tab_view.get_selected_page())
-
-    def _on_detach_settled(self) -> None:
-        """A /bg handoff stopped being in flight — confirmed, abandoned or
-        timed out, on any client (`_sync_detach_in_flight` reads every row's
-        `backgrounding`, so a handoff settling elsewhere lands here too). The
-        gate that reopens is the service's, app-wide (`bgagents`' `blocker`
-        re-checks it at the next close); a quit-time queue here can send the
-        next."""
-        self._refresh_background_affordances()
-        if self._bg_queue or self._bg_queue_dialog is not None:
-            self._advance_bg_queue()
 
     def _current_terminal_tab(self) -> TerminalTab | None:
         page = self.tab_view.get_selected_page()
@@ -5735,13 +5413,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _page_settling(self, page: Adw.TabPage) -> bool:
         """Whether a page is mid-close: the agent is being asked about, exiting
-        gracefully, or waiting its turn in the quit-time /bg queue. All of that
+        gracefully. All of that
         is tracked per page *in this window*, so such a page must stay put."""
         return (
             page in self._closing_pages
             or page in self._close_asking
-            or page in self._bg_closing
-            or page in self._bg_queue
         )
 
     def can_move_session_to_new_window(self, session_id: str) -> bool:
@@ -5807,7 +5483,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._local_titles.discard(page)
         self._confirmed_closes.discard(page)
         self._close_ok.discard(page)
-        self._bg_ok.discard(page)
         self._remove_placeholder(page)  # the destination's sidebar shows the real row
         if self._menu_page is page:
             self._menu_page = None
@@ -5819,7 +5494,7 @@ class MainWindow(Adw.ApplicationWindow):
         # done. All that's left is the window itself, which may be empty now.
         if self.tab_view.get_n_pages() == 0:
             self.content_stack.set_visible_child_name("empty")
-        self._refresh_background_affordances()
+        self._refresh_header_buttons()
         self._sync_window_title()
         target._adopt_page(page, carried, pop_out_editor=popped_out)
 
@@ -5851,7 +5526,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_status(session_id)  # the row's tab lives here now
         self._apply_resolved_sessions()  # a tab still waiting for its row keeps waiting, here
         self._update_active_row()
-        self._refresh_background_affordances()
+        self._refresh_header_buttons()
         self._sync_window_title()
         self.present()
         if pop_out_editor and isinstance(tab, TerminalTab):
@@ -6002,11 +5677,7 @@ class MainWindow(Adw.ApplicationWindow):
             # rest; a close dialog still open finds its page gone
             # (`_page_alive`) and does nothing.
             self._closing_pages.discard(page)
-            self._bg_closing.discard(page)
             self._close_asking.discard(page)
-            self._bg_ok.discard(page)
-            if page in self._bg_queue:
-                self._bg_queue.remove(page)
             self._close_ok.add(page)
             fate = self._quit_fate(tab, "detach")
             if fate == quitrules.DETACH:
@@ -6124,7 +5795,6 @@ class MainWindow(Adw.ApplicationWindow):
                 return True
         self._confirmed_closes.discard(page)
         self._closing_pages.discard(page)
-        self._bg_closing.discard(page)
         self._detached_pages.discard(page)
         if isinstance(tab, TerminalTab) and not detaching:
             app = self.get_application()
@@ -6138,7 +5808,6 @@ class MainWindow(Adw.ApplicationWindow):
                 tab.release_pty()  # the tab's pty goes with it
         self._close_asking.discard(page)
         self._close_ok.discard(page)
-        self._bg_ok.discard(page)
         # Ghosting again just before the archive lands is a no-op for the
         # closes that came through the gate above, and the backstop for any
         # that skipped it (a pre-confirmed re-entry): the ghost then bridges
@@ -6149,9 +5818,11 @@ class MainWindow(Adw.ApplicationWindow):
         if archive_session_id:
             self.store.set_archived(archive_session_id, True)
             self._offer_undo([archive_session_id])
-            # The tab is closing: unless it handed the session to the
-            # background (checked inside), the session has stopped.
-            self._settle_archived_worktree(archive_session_id)
+            # The tab is closing and, unless it was detached (the session
+            # runs on in the service, in its worktree), the session has
+            # stopped.
+            if not detaching:
+                self._settle_archived_worktree(archive_session_id)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         if isinstance(tab, TerminalTab):
@@ -6191,13 +5862,11 @@ class MainWindow(Adw.ApplicationWindow):
             # while the list still names it (bgagents.session_ended).
             self._sync_status(session_id)
         view.close_page_finish(page, True)
-        self._refresh_background_affordances()  # a row without a tab can't be backgrounded
+        self._refresh_header_buttons()  # a row without a tab can't be backgrounded
         if view.get_n_pages() == 0:
             self.content_stack.set_visible_child_name("empty")
-            # Last tab drained — finish the window close, unless the quit-time
-            # queue is still working through its handoffs (closing now would
-            # abandon the ones it hasn't fed yet).
-            if self._quitting and self._bg_queue_dialog is None:
+            # Last tab drained — finish the window close.
+            if self._quitting:
                 GLib.idle_add(self.close)
         return True  # we handled it
 
@@ -6867,13 +6536,33 @@ class MainWindow(Adw.ApplicationWindow):
             if behavior == "exit":
                 # The setting stands in for the dialog's Exit Session button;
                 # unsaved editor edits still get their Save Changes? ask.
-                self._close_tab_direct(page, background=False)
+                self._close_tab_direct(page)
                 return
-            if behavior == "background" and not self._background_blocker(page):
-                self._close_tab_direct(page, background=True)
+            # "detach" (or the "background" an older build stored, which
+            # meant the same: keep the agent running) when there is a CLI
+            # to leave running; else the dialog. The session runs on in the
+            # Collins service, archived, and its worktree stays
+            # (_settle_archived_worktree skips a running session).
+            tab = page.get_child()
+            if (
+                behavior in ("detach", "background")
+                and isinstance(tab, TerminalTab)
+                and not tab.is_new_chat
+                and tab.pty_id is not None
+                and tab.has_running_command()
+                and not self._page_settling(page)
+            ):
+
+                def detach() -> None:
+                    if not self._page_alive(page):
+                        return
+                    self._close_ok.add(page)
+                    self._detached_pages.add(page)
+                    self.tab_view.close_page(page)
+
+                self._ask_save_editors([tab], detach, lambda: self._archive_cancelled(page))
                 return
-            # "ask" — or backgrounding was chosen but isn't available for this
-            # tab right now: the dialog says why and offers the alternatives.
+            # "ask": the dialog offers the alternatives.
             self.tab_view.close_page(page)
             return
         # Tabless: no dialog can interpose, so the row slides out right away
@@ -6934,6 +6623,8 @@ class MainWindow(Adw.ApplicationWindow):
         session = self.store.get_session(session_id)
         if session is None or self._is_detached(session_id):
             return
+        if self._page_for(session_id) is None and any(item.running for item in self._items_for(session_id)):
+            return  # running on in the Collins service with no tab: not stopped
 
         def land(state: dict) -> bool:
             path = str(state["worktreePath"])

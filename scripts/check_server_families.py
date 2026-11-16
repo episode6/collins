@@ -203,7 +203,6 @@ while True:
 
     from collins import apilink, blobcache, checkouts, claudemodels, gitinfo, i18n, modelcatalog
     from collins import remoteicons, sandboxstatus
-    from collins import prefs as prefs_mod
     from collins import remotefiles, trust
     from collins.api import protocol
     from collins.api.client import ProtocolMismatch
@@ -282,15 +281,9 @@ while True:
         wait_until(lambda: bool(got))
         group_menu = got.pop() if got else []
         prefs = PreferencesDialog(win.state, lambda: None)
-        labels = prefs._quit_behavior_row.get_model()
         return {
             "dialog": prefs,
             "rows": [row for group in prefs._groups.values() for row in group.rows],
-            "quit_choices": [
-                value
-                for value, label in prefs_mod._QUIT_BEHAVIORS
-                if any(labels.get_string(i) == i18n._(label) for i in range(labels.get_n_items()))
-            ],
             "row": row_menu,
             "group": group_menu,
             "add": actions(sidebar._add_menu),
@@ -299,7 +292,6 @@ while True:
             "prefs": {name for name, _side in prefs._groups},
             "tab": tab,
             "win": win,
-            "row_widget": session_row(win),
         }
 
     # What a person would see of each family. True when it shows.
@@ -344,13 +336,8 @@ while True:
             ("the project menu's Generate Icon", lambda c: "win.generate-icon" in c["group"]),
         ],
         protocol.CAP_BACKGROUND: [
-            ("the row's background button", lambda c: c["row_widget"]._can_background),
             ("the row menu's Repair", lambda c: "win.repair-session" in c["row"]),
             ("Preferences' background poll", lambda c: c["dialog"]._bg_poll_row.get_parent() is not None),
-            (
-                "Preferences' background choice on quit",
-                lambda c: "background" in c["quit_choices"],
-            ),
         ],
         protocol.CAP_SHELLS: [
             ("the footer's panel toggle", lambda c: c["tab"]._panel_toggle_btn.get_visible()),
@@ -467,9 +454,8 @@ while True:
             check("the pickers have the static list", bool(claudemodels.FALLBACK_MODELS))
             check("the CLI's defaults answer nothing", modelcatalog.cli_default_model(PROJECT) is None)
         elif cap == protocol.CAP_BACKGROUND:
-            page = win.tab_view.get_page(tab)
-            check("the window's gate refuses a /bg", bool(win._background_blocker(page)))
-            check("…and so does the session", tab.session.begin_close("/bg", True) is False)
+            # Detach is core: the row's and the header's Detach stay.
+            check("the header's Detach stays", win.detach_btn.get_visible())
         elif cap == protocol.CAP_SHELLS:
             win.lookup_action("toggle-panel").activate(None)
             check("Ctrl+J opens no shell", not tab._dock.shell_pages())
@@ -721,7 +707,6 @@ while True:
                 "the app menu's Restart": lambda: "win.restart-service" in actions(win.sidebar._menu),
                 "the editor's follow judge": lambda: tab._editor._follow_judge is not None,
                 "the strip's add button": lambda: strip is not None and strip._add_btn.get_visible(),
-                "the row's background button": lambda: session_row(win)._can_background,
                 "the footer's panel toggle": lambda: tab._panel_toggle_btn.get_visible(),
                 "the attachments handle": lambda: tab._attachments_btn.get_visible(),
             }

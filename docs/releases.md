@@ -45,6 +45,17 @@ downloads of each version, see the
   window logs a size it held back and a redraw it was sent unasked. Log
   lines are timestamped, and `./start-debug` logs at `INFO` to
   `~/.local/state/collins/debug.log` by default.
+
+- **Detach replaces Background Session.** The header's and the sidebar row's
+  background buttons are Detach buttons now, and the close dialog's
+  *Background Session* is *Detach Session*: the tab closes and the session
+  keeps running in the Collins service, to attach to again by opening it.
+  Collins no longer sends the CLI's `/bg`, so the quit-time handoff queue is
+  gone and *Background Session* is no longer a choice for quitting (a saved
+  one reads as *Leave Running*) or for archiving (where it reads as the new
+  *Detach Session*). Background agents started by hand are still listed,
+  wear their yellow line, and attach when opened.
+
 - **The service's API is published, under MIT.** The protocol
   `collins-service` speaks over its socket has a spec of its own at
   [docs/api](/api/): the transport, connecting over ssh, the frames, the

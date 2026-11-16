@@ -49,8 +49,9 @@ def _names(tree: ast.Module) -> set[str]:
 def test_the_window_imports_nothing_of_bgstatus():
     imports = _imports(_tree("window.py"))
     assert not {i for i in imports if i == "bgstatus" or i.startswith("bgstatus.")}, imports
-    # The gate it reads is bgblock's, which holds no poller and no CLI read.
-    assert "bgblock.background_blocker" in imports
+    # Nor the /bg gate: the window never sends a /bg (a session kept
+    # running is a detach), so it has no gate to read.
+    assert not {i for i in imports if i == "bgblock" or i.startswith("bgblock.")}, imports
 
 
 def test_the_window_reads_and_stats_no_transcript_for_the_services_work():
