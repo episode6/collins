@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-11-23. Full change history: git log for this file.
 
 import os
 import shutil
@@ -947,11 +947,17 @@ def test_attach_carries_no_mcp_config(monkeypatch):
     assert ClaudeProvider().resume_command("abc") == "/usr/bin/claude attach abc12345"
 
 
+# Every `-w` launch pins the worktree's base to the remote's default branch.
+WT = """--settings '{"worktree":{"baseRef":"fresh"}}'"""
+
+
 def test_new_command_worktree_flag(monkeypatch):
     from collins.providers import SessionOptions
     monkeypatch.setattr(shutil, "which", lambda cli, **_: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
-    assert claude.new_command(SessionOptions(worktree=True)) == "/usr/bin/claude -w"
+    assert claude.new_command(SessionOptions(worktree=True)) == (
+        f"/usr/bin/claude {WT} -w"
+    )
     assert claude.new_command(SessionOptions()) == "/usr/bin/claude"
 
 
@@ -965,11 +971,13 @@ def test_new_command_names_the_worktree_it_was_given(monkeypatch):
     claude = ClaudeProvider()
     named = SessionOptions(worktree=True, worktree_name="calm-heron-3f9a")
     assert claude.new_command(named) == (
-        "/usr/bin/claude -w calm-heron-3f9a --mcp-config /run/mcp.json"
+        f"/usr/bin/claude {WT} -w calm-heron-3f9a --mcp-config /run/mcp.json"
     )
     for bad in ("--model", "-x", ".git", "a/b", "a b", "$(id)", "x" * 65, ""):
         options = SessionOptions(worktree=True, worktree_name=bad)
-        assert claude.new_command(options) == "/usr/bin/claude -w --mcp-config /run/mcp.json", bad
+        assert claude.new_command(options) == (
+            f"/usr/bin/claude {WT} -w --mcp-config /run/mcp.json"
+        ), bad
     unflagged = SessionOptions(worktree_name="calm-heron-3f9a")
     assert claude.new_command(unflagged) == "/usr/bin/claude --mcp-config /run/mcp.json"
 

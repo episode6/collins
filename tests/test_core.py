@@ -167,7 +167,10 @@ def test_the_service_assembles_every_launch_from_its_own_cli(server, tmp_path):
         return server.core.sessions[pty].session.initial_command
 
     fresh = typed(model="opus", permission_mode="plan", worktree=True, worktree_name="feat")
-    assert fresh.startswith(f"{cli} --model opus --permission-mode plan -w feat")
+    assert fresh.startswith(
+        f"{cli} --model opus --permission-mode plan "
+        """--settings '{"worktree":{"baseRef":"fresh"}}' -w feat"""
+    )
     assert typed(session=sid).startswith(f"{cli} --resume {sid}")
     assert typed(session="1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", fork=True).startswith(
         f"{cli} --resume 1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0 --fork-session"

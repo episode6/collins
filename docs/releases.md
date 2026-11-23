@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-15. Full change history: git log for this file.
+fork. Last modified: 2026-11-23. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -37,6 +37,14 @@ downloads of each version, see the
 ## Changelog
 
 ### v0.1.5 — UNRELEASED
+
+- **New worktrees start from the remote's default branch, as it is now.**
+  Before a session starts in a new git worktree, Collins fetches
+  `origin`'s default branch on the service's machine, and the launch pins
+  the CLI's `worktree.baseRef` to `"fresh"`, so the worktree never
+  branches from a day-old `origin/main`, from local `HEAD` because a
+  setting said `"head"`, or from a ref a sandbox couldn't fetch. A fetch
+  that fails says so in the terminal and the session starts anyway.
 
 - **A garbled or frozen session terminal leaves a trace.** At
   `COLLINS_LOG=INFO` the service now logs which client owns each

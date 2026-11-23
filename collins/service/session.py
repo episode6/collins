@@ -114,6 +114,7 @@ from ..sessions import (
 )
 from ..shellinput import shell_command
 from ..transcript import TranscriptModel
+from ..worktreebase import freshen
 from .ports import PtyPort, ScreenPort
 
 log = logging.getLogger(__name__)
@@ -655,6 +656,12 @@ class Session:
         # (see spawn): the shell is already up in the directory, the command
         # waits for the checkout.
         self._recreating: tuple[str | None, str | None, str] | None = None
+        # A `-w` launch fetches the remote's default branch on the host
+        # before its command is typed (worktreebase.freshen), so the new
+        # worktree branches from it as it is now: owed from the settle,
+        # in flight until it lands (_freshened).
+        self._freshen_owed = False
+        self._freshening = False
 
         # The sandbox: where the host and the live grants are read from; the
         # plan file a sandboxed launch typed (sandboxplan.prepare_launch),
@@ -2187,6 +2194,7 @@ class Session:
                 and not self.continue_recent
                 and bool(self.options and self.options.worktree)
             )
+        self._freshen_owed = self.worktree_launch
         return command
 
     def _type_launch(self, cwd: str, session_id: str | None) -> None:
@@ -2222,13 +2230,48 @@ class Session:
         agent command, and start watching a worktree launch. With a
         worktree still being put back nothing is typed yet: `_recreated`
         comes back here once it is."""
-        if self._recreating is not None:
+        if self._recreating is not None or self._freshening:
+            return
+        if self._freshen_owed:
+            self._freshen_owed = False
+            self._start_freshen(self.cwd)
             return
         if self.initial_command:
             self.write_text(f"{self.initial_command}\n")
         if self.worktree_launch:
             self.worktree_launch_ticks = 0
             self.scheduler.timeout_add(WORKTREE_LAUNCH_POLL_MS, self._check_worktree_launch)
+
+    def _start_freshen(self, cwd: str) -> None:
+        """Fetch the default branch of *cwd*'s repository off the main
+        loop, and type the launch once it has (_freshened)."""
+        self._freshening = True
+        self.host.paint(_("fetching the default branch for the new worktree"))
+
+        def run() -> None:
+            outcome, detail = freshen(cwd)
+            # It advances the spawn, so it lands at PRIORITY_DEFAULT: a
+            # default-idle callback starves under CI's Xvfb.
+            self.scheduler.idle_add(
+                self._freshened, outcome, detail, priority=GLib.PRIORITY_DEFAULT
+            )
+
+        self.scheduler.background(run)
+
+    def _freshened(self, outcome: str, detail: str) -> bool:
+        """The fetch landed: say so when it failed (the worktree then
+        branches from whatever ref the repository has), and type the
+        launch."""
+        self._freshening = False
+        if not self.host.alive():
+            return GLib.SOURCE_REMOVE
+        if outcome == "failed":
+            self.host.paint(
+                _("warning: couldn't fetch the default branch ({why}) — "
+                  "the worktree may start from a stale base").format(why=detail)
+            )
+        self.shell_spawned()
+        return GLib.SOURCE_REMOVE
 
     def _check_worktree_launch(self) -> bool:
         """Catch a worktree launch that never started, and start the session

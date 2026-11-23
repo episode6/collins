@@ -1151,7 +1151,23 @@ class FakeSandboxHost:
 
 
 @pytest.fixture
-def launch(agent, tmp_path):
+def freshens(monkeypatch):
+    """The fetch a `-w` launch runs before it types (worktreebase.freshen),
+    recorded and answered as `freshens.outcome` says."""
+    calls: list[str] = []
+
+    def fake(cwd):
+        calls.append(cwd)
+        return fake.outcome
+
+    fake.outcome = ("fetched", "origin/main")
+    fake.calls = calls
+    monkeypatch.setattr(session_mod, "freshen", fake)
+    return fake
+
+
+@pytest.fixture
+def launch(agent, tmp_path, freshens):
     def make(**kwargs):
         term = FakeTerminal()
         term.pid = None  # nothing spawned yet
@@ -1261,6 +1277,7 @@ def test_a_failed_worktree_launch_is_retyped_without_it(launch, tmp_path, agent)
     session, term, host, clock = launch(options=SessionOptions(worktree=True))
     session.spawn(str(tmp_path), None)
     _spawned(session, term)
+    clock.advance(0)  # the default branch fetched first
     assert term.writes == ["claude -w\n"]
     assert session.worktree_launch
     clock.advance(session_mod.WORKTREE_LAUNCH_POLL_MS)
@@ -1280,10 +1297,62 @@ def test_an_error_quoted_by_a_running_agent_is_never_typed_over(launch, tmp_path
     session, term, host, clock = launch(options=SessionOptions(worktree=True))
     session.spawn(str(tmp_path), None)
     _spawned(session, term)
+    clock.advance(0)
     term.screen_text_extra = "\nError creating worktree: as quoted in a reply"
     clock.advance(session_mod.WORKTREE_LAUNCH_POLL_MS * (session_mod.WORKTREE_LAUNCH_POLL_TICKS + 2))
     assert term.writes == ["claude -w\n"]
     assert not session.worktree_launch  # the watch ran out: the launch worked
+
+
+def test_a_worktree_launch_fetches_the_default_branch_before_it_types(
+    launch, tmp_path, freshens
+):
+    """A new worktree branches from the remote's default branch as it is
+    now: the service fetches it on the host, off the main loop, and types
+    the `-w` launch once the fetch has landed (at PRIORITY_DEFAULT)."""
+    from collins.providers import SessionOptions
+
+    session, term, host, clock = launch(options=SessionOptions(worktree=True))
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    assert freshens.calls == [str(tmp_path)]
+    assert term.writes == []  # not before the fetch lands
+    assert clock.idle_priority("_freshened") == session_mod.GLib.PRIORITY_DEFAULT
+    session.shell_spawned()  # a second call while it is in flight types nothing
+    clock.advance(0)
+    assert term.writes == ["claude -w\n"]
+    assert any("fetching the default branch" in line for line in host.painted())
+    assert not any(line.startswith("warning") for line in host.painted())
+
+
+def test_a_failed_fetch_warns_and_launches_anyway(launch, tmp_path, freshens):
+    from collins.providers import SessionOptions
+
+    freshens.outcome = ("failed", "Could not resolve host: github.com")
+    session, term, host, clock = launch(options=SessionOptions(worktree=True))
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    clock.advance(0)
+    assert term.writes == ["claude -w\n"]
+    assert any(
+        "couldn't fetch the default branch" in line and "Could not resolve host" in line
+        for line in host.painted()
+    )
+
+
+def test_only_a_worktree_launch_fetches(launch, tmp_path, freshens):
+    from collins.providers import SessionOptions
+
+    for kwargs, sid in (
+        ({}, None),
+        ({"session_id": "abc", "options": SessionOptions(worktree=True)}, "abc"),
+        ({"continue_recent": True, "options": SessionOptions(worktree=True)}, None),
+    ):
+        session, term, _host, _clock = launch(**kwargs)
+        session.spawn(str(tmp_path), sid)
+        _spawned(session, term)
+        assert term.writes, kwargs  # typed at once
+    assert freshens.calls == []
 
 
 def test_the_new_chat_prompt_goes_in_at_the_empty_box(launch, tmp_path):

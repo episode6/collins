@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-29. Full change history: git log for this file.
+# fork. Last modified: 2026-11-23. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -32,6 +32,7 @@ from .sessions import (
 )
 from .sessions import parse_details as _claude_parse_details
 from .titles import is_scratch_project
+from .worktreebase import BASE_REF_SETTINGS
 
 # How Claude Code opens the line it takes a prompt on: a caret and a no-break
 # space (an ordinary space is what its *other* prompts use), followed by the
@@ -968,7 +969,10 @@ class ClaudeProvider(Provider):
         for d in options.add_dirs:
             out += ["--add-dir", shlex.quote(d)]
         if options.worktree:
-            out.append("-w")
+            # A new worktree branches from the remote's default branch,
+            # whatever a user or project `worktree.baseRef` says (the
+            # service fetches that branch first: worktreebase.freshen).
+            out += ["--settings", shlex.quote(BASE_REF_SETTINGS), "-w"]
             if _WORKTREE_NAME_RE.match(options.worktree_name or ""):
                 # `-w [name]`: the CLI cuts <repo>/.claude/worktrees/<name>
                 # on the branch worktree-<name>.
