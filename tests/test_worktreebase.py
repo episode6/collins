@@ -1,3 +1,4 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
 """worktreebase: a new session worktree branches from the remote's default
 branch as it is now (the fetch before a `-w` launch, and the setting the
 launch carries)."""
