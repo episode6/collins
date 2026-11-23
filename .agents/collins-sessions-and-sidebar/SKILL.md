@@ -684,6 +684,16 @@ dialog opens no folder and runs no `which` of this device's).
   does).
 - A `claude -w` refusal ("Error creating worktree:") is fatal and silent to
   everything downstream; the tab watches the screen and retypes without `-w`.
+- The CLI picks a `-w` worktree's base itself (`worktree.baseRef`), and its
+  "fresh" default is best-effort: it fetches only after a day without one,
+  for five seconds at most, falls back to local HEAD with no `origin/HEAD`,
+  and can't fetch inside a sandbox's read-only checkout. So every `-w`
+  launch carries `--settings '{"worktree":{"baseRef":"fresh"}}'`
+  (`worktreebase.BASE_REF_SETTINGS`, typed ahead of `-w` so the flag's
+  optional name stays next to it), and `Session.shell_spawned`
+  holds the typing until `worktreebase.freshen` has fetched the default
+  branch on the host (`_start_freshen` → `_freshened`, at
+  PRIORITY_DEFAULT; a failure paints a warning and launches anyway).
 - The CLI recycles an unchanged existing worktree for a new `-w` session, so
   a leftover transcript can sit under its key before the new session writes.
 - Sidebar groups start **collapsed** unless `expanded_groups` lists them;

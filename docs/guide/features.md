@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-11-15. Full change history: git log for this file.
+fork. Last modified: 2026-11-23. Full change history: git log for this file.
 -->
 
 # Features
@@ -1248,8 +1248,13 @@ flipped the switch is refused if it calls it anyway.
   draft away along with the tab.
 - With *Start new sessions in a git worktree* on, each new session works in
   a fresh worktree of its project, so it won't see uncommitted local
-  changes; a launch that can't cut one (a repository with nothing committed
-  yet, say) says so and starts in the project directory instead. If
+  changes. The worktree always branches from the remote's default branch
+  as it is now: Collins fetches `origin`'s default branch on the
+  service's machine before it types the launch (a failed fetch says so
+  and the launch goes ahead on the ref the repository has), and the
+  launch carries `worktree.baseRef` `"fresh"`, so a `"head"` in your own
+  or the project's Claude settings doesn't apply to it. A launch that
+  can't cut one (a repository with nothing committed yet, say) says so and starts in the project directory instead. If
   terminals were open beside the new-chat screen when a worktree launch was
   sent, Collins offers to `cd` them into the worktree once it exists — a
   terminal running a command is left alone. The choice is per project as
