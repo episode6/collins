@@ -26,13 +26,13 @@ jobs:
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217: v1.0.218 pins Claude Code 2.1.265, whose installer leaves no launcher on ubuntu-latest
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -47,4 +47,11 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
           # claude_args: '--allowed-tools Bash(gh pr *)'
+          claude_args: |
+            --model claude-fable-5-2
+            --append-system-prompt "This runner has none of the project's build or test tooling and Bash is limited to the action's git scripts, so you cannot build the project or run its tests: do not try. Review by reading the code. Never wait on background work. Before you finish, you MUST post your complete result (for a review, every finding) with mcp__github_comment__update_claude_comment; anything you only say in your final message is never seen."
 
+          # Claude's last message and tool calls in the run's step summary, so a run that
+          # ends without updating its comment can be diagnosed. Only users with write
+          # access can trigger this workflow, so the input is trusted.
+          display_report: true
